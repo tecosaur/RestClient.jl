@@ -1,8 +1,68 @@
-#+title: RestClient
+#+title: RestClient.jl
 
-Interacting with a RESTful API is fairly simple, but there's often a fair bit of
-boilerplate involved in making well-formed requests, handling serialisation and
+As simple as a RESTful API may be, there's often a fair bit of boilerplate
+involved in making well-formed requests, handling serialisation and
 deserialisation, request limiting, and result pagination.
 
-=RestClient= aims to take care of as much of this boilerplate as possible.
-See the tutorial for a sense of what this looks like in practice.
+=RestClient= aims to take care of as much of this boilerplate as possible without
+compromising on flexibility. See [[file:tutorial.md][the tutorial]] for a sense of what this looks
+like in practice.
+
+* Getting started
+** Set the API configuration
+
+#+begin_src julia
+@globalconfig RequestConfig("https://api.example.com")
+#+end_src
+
+See [[@ref][~@globalconfig~]] and [[@ref][~RequestConfig~]] for more information.
+
+** Define response types
+
+#+begin_src julia
+@jsondef struct Item
+    id::Int
+    name::String
+    description::String
+end
+#+end_src
+
+See [[@ref][~@jsondef~]] for more information.
+
+** Declare endpoints
+
+#+begin_src julia
+@endpoint item(id::Int) -> "items/{id}" -> Item
+#+end_src
+
+See [[@ref][~@endpoint~]] for more information.
+
+** Extra functionality
+
++ Pagination
++ Response post-processing
++ Custom data formats
+
+* Request data flow
+
+As detailed in the [[@ref][~Request~]] docstring, this is the flow of calls when making a
+request:
+
+#+begin_example
+         ╭─╴config╶────────────────────────────╮
+         │     ╎                               │
+         │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
+Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
+         │              ├─▶ pagename ╾───╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
+         │              │                ├──▶ url ╾─┬─━─▶ request ╾━┬─▶ interpret ╾──▶ data
+         ├─╴endpoint╶───┼─▶ parameters ╾─╯          │               │                   │
+         │              │                           │               │             ╭─────╯
+         │              ├─▶ parameters ╾────────────┤               ╰─────────╮   │
+         │              │                           │                      postprocess ╾──▶ result
+         │             *╰─▶ payload ─▶ writepayload╶╯                           │
+         │                    ╰─▶ dataformat ╾╯                                 │
+         ╰─────────┬────────────────────────────────────────────────────────────╯
+                   ╰────▶ validate (before initiating the request)
+
+ * Only for POST requests   ╶╶ Optional first argument
+#+end_example

@@ -4,4 +4,42 @@
 #+html: <a href="https://tecosaur.github.io/RestClient.jl/stable/"><img src="https://img.shields.io/badge/docs-stable-blue.svg"></a>
 #+html: <a href="https://tecosaur.github.io/RestClient.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg"></a>
 
-Accessing RESTful APIs with as little boilerplate as possible.
+Simplify the process of interacting with RESTful APIs with concise but capable
+utilities for defining endpoints, request handling, and response parsing. This
+package aims to absorb as much of the common complexity of interfacing with an
+API as possible, and provide sensible OOTB behaviour with minimal setup.
+
+See the docs' tutorial for a guided example on how to write a client with this package.
+
+* Features
+
++ Minimal Boilerplate :: Defining an API endpoint can take just a single line of code.
++ Built-in common functionality :: Debugging utilities, input URI encoding, and rate limiting.
++ Easy serialisation :: Straightforward interoperability with JSON3 via ~@jsondef~.
++ Flexibility :: Extensible to support custom serialisation formats, complex requests, and more.
+
+* Example
+
+#+begin_src julia
+module CoffeeClient
+
+using RestClient, JSON3
+
+@globalconfig RequestConfig("https://api.sampleapis.com/coffee")
+
+@jsondef struct Coffee
+    title::String
+    description::String
+    ingredients::Vector{String}
+    image::String
+    id::Int
+end
+
+@endpoint hot() -> "hot" -> Vector{Coffee}
+@endpoint iced() -> "iced" -> Vector{Coffee}
+
+end
+#+end_src
+
+This is fully-functional, you can now call the API with ~CoffeeClient.hot()~ ☕
+and ~CoffeeClient.iced()~ 🧋.

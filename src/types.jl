@@ -98,7 +98,7 @@ See also: [`AbstractEndpoint`](@ref), [`RequestConfig`](@ref).
          │     ╎                               │
          │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
 Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
-         │              ├─▶ pagename ╾───╮     │      ┌╶╶╶ debug╴╴╴┐      │  ╭──────╯
+         │              ├─▶ pagename ╾───╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
          │              │                ├──▶ url ╾─┬─━─▶ request ╾━┬─▶ interpret ╾──▶ data
          ├─╴endpoint╶───┼─▶ parameters ╾─╯          │               │                   │
          │              │                           │               │             ╭─────╯
