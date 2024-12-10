@@ -6,6 +6,7 @@
 @globalconfig
 @endpoint
 @jsondef
+@xmldef
 #+end_src
 
 * Request types
@@ -56,6 +57,7 @@ RestClient.remainingpages
 RestClient.AbstractFormat
 RestClient.RawFormat
 RestClient.JSONFormat
+RestClient.XMLFormat
 RestClient.dataformat
 RestClient.interpretresponse
 RestClient.writepayload

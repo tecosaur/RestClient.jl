@@ -8,7 +8,7 @@ export AbstractEndpoint, SingleEndpoint, ListEndpoint, Request, RequestConfig,
 export SingleResponse, ListResponse, Single, List, perform, pagename,
     parameters, headers, payload, responsetype, dataformat, interpretresponse,
     validate, postprocess, thispagenumber, nextpage, remainingpages
-export AbstractFormat, RawFormat, JSONFormat, @jsondef
+export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
 export setfield
 
 include("types.jl")

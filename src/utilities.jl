@@ -69,3 +69,35 @@ macro jsondef(arg::Any)
     end
 end
 
+"""
+    @xmldef struct ... end
+
+Define a struct that can be used with `XML`.
+
+This macro conveniently combines the following pieces:
+- XML deserialization
+- `@kwdef` to define keyword constructors for the struct.
+- `RestClient.dataformat` to declare that this struct is XML-formatted.
+
+!!! warning "Soft XML dependency"
+    This macro is implemented in a package extension, and so
+    requires `XML` to be loaded before it can be used.
+
+# Examples
+
+```julia
+@xmldef struct DocumentStatus
+    exists."status/@exists"::Bool
+    status."status/text()"::String
+    url."status/@url"::Union{String, Nothing} = nothing
+    age."status/@age"::Int
+end
+```
+"""
+macro xmldef(arg::Any)
+    if arg isa Expr
+        throw(ArgumentError("@xmldef requires XML to be loaded"))
+    else
+        throw(ArgumentError("@xmldef expects a struct definition"))
+    end
+end
