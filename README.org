@@ -15,7 +15,8 @@ See the docs' tutorial for a guided example on how to write a client with this p
 
 + Minimal Boilerplate :: Defining an API endpoint can take just a single line of code.
 + Built-in common functionality :: Debugging utilities, input URI encoding, and rate limiting.
-+ Easy serialisation :: Straightforward interoperability with JSON3 via ~@jsondef~.
++ Easy serialisation :: Straightforward interoperability with JSON3 and XML via
+  ~@jsondef~ and ~@xmldef~.
 + Flexibility :: Extensible to support custom serialisation formats, complex requests, and more.
 
 * Example

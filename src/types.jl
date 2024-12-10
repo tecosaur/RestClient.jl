@@ -66,6 +66,13 @@ Singleton type for JSON response formats.
 struct JSONFormat <: AbstractFormat end
 
 """
+    XMLFormat <: AbstractFormat
+
+Singleton type for XML response formats.
+"""
+struct XMLFormat <: AbstractFormat end
+
+"""
     RequestConfig
 
 The general configuration for a request to the API,

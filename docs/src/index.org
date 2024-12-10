@@ -21,13 +21,19 @@ See [[@ref][~@globalconfig~]] and [[@ref][~RequestConfig~]] for more information
 
 #+begin_src julia
 @jsondef struct Item
-    id::Int
+    id."item_id"::Int
     name::String
     description::String
 end
+
+@xmldef struct Item
+    id."@id"::Int
+    name."@name"::String
+    description."text()"::String
+end
 #+end_src
 
-See [[@ref][~@jsondef~]] for more information.
+See [[@ref][~@jsondef~]] and [[@ref][~@xmldef~]] for more information.
 
 ** Declare endpoints
 
