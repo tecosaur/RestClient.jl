@@ -152,7 +152,9 @@ function debug_request(method::String, url::String, headers, body::Union{IO, Not
         @static if isdefined(Base.Filesystem, :temp_cleanup_later)
             isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
         end
-        write(dumpfile, seekstart(body))
+        p0 = position(body)
+        write(dumpfile, body)
+        seek(body, p0)
         S"$(Base.format_bytes(position(body))) (saved to {bright_magenta:$dumpfile}) sent to "
     end
     strheaders = if isempty(headers)
