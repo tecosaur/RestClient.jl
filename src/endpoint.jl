@@ -230,7 +230,7 @@ macro endpoint(expr::Expr)
     path, params = if einfo.url isa String
         parse_endpoint_url(einfo.url, varname = ANAPHORIC_VAR, knownfields = efields, mod=__module__, filename = string(__source__.file))
     else
-        varform(einfo.url), nothing
+        varform(einfo.url, varname = ANAPHORIC_VAR, knownfields = efields, mod=__module__), nothing
     end
     push!(body, defform(:pagename, einfo.structparams, path))
     !isnothing(params) &&
