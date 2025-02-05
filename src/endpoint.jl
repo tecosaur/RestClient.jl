@@ -297,6 +297,9 @@ function generate_funcalls(einfo; mod::Module)
     else
         Expr(:call, fname, Expr(:parameters, kwargs...), args...)
     end
+    if !isnothing(einfo.structparams)
+        fcall = Expr(:where, fcall, einfo.structparams...)
+    end
     estrucform = Expr(:call, einfo.structname, map(f -> f.name, einfo.fields)...)
     reqmethod = QuoteNode(einfo.method)
     f1 = :($fcall = perform(Request{$reqmethod}(globalconfig(Val{$mod}()), $estrucform)))
@@ -306,6 +309,9 @@ function generate_funcalls(einfo; mod::Module)
         Expr(:call, fname, args...)
     else
         Expr(:call, fname, Expr(:parameters, kwargs...), args...)
+    end
+    if !isnothing(einfo.structparams)
+        fcall = Expr(:where, fcall, einfo.structparams...)
     end
     f2 = :($fcall = perform(Request{$reqmethod}($confarg, $estrucform)))
     f1, f2
