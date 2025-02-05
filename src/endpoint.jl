@@ -451,7 +451,9 @@ function decompose_struct(strux::Expr)
         throw(ArgumentError("Struct name/supertype declaration is malformed"))
     end
     structname, structparams = if Meta.isexpr(structlabel, :curly)
-        first(structlabel.args)::Symbol, Vector{Symbol}(structlabel.args[2:end])
+        first(structlabel.args)::Symbol,
+        [if Meta.isexpr(a, :(<:), 2) first(a.args) else a end::Symbol
+             for a in structlabel.args[2:end]]
     else
         structlabel::Symbol, nothing
     end
