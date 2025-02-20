@@ -197,9 +197,13 @@ function debug_request(method::String, url::String, headers, body::Union{IO, Not
     S"{inverse,bold,magenta: $method } $bodyinfo{light,underline:$url}$strheaders"
 end
 
+const MUNDANE_HEADERS = (
+    "server", "date", "transfer-encoding", "connection", "keep-alive", "vary",
+    "access-control-allow-origin", "strict-transport-security")
+
 function debug_response(url::String, res, buf::IOBuffer)
-    face, status, msg = if res isa Downloads.RequestError
-        :error, res.response.status, res.response.message
+    face, status, headers, msg = if res isa Downloads.RequestError
+        :error, res.response.status, res.response.headers, res.response.message
     else
         dumpfile = joinpath(tempdir(), "rest-response.dump")
         @static if isdefined(Base.Filesystem, :temp_cleanup_later)
@@ -207,9 +211,15 @@ function debug_response(url::String, res, buf::IOBuffer)
         end
         write(dumpfile, seekstart(buf))
         statuscolor = ifelse(200 <= res.status <= 299, :success, :warning)
-        statuscolor, res.status, S"$(Base.format_bytes(position(buf))) (saved to {bright_magenta:$dumpfile}) from"
+        statuscolor, res.status, res.headers, S"$(Base.format_bytes(position(buf))) (saved to {bright_magenta:$dumpfile}) from"
     end
-    S"{inverse,bold,$face: $status } $msg {light,underline:$url}"
+    headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, headers)
+    strheaders = if isempty(headers)
+        S""
+    else
+        join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
+    end
+    S"{inverse,bold,$face: $status } $msg {light,underline:$url}$strheaders"
 end
 
 function handle_response(req::Request, res::Downloads.Response, buf::IO)
