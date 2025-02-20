@@ -213,7 +213,7 @@ function debug_response(url::String, res, buf::IOBuffer)
 end
 
 function handle_response(req::Request, res::Downloads.Response, buf::IO)
-    dtype = responsetype(req.endpoint)
+    dtype = responsetype(req.config, req.endpoint)
     fmt = dataformat(req.endpoint, dtype)
     seekstart(buf)
     data = interpretresponse(buf, fmt, dtype)
