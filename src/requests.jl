@@ -232,40 +232,28 @@ end
 
 # HTTP method implementations
 
-# GET
-
-function http_get_directly(url::String;
-                          headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                          timeout::Float64 = Inf)
+function http_request(method::String, url::String;
+                      headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
+                      timeout::Float64 = Inf)
     buf = IOBuffer()
-    @debug debug_request("GET", url, headers) _file=nothing
-    res = Downloads.request(url; method="GET", output=buf, headers, timeout)
+    @debug debug_request(method, url, headers) _file=nothing
+    res = Downloads.request(url; method, output=buf, headers, timeout)
     @debug debug_response(url, res, buf) _file=nothing
     res isa Downloads.RequestError && throw(res)
     res, buf
 end
 
-function perform(req::Request{:get})
-    validate(req) || throw(ArgumentError("Request is not well-formed"))
-    res, buf = catch_ratelimit(http_get_directly, req.config.reqlock, url(req);
-                               headers=mimeheaders(req, Nothing),
-                               timeout=req.config.timeout)
-    handle_response(req, res, buf)
-end
-
-# POST
-
-function http_post_directly(url::String, payload::Union{<:IO, <:AbstractString, Nothing} = nothing;
-                           headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                           timeout::Float64 = Inf)
+function http_request(method::String, url::String, payload::Union{<:IO, <:AbstractString, Nothing};
+                      headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
+                      timeout::Float64 = Inf)
     buf = IOBuffer()
     input = if payload isa IO
         payload
     elseif payload isa AbstractString
         IOBuffer(payload)
     end
-    @debug debug_request("POST", url, headers, payload) _file=nothing
-    res = Downloads.request(url; method="POST", output=buf, input, headers, timeout)
+    @debug debug_request(method, url, headers, payload) _file=nothing
+    res = Downloads.request(url; method, output=buf, input, headers, timeout)
     @debug debug_response(url, res, buf) _file=nothing
     res isa Downloads.RequestError && throw(res)
     res, buf
@@ -280,13 +268,27 @@ function format_payload(endpoint::AbstractEndpoint, payload)
     seekstart(buf)
 end
 
-function perform(req::Request{:post})
+function bare_request(req::Request, method::String)
+    validate(req) || throw(ArgumentError("Request is not well-formed"))
+    res, buf = catch_ratelimit(
+        http_request, req.config.reqlock, method, url(req);
+        headers=mimeheaders(req, Nothing),
+        timeout=req.config.timeout)
+    handle_response(req, res, buf)
+end
+
+function payload_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     pldtype, pldio = let pld = payload(req)
         typeof(pld), format_payload(req.endpoint, pld)
     end
-    res, buf = catch_ratelimit(http_post_directly, req.config.reqlock, url(req), pldio;
+    res, buf = catch_ratelimit(http_request, req.config.reqlock, method, url(req), pldio;
                                headers=mimeheaders(req, pldtype),
                                timeout=req.config.timeout)
     handle_response(req, res, buf)
 end
+
+# Specific HTTP methods
+
+perform(req::Request{:get}) = bare_request(req, "GET")
+perform(req::Request{:post}) = payload_request(req, "POST")
