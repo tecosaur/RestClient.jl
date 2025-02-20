@@ -348,8 +348,9 @@ function extract_forms(expr::Expr; mod::Module)
             throw(ArgumentError("Supertype declarations may be applied the function or stuct"))
         end
     end
-    # 2: Check for `func(...)`
-    if !isempty(components) && Meta.isexpr(first(components), :call)
+    # 2: Check for `func(...)` (but not `:func(...)`, that's a HTTP method spec)
+    if !isempty(components) && Meta.isexpr(first(components), :call) &&
+        !(first(first(components).args) isa QuoteNode)
         efunc = popfirst!(components)
     end
     # 3: Extract fields from function arguments
