@@ -143,6 +143,8 @@ global variables) by surrounding them with curly braces.
 "page/{somefield}?param={another}&{globalvar}=7"
 ```
 
+Parameters with a value of `nothing` are omitted from the query string.
+
 For convenience, a parameter by the same name as the field can be referred to by
 the field name alone (e.g. `?{var}` instead of `?var={var}`).
 
@@ -233,8 +235,13 @@ macro endpoint(expr::Expr)
         varform(einfo.url, varname = ANAPHORIC_VAR, knownfields = efields, mod=__module__), nothing
     end
     push!(body, defform(:pagename, einfo.structparams, path))
-    !isnothing(params) &&
-        push!(body, defform(:parameters, einfo.structparams, Expr(:vect, params...)))
+    if !isnothing(params)
+        paramvec = Expr(:vect, params...)
+        finalparam = :($(Vector{Pair{String, String}})(
+            $filter($(!isnothing), $(Vector{Union{Pair{String, String}, Nothing}})(
+                $paramvec))))
+        push!(body, defform(:parameters, einfo.structparams, finalparam))
+    end
     push!(body, defform(:responsetype, einfo.structparams, einfo.out))
     # Function (optional)
     if !isnothing(einfo.func)
@@ -469,7 +476,8 @@ function decompose_struct(strux::Expr)
     for line in structdef.args
         if line isa LineNumberNode
             continue
-        elseif isempty(fields) && isnothing(specialline) && Meta.isexpr(line, :(->), 2)
+        elseif isempty(fields) && isnothing(specialline) &&
+            (Meta.isexpr(line, :(->), 2) || line isa String)
             specialline = line
             continue
         end
@@ -509,6 +517,8 @@ function linearize_arrowforms(expr::Expr)
     components
 end
 
+linearize_arrowforms(@nospecialize(x::Any)) = Any[x]
+
 """
     parse_endpoint_url(url::String; kwargs...)
 
@@ -525,19 +535,23 @@ function parse_endpoint_url(url::String; kwargs...)
     isnothing(query) && return interp_curlies(String(path); percentescape=true, kwargs...), nothing
     components = split(query, '&')
     parameters = Expr[]
+    function mkparam(key, val)
+        valvar = gensym("val")
+        :(let $valvar = $val; if !isnothing($valvar); $key => $string($valvar) end end)
+    end
     for comp in components
         if '=' in comp
             key, value = split(comp, '=', limit=2)
             keyex, valex = interp_curlies(String(key); kwargs...), interp_curlies(String(value); kwargs...)
-            push!(parameters, :($keyex => $valex))
+            push!(parameters, mkparam(keyex, valex))
         elseif startswith(comp, '{') && endswith(comp, '}')
             compparsed = Meta.parse(comp)
             Meta.isexpr(compparsed, :braces, 1) || throw(ArgumentError("Invalid query component $comp"))
             compvar = first(compparsed.args)
             compvar isa Symbol || throw(ArgumentError("Invalid query component $comp"))
             kwargs2 = ((; filename, k...) -> k)(; kwargs...)
-            compex = Expr(:call, GlobalRef(Base, :string), varform(compvar; kwargs2...))
-            push!(parameters, :($(String(compvar)) => $compex))
+            compex = varform(compvar; kwargs2...)
+            push!(parameters, mkparam(String(compvar), compex))
         else
             throw(ArgumentError("Invalid query component $comp"))
         end
@@ -568,8 +582,8 @@ function interp_curlies(str::String; filename::String = "unknown", percentescape
             Meta.isexpr(expr, :braces, 1) ||
                 throw(ArgumentError("Expected single {curly} form in URL, instead saw $expr"))
             exval = first(expr.args)
-            exstr = Expr(:call, GlobalRef(Base, :string), varform(exval; kwargs...))
-            push!(components, if percentescape; :($encode_uri_component($exstr)) else exstr end)
+            exvar = varform(exval; kwargs...)
+            push!(components, if percentescape; :($encode_uri_component($exvar)) else exvar end)
             lastidx = idx
         else
             idx = nextind(str, idx)
