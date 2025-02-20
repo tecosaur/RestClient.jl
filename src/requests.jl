@@ -241,7 +241,7 @@ function http_get_directly(url::String;
     @debug debug_request("GET", url, headers) _file=nothing
     res = Downloads.request(url; method="GET", output=buf, headers, timeout)
     @debug debug_response(url, res, buf) _file=nothing
-    res isa Downloads.RequestError && throw(req)
+    res isa Downloads.RequestError && throw(res)
     res, buf
 end
 
@@ -267,7 +267,7 @@ function http_post_directly(url::String, payload::Union{<:IO, <:AbstractString, 
     @debug debug_request("POST", url, headers, payload) _file=nothing
     res = Downloads.request(url; method="POST", output=buf, input, headers, timeout)
     @debug debug_response(url, res, buf) _file=nothing
-    res isa Downloads.RequestError && throw(req)
+    res isa Downloads.RequestError && throw(res)
     res, buf
 end
 
