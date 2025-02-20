@@ -61,14 +61,14 @@ struct RawFormat <: AbstractFormat end
 """
     JSONFormat <: AbstractFormat
 
-Singleton type for JSON response formats.
+Singleton type for JSON request/response formats.
 """
 struct JSONFormat <: AbstractFormat end
 
 """
     XMLFormat <: AbstractFormat
 
-Singleton type for XML response formats.
+Singleton type for XML request/response formats.
 """
 struct XMLFormat <: AbstractFormat end
 
