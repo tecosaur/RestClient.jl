@@ -1,6 +1,7 @@
 # The endpoint macro, in all its glory
 
 const ANAPHORIC_VAR = :self
+const CONFIG_VAR = :config
 
 const SUPPORTED_HTTP_METHODS = (:get, :post)
 
@@ -156,7 +157,8 @@ the field name alone (e.g. `?{var}` instead of `?var={var}`).
 
 In more complex cases, arbitrary Julia code can be included in the curly braces.
 This code will be evaluated with the endpoint value bound the the anaphoric
-variable `$ANAPHORIC_VAR`.
+variable `$ANAPHORIC_VAR` as well as `$CONFIG_VAR` for the request
+configuration.
 
 ```julia
 "page/{if self.new \\"new\\" else \\"fetch\\" end}/{id}"
@@ -228,17 +230,19 @@ macro endpoint(expr::Expr)
     body = Expr[]
     # Standard components: struct, page, parameters, responsetype
     push!(body, Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, einfo.structdef))
-    defform(func::Symbol, ::Nothing, body) = :($(@__MODULE__).$func($ANAPHORIC_VAR::$(einfo.structname)) = $body)
+    defform(func::Symbol, ::Nothing, body) =
+        :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $body)
     defform(func::Symbol, params::Vector{Symbol}, body) =
-        :($(@__MODULE__).$func($ANAPHORIC_VAR::$(einfo.structname){$(params...)}) where {$(params...)} = $body)
+        :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname){$(params...)}) where {$(params...)} = $body)
+    varcontext = (; varname = ANAPHORIC_VAR, localvars = [CONFIG_VAR], knownfields = efields, mod=__module__)
     if !isnothing(einfo.in)
-        inval = varform(einfo.in, varname = ANAPHORIC_VAR, knownfields = efields, mod=__module__)
-        push!(body, :($(@__MODULE__).payload($ANAPHORIC_VAR::$(einfo.structname)) = $inval))
+        inval = varform(einfo.in; varcontext...)
+        push!(body, :($(@__MODULE__).payload($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $inval))
     end
     path, params = if einfo.url isa String
-        parse_endpoint_url(einfo.url, varname = ANAPHORIC_VAR, knownfields = efields, mod=__module__, filename = string(__source__.file))
+        parse_endpoint_url(einfo.url; varcontext..., filename = string(__source__.file))
     else
-        varform(einfo.url, varname = ANAPHORIC_VAR, knownfields = efields, mod=__module__), nothing
+        varform(einfo.url; varcontext...), nothing
     end
     push!(body, defform(:pagename, einfo.structparams, path))
     if !isnothing(params)
@@ -615,14 +619,16 @@ Convert implicit references to a field of a variable `varname` into explicit ref
 A field reference is recognised when `exval` is one of `knownfields`. If `exval` is a variable
 but not a member of `knownfields` or a global variable, an `ArgumentError` is thrown.
 """
-function varform(exval; varname::Symbol, knownfields::Vector{Symbol}, mod::Module)
+function varform(exval; varname::Symbol, localvars::Vector{Symbol}, knownfields::Vector{Symbol}, mod::Module)
     if exval isa Symbol
         if exval ∈ knownfields
             :($varname.$exval)
+        elseif exval ∈ localvars
+            exval
         elseif isdefined(mod, exval)
             exval
         else
-            throw(ArgumentError("$exval is not a known field or global variable"))
+            throw(ArgumentError("$exval is not a known field, local variable, or global variable"))
         end
     elseif Meta.isexpr(exval, :., 2)
         dotpath = Any[exval]
@@ -635,10 +641,12 @@ function varform(exval; varname::Symbol, knownfields::Vector{Symbol}, mod::Modul
         if last(dotpath) ∈ knownfields
             dotpath[end] = QuoteNode(last(dotpath))
             foldl((d, x) -> Expr(:., d, x), reverse(dotpath), init=varname)
+        elseif last(dotpath) ∈ localvars
+            exval
         elseif isdefined(mod, last(dotpath))
             exval
         else
-            throw(ArgumentError("$exval is not a known field or global variable"))
+            throw(ArgumentError("$exval is not a known field, local variable, or global variable"))
         end
     else
         exval
