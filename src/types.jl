@@ -141,6 +141,8 @@ struct Single{T, E<:SingleEndpoint}
     meta::Dict{Symbol, Any}
 end
 
+Base.getindex(single::Single) = single.data
+
 """
     List{T, E<:ListEndpoint}
 
