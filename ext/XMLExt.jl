@@ -19,6 +19,8 @@ function RestClient.writepayload(dest::IO, ::RestClient.XMLFormat, data)
     writexml(dest, data)
 end
 
+RestClient.mimetype(::Type{RestClient.XMLFormat}) = "application/xml"
+
 # Parsing
 
 abstract type XMLParseException <: Exception end
