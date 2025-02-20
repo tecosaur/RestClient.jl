@@ -95,7 +95,8 @@ end
 """
     dataformat([endpoint::AbstractEndpoint], ::Type{T}) -> AbstractFormat
 
-Return the expected format that `T` is represented by in the response from `endpoint`.
+Return the expected format that `T` is represented by in requests to and
+responses from `endpoint`.
 
 Using the default `dataformat(::Type)` method, the format is [`RawFormat`](@ref).
 
