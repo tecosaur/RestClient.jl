@@ -8,6 +8,8 @@ function RestClient.interpretresponse(data::IO, ::RestClient.JSONFormat, ::Type{
     JSON3.read(data, T)
 end
 
+RestClient.mimetype(::Type{RestClient.JSONFormat}) = "application/json"
+
 function RestClient.writepayload(dest::IO, ::RestClient.JSONFormat, data)
     JSON3.write(dest, data)
 end

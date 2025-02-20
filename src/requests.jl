@@ -94,6 +94,38 @@ function url((; config, endpoint)::Request)
     string(config.baseurl, '/', pagename(config, endpoint)::String, url_parameters(params))
 end
 
+function addmimes!(headers::AbstractVector{Pair{String, String}}, ::In, ::Out) where {In, Out}
+    setheaders = map(lowercase ∘ first, headers)
+    inmime = mimetype(In)
+    outmime = mimetype(Out)
+    if "content-type" ∉ setheaders && !isnothing(inmime)
+        push!(headers, "Content-Type" => inmime)
+    end
+    if "accept" ∉ setheaders && !isnothing(outmime)
+        push!(headers, "Accept" => outmime)
+    end
+    headers
+end
+
+function addmimes!(headers::AbstractDict{<:AbstractString}, ::In, ::Out) where {In, Out}
+    setheaders = [lowercase(k) for k in keys(headers)]
+    inmime = mimetype(In)
+    outmime = mimetype(Out)
+    if "content-type" ∉ setheaders && !isnothing(inmime)
+        headers["Content-Type"] = inmime
+    end
+    if "accept" ∉ setheaders && !isnothing(outmime)
+        headers["Accept"] = outmime
+    end
+    headers
+end
+
+function mimeheaders(req::Request, in::Type)
+    addmimes!(copy(headers(req)),
+              if in !== Nothing dataformat(req.endpoint, in) end,
+              dataformat(req.endpoint, responsetype(req.config, req.endpoint)))
+end
+
 """
     catch_ratelimit(f::Function, reqlock::ReentrantLock, args...; kwargs...)
 
@@ -205,7 +237,9 @@ end
 
 function perform(req::Request{:get})
     validate(req) || throw(ArgumentError("Request is not well-formed"))
-    res, buf = catch_ratelimit(http_get_directly, req.config.reqlock, url(req); headers=headers(req), timeout=req.config.timeout)
+    res, buf = catch_ratelimit(http_get_directly, req.config.reqlock, url(req);
+                               headers=mimeheaders(req, Nothing),
+                               timeout=req.config.timeout)
     handle_response(req, res, buf)
 end
 
@@ -238,8 +272,11 @@ end
 
 function perform(req::Request{:post})
     validate(req) || throw(ArgumentError("Request is not well-formed"))
-    payload_io = format_payload(req.endpoint, payload(req))
-    res, buf = catch_ratelimit(http_post_directly, req.config.reqlock, url(req), payload_io;
-                               headers=headers(req), timeout=req.config.timeout)
+    pldtype, pldio = let pld = payload(req)
+        typeof(pld), format_payload(req.endpoint, pld)
+    end
+    res, buf = catch_ratelimit(http_post_directly, req.config.reqlock, url(req), pldio;
+                               headers=mimeheaders(req, pldtype),
+                               timeout=req.config.timeout)
     handle_response(req, res, buf)
 end

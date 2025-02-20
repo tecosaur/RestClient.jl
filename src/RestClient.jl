@@ -6,8 +6,9 @@ using StyledStrings: @styled_str as @S_str
 export AbstractEndpoint, SingleEndpoint, ListEndpoint, Request, RequestConfig,
     @endpoint, @globalconfig, globalconfig
 export SingleResponse, ListResponse, Single, List, perform, pagename,
-    parameters, headers, payload, responsetype, dataformat, interpretresponse,
-    validate, postprocess, thispagenumber, nextpage, remainingpages
+    parameters, headers, payload, responsetype, dataformat, mimetype,
+    interpretresponse, validate, postprocess, thispagenumber, nextpage,
+    remainingpages
 export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
 export setfield
 
