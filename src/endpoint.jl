@@ -122,6 +122,12 @@ a `:post` request (`:get` without).
 @endpoint upload(content::String) -> content -> "create" -> Status
 ```
 
+This is equivalent to the explicit HTTP method form:
+
+```
+@endpoint upload(content::String) -> content -> :post("create") -> Status
+```
+
 In this example `content` is a `String`, and so a `:post` request is made to
 `"\$BASEURL/create"` with `content` as the payload/body. More complex types are
 encoded according with [`writepayload`](@ref) according to [`dataformat`](@ref).
@@ -401,7 +407,9 @@ function extract_forms(expr::Expr; mod::Module)
         end
     end
     # Check that remaining components are: `[in] -> url -> out`
-    if length(components) < 2
+    if length(components) == 1 && first(components) isa String
+        throw(ArgumentError("Only a URL is provided in @endpoint, a response type is also required"))
+    elseif length(components) < 2
         throw(ArgumentError("Expected @endpoint to include a URL and response type"))
     elseif length(components) > 3
         throw(ArgumentError("Too many components in @endpoint, at most could contain `func -> struct -> in -> url -> out`"))
