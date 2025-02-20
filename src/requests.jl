@@ -291,4 +291,24 @@ end
 # Specific HTTP methods
 
 perform(req::Request{:get}) = bare_request(req, "GET")
+perform(req::Request{:options}) = bare_request(req, "OPTIONS")
+
 perform(req::Request{:post}) = payload_request(req, "POST")
+perform(req::Request{:put}) = payload_request(req, "PUT")
+perform(req::Request{:patch}) = payload_request(req, "PATCH")
+perform(req::Request{:delete}) = payload_request(req, "DELETE")
+
+function perform(req::Request{:head})
+    function head_request(url::String; headers, timeout)
+        @debug debug_request("HEAD", url, headers) _file=nothing
+        res = Downloads.request(url; method, headers, timeout)
+        @debug debug_response(url, res, IOBuffer()) _file=nothing
+        res
+    end
+    res = catch_ratelimit(
+        head_request, req.config.reqlock, url(req);
+        headers=headers(req),
+        timeout=req.config.timeout)
+    success = 200 <= res.status <= 299
+    postprocess(res, req, success)
+end
