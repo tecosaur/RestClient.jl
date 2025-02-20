@@ -35,6 +35,11 @@ pagename(::RequestConfig, endpoint::AbstractEndpoint) = pagename(endpoint)
 Return headers for the given `endpoint`.
 
 The default implementation returns an empty list.
+
+!!! note "Default Content-Type"
+
+    When no `Content-Type` header is provided and `mimetype` is defined for
+    the format, the `Content-Type` header is set to the value from `mimetype`.
 """
 function headers(::AbstractEndpoint)
     Pair{String, String}[]
@@ -109,6 +114,15 @@ end
 dataformat(::AbstractEndpoint, T::Type) = dataformat(T)
 
 dataformat(::Type{Vector{T}}) where T = dataformat(T)
+
+"""
+    mimetype(::Type{<:AbstractFormat}) -> Union{String, Nothing}
+
+Return the MIME type for the given format, if known.
+"""
+mimetype(::Type) = nothing
+
+mimetype(::Type{RawFormat}) = "text/plain"
 
 """
     interpretresponse(data::IO, fmt::AbstractFormat, ::Type{T}) -> value::T
