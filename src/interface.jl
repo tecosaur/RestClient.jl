@@ -111,7 +111,7 @@ function dataformat(::Type{IO})
     RawFormat()
 end
 
-dataformat(::AbstractEndpoint, T::Type) = dataformat(T)
+dataformat(@nospecialize(::AbstractEndpoint), T::Type) = dataformat(T)
 
 dataformat(::Type{Vector{T}}) where T = dataformat(T)
 
@@ -133,7 +133,7 @@ Interpret `data` as a response of type `T` according to `fmt`.
 """
 function interpretresponse end
 
-function interpretresponse(data::IO, ::RawFormat, ::Type)
+function interpretresponse(data::IO, ::RawFormat, @nospecialize ::Type)
     data
 end
 
@@ -162,7 +162,7 @@ The default implementation always returns `true`.
 !!! note
     Part of the `AbstractEndpoint` interface.
 """
-function validate(::AbstractEndpoint)
+function validate(@nospecialize ::AbstractEndpoint)
     true
 end
 
@@ -184,7 +184,7 @@ There are three generic implementations provided:
 !!! note
     Part of the `AbstractEndpoint` interface.
 """
-function postprocess(::Request, data)
+function postprocess(@nospecialize(::Request), data)
     data
 end
 
@@ -262,8 +262,8 @@ Return metadata for the given response.
 The default implementation returns an empty dictionary.
 """
 function metadata end
-metadata(::SingleResponse) = Dict{Symbol, Any}()
-metadata(::ListResponse) = Dict{Symbol, Any}()
+metadata(@nospecialize ::SingleResponse) = Dict{Symbol, Any}()
+metadata(@nospecialize ::ListResponse) = Dict{Symbol, Any}()
 
 """
     nextpage(response::List) -> Union{List, Nothing}
@@ -273,7 +273,7 @@ Fetch the next page of results after `response`.
 If there are no more pages, or this method is not available for the given
 endpoint, return `nothing`.
 """
-function nextpage(l::List)
+function nextpage(@nospecialize ::List)
     nothing
 end
 
@@ -282,7 +282,7 @@ end
 
 Return the current page number of `response`, if known.
 """
-function thispagenumber(l::List)
+function thispagenumber(@nospecialize ::List)
     nothing
 end
 
@@ -291,6 +291,6 @@ end
 
 Return the number of remaining pages after `response`, if known.
 """
-function remainingpages(l::List)
+function remainingpages(@nospecialize ::List)
     nothing
 end
