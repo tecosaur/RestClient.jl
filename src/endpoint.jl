@@ -434,7 +434,7 @@ function extract_forms(expr::Expr; mod::Module)
         outtype = Core.eval(mod, eout)
         esuper = if outtype <: SingleResponse
             :SingleEndpoint
-        elseif outtype <: ListResponse
+        elseif outtype <: ListResponse || outtype <: Vector
             :ListEndpoint
         else
             :AbstractEndpoint
