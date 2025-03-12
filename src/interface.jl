@@ -67,6 +67,29 @@ end
 parameters(::RequestConfig, endpoint::AbstractEndpoint) = parameters(endpoint)
 
 """
+    validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
+
+Check if the request to `endpoint` according to `config` is valid.
+
+This is called before the request is made, and can be used to check
+if the request is well-formed. This is the appropriate place to
+emit warnings about potential issues with the request.
+
+Return `true` if the request should proceed, `false` otherwise.
+
+The default implementation always returns `true`.
+
+!!! note
+    Part of the `AbstractEndpoint` interface.
+"""
+function validate(@nospecialize ::AbstractEndpoint)
+    true
+end
+
+validate(::RequestConfig, endpoint::AbstractEndpoint) = validate(endpoint)
+validate((; config, endpoint)::Request) = validate(config, endpoint)
+
+"""
     payload([config::RequestConfig], endpoint::AbstractEndpoint) -> Any
 
 Return the payload for the given `endpoint`.
@@ -80,6 +103,9 @@ function payload end
 
 payload(::RequestConfig, endpoint::AbstractEndpoint) = payload(endpoint)
 payload((; config, endpoint)::Request) = payload(config, endpoint)
+
+
+# Interpretation
 
 """
     responsetype(endpoint::AbstractEndpoint) -> Type
@@ -147,29 +173,6 @@ function writepayload(dest::IO, ::RawFormat, data)
 end
 
 """
-    validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
-
-Check if the request to `endpoint` according to `config` is valid.
-
-This is called before the request is made, and can be used to check
-if the request is well-formed. This is the appropriate place to
-emit warnings about potential issues with the request.
-
-Return `true` if the request should proceed, `false` otherwise.
-
-The default implementation always returns `true`.
-
-!!! note
-    Part of the `AbstractEndpoint` interface.
-"""
-function validate(@nospecialize ::AbstractEndpoint)
-    true
-end
-
-validate(::RequestConfig, endpoint::AbstractEndpoint) = validate(endpoint)
-validate((; config, endpoint)::Request) = validate(config, endpoint)
-
-"""
     postprocess([response::Downloads.Response], request::Request, data) -> Any
 
 Post-process the data returned by the request.
@@ -199,7 +202,8 @@ function postprocess(req::Request{kind, E}, data::SingleResponse{T}) where {kind
     Single{T, E}(req, contents(data), metadata(data))
 end
 
-# Response API
+
+# Response handling
 
 function contents end
 
