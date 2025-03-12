@@ -11,9 +11,12 @@ function setfield(x::T, field::Symbol, value) where {T}
 end
 
 """
-    @globalconfig value
+    @globalconfig expr
 
-Store `value` as the global request configuration, and define [`globalconfig`](@ref) to return it.
+Define [`globalconfig`](@ref) for the current module as `expr`.
+
+This is a minor convenience macro to avoid having to write the slightly awkward
+`RestClient.globalconfig(::Val{@__MODULE__}) = expr`.
 
 # Examples
 
@@ -22,11 +25,7 @@ Store `value` as the global request configuration, and define [`globalconfig`](@
 ```
 """
 macro globalconfig(expr::Expr)
-    confvar = gensym("global-request-config")
-    quote
-        const $confvar = $expr
-        $(@__MODULE__).globalconfig(::Val{$__module__}) = $confvar
-    end
+    :($(@__MODULE__).globalconfig(::Val{$__module__}) = $expr)
 end
 
 """
