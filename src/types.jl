@@ -42,6 +42,9 @@ See also: [`AbstractEndpoint`](@ref), [`ListResponse`](@ref), [`List`](@ref).
 """
 abstract type ListEndpoint <: AbstractEndpoint end
 
+
+# Datatype singletons
+
 """
     AbstractFormat
 
@@ -71,6 +74,9 @@ struct JSONFormat <: AbstractFormat end
 Singleton type for XML request/response formats.
 """
 struct XMLFormat <: AbstractFormat end
+
+
+# Requests
 
 """
     RequestConfig
@@ -126,6 +132,9 @@ end
 
 Request{kind}(config::RequestConfig, endpoint::E) where {kind, E <: AbstractEndpoint} =
     Request{kind, E}(config, endpoint)
+
+
+# Generic response forms
 
 """
     Single{T, E<:SingleEndpoint}

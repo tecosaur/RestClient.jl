@@ -10,6 +10,7 @@ corresponds to an HTTP method name (`:get`, `:post`, etc.).
 """
 function perform end
 
+
 # Generic request functionality
 
 """
@@ -174,6 +175,7 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
     end
 end
 
+
 # Utility functions
 
 function debug_request(method::String, url::String, headers, body::Union{IO, Nothing} = nothing)
@@ -230,6 +232,7 @@ function handle_response(req::Request, res::Downloads.Response, buf::IO)
     postprocess(res, req, data)
 end
 
+
 # HTTP method implementations
 
 function http_request(method::String, url::String;
@@ -288,6 +291,7 @@ function payload_request(req::Request, method::String)
     handle_response(req, res, buf)
 end
 
+
 # Specific HTTP methods
 
 perform(req::Request{:get}) = bare_request(req, "GET")
