@@ -89,10 +89,11 @@ struct RequestConfig
     reqlock::ReentrantLock
     key::Union{Nothing, String}
     timeout::Float64
+    cache::Bool
 end
 
-RequestConfig(baseurl::String; key::Union{Nothing, String}=nothing, timeout::Real = Inf) =
-    RequestConfig(baseurl, ReentrantLock(), key, Float64(timeout))
+RequestConfig(baseurl::String; key::Union{Nothing, String}=nothing, timeout::Real = Inf, cache::Bool = true) =
+    RequestConfig(baseurl, ReentrantLock(), key, Float64(timeout), cache)
 
 """
     Request{kind, E<:AbstractEndpoint}
@@ -111,12 +112,12 @@ See also: [`AbstractEndpoint`](@ref), [`RequestConfig`](@ref).
          │     ╎                               │
          │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
 Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
-         │              ├─▶ pagename ╾───╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
-         │              │                ├──▶ url ╾─┬─━─▶ request ╾━┬─▶ interpret ╾──▶ data
-         ├─╴endpoint╶───┼─▶ parameters ╾─╯          │               │                   │
-         │              │                           │               │             ╭─────╯
-         │              ├─▶ parameters ╾────────────┤               ╰─────────╮   │
-         │              │                           │                      postprocess ╾──▶ result
+         │              ├─▶ pagename ╾───╮     │      ╓┄┄*debug*┄┄╖       │  ╭──────╯
+         │              │                ├──▶ url ╾─┬─━─▶ request ┊ ╭─▶ interpret ╾──▶ data
+         ├─╴endpoint╶───┼─▶ parameters ╾─╯          │ ┊      ┠────━─┤                   │
+         │              │                           ├─━──▶ cache  ┊ │             ╭─────╯
+         │              ├─▶ parameters ╾────────────┤ ┊           ┊ ╰─────────╮   │
+         │              │                           │ ╙┄┄┄┄┄┄┄┄┄┄┄╜        postprocess ╾──▶ result
          │             *╰─▶ payload ─▶ writepayload╶╯                           │
          │                    ╰─▶ dataformat ╾╯                                 │
          ╰─────────┬────────────────────────────────────────────────────────────╯
