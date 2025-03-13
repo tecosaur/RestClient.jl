@@ -1,3 +1,5 @@
+const HTTP_DATE_FORMAT = dateformat"e, d u Y H:M:S G\MT"
+
 # The core API
 
 """
@@ -178,25 +180,32 @@ end
 
 # Utility functions
 
-function debug_request(method::String, url::String, headers, body::Union{IO, Nothing} = nothing)
-    bodyinfo = if isnothing(body)
+function debug_request(method::String, url::String, headers, payload::Union{IO, Nothing} = nothing)
+    payloadinfo = if isnothing(payload)
         S""
     else
-        dumpfile = joinpath(tempdir(), "rest-body.dump")
+        dumpfile = joinpath(tempdir(), "rest-request.http")
         @static if isdefined(Base.Filesystem, :temp_cleanup_later)
             isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
         end
-        p0 = position(body)
-        write(dumpfile, body)
-        seek(body, p0)
-        S"$(Base.format_bytes(position(body))) (saved to {bright_magenta:$dumpfile}) sent to "
+        open(dumpfile, "w") do io
+            println(io, method, ' ', url)
+            for (k, v) in headers
+                println(io, k, ": ", v)
+            end
+            println(io)
+            mark(payload)
+            write(dumpfile, payload)
+            reset(payload)
+        end
+        S"$(Base.format_bytes(position(payload))) (saved to {bright_magenta:$dumpfile}) sent to "
     end
     strheaders = if isempty(headers)
         S""
     else
         join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
     end
-    S"{inverse,bold,magenta: $method } $bodyinfo{light,underline:$url}$strheaders"
+    S"{inverse,bold,magenta: $method } $payloadinfo{light,underline:$url}$strheaders"
 end
 
 const MUNDANE_HEADERS = (
@@ -207,11 +216,15 @@ function debug_response(url::String, res, buf::IOBuffer)
     face, status, headers, msg = if res isa Downloads.RequestError
         :error, res.response.status, res.response.headers, res.response.message
     else
-        dumpfile = joinpath(tempdir(), "rest-response.dump")
+        dumpfile = joinpath(tempdir(), "rest-response.http")
         @static if isdefined(Base.Filesystem, :temp_cleanup_later)
             isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
         end
-        write(dumpfile, seekstart(buf))
+        open(dumpfile, "w") do io
+            mark(buf)
+            dumpresponse(io, res, buf)
+            reset(buf)
+        end
         statuscolor = ifelse(200 <= res.status <= 299, :success, :warning)
         statuscolor, res.status, res.headers, S"$(Base.format_bytes(position(buf))) (saved to {bright_magenta:$dumpfile}) from"
     end
@@ -224,23 +237,24 @@ function debug_response(url::String, res, buf::IOBuffer)
     S"{inverse,bold,$face: $status } $msg {light,underline:$url}$strheaders"
 end
 
-function handle_response(req::Request, res::Downloads.Response, buf::IO)
+function handle_response(req::Request, res::Downloads.Response, body::IO)
     dtype = responsetype(req.config, req.endpoint)
     fmt = dataformat(req.endpoint, dtype)
-    seekstart(buf)
-    data = interpretresponse(buf, fmt, dtype)
+    data = interpretresponse(body, fmt, dtype)
+    close(body)
     postprocess(res, req, data)
 end
 
 
 # HTTP method implementations
 
-function http_request(method::String, url::String;
+function http_request(method::String, url::String, ::Nothing = nothing;
                       headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
                       timeout::Float64 = Inf)
     buf = IOBuffer()
     @debug debug_request(method, url, headers) _file=nothing
     res = Downloads.request(url; method, output=buf, headers, timeout)
+    seekstart(buf)
     @debug debug_response(url, res, buf) _file=nothing
     res isa Downloads.RequestError && throw(res)
     res, buf
@@ -257,6 +271,7 @@ function http_request(method::String, url::String, payload::Union{<:IO, <:Abstra
     end
     @debug debug_request(method, url, headers, payload) _file=nothing
     res = Downloads.request(url; method, output=buf, input, headers, timeout)
+    seekstart(buf)
     @debug debug_response(url, res, buf) _file=nothing
     res isa Downloads.RequestError && throw(res)
     res, buf
@@ -271,24 +286,38 @@ function format_payload(endpoint::AbstractEndpoint, payload)
     seekstart(buf)
 end
 
+function cached_request(req::Request, method::String, payload)
+    pldtype, pldio = if isnothing(payload)
+        Nothing, nothing
+    else
+        typeof(payload), format_payload(req.endpoint, payload)
+    end
+    rurl, headers = url(req), mimeheaders(req, pldtype)
+    if !req.config.cache
+        return http_request(method, rurl, pldio; headers, timeout=req.config.timeout)
+    end
+    res, body, wascached = http_cached(
+        method, rurl, pldio; headers, timeout=req.config.timeout)
+    if !wascached
+        cachesave(req, rurl, headers,
+                  if !isnothing(pldio) seekstart(pldio) end,
+                  res, body)
+    end
+    res, body
+end
+
 function bare_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
-    res, buf = catch_ratelimit(
-        http_request, req.config.reqlock, method, url(req);
-        headers=mimeheaders(req, Nothing),
-        timeout=req.config.timeout)
-    handle_response(req, res, buf)
+    res, body = catch_ratelimit(
+        cached_request, req.config.reqlock, req, method, nothing)
+    handle_response(req, res, body)
 end
 
 function payload_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
-    pldtype, pldio = let pld = payload(req)
-        typeof(pld), format_payload(req.endpoint, pld)
-    end
-    res, buf = catch_ratelimit(http_request, req.config.reqlock, method, url(req), pldio;
-                               headers=mimeheaders(req, pldtype),
-                               timeout=req.config.timeout)
-    handle_response(req, res, buf)
+    res, body = catch_ratelimit(
+        cached_request, req.config.reqlock, req, method, payload(req))
+    handle_response(req, res, body)
 end
 
 

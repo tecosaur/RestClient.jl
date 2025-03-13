@@ -14,6 +14,7 @@ export setfield
 
 include("types.jl")
 include("interface.jl")
+include("caching.jl")
 include("requests.jl")
 include("utilities.jl")
 include("endpoint.jl")
@@ -27,5 +28,7 @@ end
 macro reexport()
     :(export Single, List, nextpage)
 end
+
+__init__() = atexit(cleancache)
 
 end
