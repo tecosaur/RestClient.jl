@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.11.2"
+julia_version = "1.11.4"
 manifest_format = "2.0"
 project_hash = "df26166797ba43d644cfabea0816e45e68597afb"
 
@@ -25,6 +25,11 @@ version = "1.11.0"
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
+
+[[deps.BaseDirs]]
+git-tree-sha1 = "cb25e4b105cc927052c2314f8291854ea59bf70a"
+uuid = "18cc8868-cbac-4acf-b575-c8ff214dc66f"
+version = "1.2.4"
 
 [[deps.CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
@@ -237,17 +242,21 @@ uuid = "2792f1a3-b283-48e8-9a74-f99dce5104f3"
 version = "0.1.0"
 
 [[deps.RestClient]]
-deps = ["Downloads", "PrecompileTools", "StyledStrings"]
+deps = ["BaseDirs", "Dates", "Downloads", "PrecompileTools", "StyledStrings"]
 path = ".."
 uuid = "e1389577-bcae-4d0f-b368-61b404b8c94c"
 version = "0.1.0"
 
     [deps.RestClient.extensions]
     JSONExt = ["JSON3", "StructTypes"]
+    TableExt = "Tables"
+    XMLExt = "XML"
 
     [deps.RestClient.weakdeps]
     JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
     StructTypes = "856f2bd8-1eba-4b0a-8007-ebc267875bd4"
+    Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
+    XML = "72c71f33-b9b6-44de-8c94-c961784809e2"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
