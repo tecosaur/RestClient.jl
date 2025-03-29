@@ -276,6 +276,8 @@ Fetch the next page of results after `response`.
 
 If there are no more pages, or this method is not available for the given
 endpoint, return `nothing`.
+
+The generic `::List` implementation returns `nothing`.
 """
 function nextpage(@nospecialize ::List)
     nothing
@@ -285,6 +287,8 @@ end
     thispagenumber(response::List) -> Union{Int, Nothing}
 
 Return the current page number of `response`, if known.
+
+The generic `::List` implementation returns `nothing`.
 """
 function thispagenumber(@nospecialize ::List)
     nothing
@@ -294,6 +298,8 @@ end
     remainingpages(response::List) -> Union{Int, Nothing}
 
 Return the number of remaining pages after `response`, if known.
+
+The generic `::List` implementation returns `nothing`.
 """
 function remainingpages(@nospecialize ::List)
     nothing

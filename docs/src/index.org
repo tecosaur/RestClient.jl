@@ -45,9 +45,10 @@ See [[@ref][~@endpoint~]] for more information.
 
 ** Extra functionality
 
-+ Pagination
-+ Response post-processing
-+ Custom data formats
++ [[@ref Pagination-interface][Pagination]]
++ Response [[@ref RestClient.postprocess][post-processing]]
++ [[@ref Caching-interface][Caching]]
++ [[@ref RestClient.AbstractFormat][Custom data formats]]
 
 * Request data flow
 
