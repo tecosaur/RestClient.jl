@@ -18,7 +18,7 @@ validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
 postprocess([response::Downloads.Response], request::Request, data) -> Any
 ```
 
-All of these functions but `pagename` have default implementations.
+All of these functions but [`pagename`](@ref) have default implementations.
 
 See also: [`Request`](@ref), [`dataformat`](@ref), [`interpretresponse`](@ref).
 """
@@ -49,6 +49,14 @@ abstract type ListEndpoint <: AbstractEndpoint end
     AbstractFormat
 
 Abstract supertype for response formats.
+
+Typically, you will want to create a singleton subtype and then implement
+the following methods for it:
+- An [`interpretresponse`](@ref) method so a response in that format
+  can be parsed/interpreted as a specific type.
+- A [`writepayload`](@ref) method so data can be sent in that format.
+- A [`mimetype`](@ref) method so that appropriate headers can be set
+  when sending or receiving data in this format.
 
 See also: [`RawFormat`](@ref), [`JSONFormat`](@ref).
 """

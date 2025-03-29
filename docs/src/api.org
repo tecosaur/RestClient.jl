@@ -32,8 +32,8 @@ List
 
 #+begin_src @docs
 RestClient.globalconfig
+RestClient.validate
 RestClient.perform
-RestClient.pagename
 RestClient.headers
 RestClient.parameters
 RestClient.payload
@@ -42,14 +42,25 @@ RestClient.payload
 * Response interface
 
 #+begin_src @docs
-RestClient.validate
 RestClient.responsetype
 RestClient.postprocess
 RestClient.contents
 RestClient.metadata
+#+end_src
+
+* Pagination interface
+
+#+begin_src @docs
+RestClient.pagename
 RestClient.nextpage
 RestClient.thispagenumber
 RestClient.remainingpages
+#+end_src
+
+* Caching interface
+
+#+begin_src @docs
+RestClient.cachelifetime
 #+end_src
 
 * Content formatting
@@ -62,4 +73,5 @@ RestClient.XMLFormat
 RestClient.dataformat
 RestClient.interpretresponse
 RestClient.writepayload
+RestClient.mimetype
 #+end_src
