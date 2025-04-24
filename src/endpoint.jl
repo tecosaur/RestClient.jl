@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: © 2025 TEC <contact@tecosaur.net>
+# SPDX-License-Identifier: MPL-2.0
+
 # The endpoint macro, in all its glory
 
 const ANAPHORIC_VAR = :self
