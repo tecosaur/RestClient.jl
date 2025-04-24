@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: © 2025 TEC <contact@tecosaur.net>
+# SPDX-License-Identifier: MPL-2.0
+
 const HTTP_DATE_FORMAT = dateformat"e, d u Y H:M:S G\MT"
 
 # The core API
