@@ -92,8 +92,33 @@ struct XMLFormat <: AbstractFormat end
 """
     RequestConfig
 
-The general configuration for a request to the API,
-not tied to any specific endpoint.
+The general configuration for a request to the API, not tied to any specific endpoint.
+
+At a minimum, this holds the base URL of the API and a lock for handling rate-limiting.
+
+Other fields are optional, but may be useful for changing the way requests are
+performed or handling authentication. The following additional fields can be
+provided as keyword arguments:
+
+- `key::Union{Nothing, String}`: An authentication key used to authorise requests.
+  This only serves to hold the key, because of the varied ways that authentication
+  may be performed implementation is left to individual endpoints.
+- `timeout::Float64`: The timeout for the request, in seconds. This is passed to
+  `Downloads.download` and defaults to `Inf`.
+- `cache::Bool`: Whether to cache the response, using lifetime information from
+  standard HTTP response headers. Defaults to `true`.
+
+See also: [`@globalconfig`](@ref), [`Request`](@ref).
+
+# Examples
+
+```julia-repl
+julia> RequestConfig("https://api.example.com")
+RequestConfig("https://api.example.com", ReentrantLock(), nothing, Inf, true)
+
+julia> RequestConfig("https://api.example.com", key = ENV["API_SECRET_KEY"])
+RequestConfig("https://api.example.com", ReentrantLock(), "*****", Inf, true)
+```
 """
 struct RequestConfig
     baseurl::String
@@ -112,9 +137,18 @@ RequestConfig(baseurl::String; key::Union{Nothing, String}=nothing, timeout::Rea
 A request to an API endpoint, with a specific configuration.
 
 This is the complete set of information required to make a `kind` HTTP request
-to an endpoint `E`.
+to an endpoint `E`. This consists of the request configuration and target
+endpoint itself. The `kind` and endpoint`::E` are put as type parameters
+so that they may participate in method dispatch.
 
-See also: [`AbstractEndpoint`](@ref), [`RequestConfig`](@ref).
+See also: [`AbstractEndpoint`](@ref), [`RequestConfig`](@ref), [`perform`](@ref).
+
+# Examples
+
+```julia-repl
+julia> Request{:get}(RequestConfig(...), MyEndpoint(...))
+Request{:get, MyEndpoint}(RequestConfig(...),MyEndpoint(...))
+```
 
 # Data flow
 
