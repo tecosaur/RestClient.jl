@@ -194,9 +194,24 @@ This sets the response type to ~Deck~, the location based on the deck id, and
 Now we just need to define a function to access this endpoint.
 
 #+begin_src julia
-shuffle(deck::Deck, remaining::Bool=false) =
-    perform(Request{:get}(DECK_CONFIG, ShuffleEndpoint(deck, remaining)))
+shuffle(config::RequestConfig, deck::Deck, remaining::Bool=false) =
+    perform(Request{:get}(config, ShuffleEndpoint(deck, remaining)))
+
+shuffle(deck::Deck, remaining::Bool=false) = shuffle(DECK_CONFIG, deck, remaining)
 #+end_src
+
+#+begin_note
+When possible, it is generally recommended to define the request-performing
+function using ~@endpoint~, as demonstrated with the draw endpoint below.
+
+When defined this way, the global ~RequestConfig~ of the module is automatically
+used, and a second method defined that takes a custom ~RequestConfig~ as the first
+argument. This allows for the endpoint to be reused across different API urls as
+well as customisation of request configuration.
+
+When not using ~@endpoint~, it is thus encouraged that you define a method like
+this as well, as we did with ~shuffle~ above.
+#+end_note
 
 ** Draw endpoint
 
@@ -256,7 +271,7 @@ helps us verify that everything is behaving as expected, and debug any
 failures or unexpected results.
 
 #+begin_src julia-repl
-julia> deck = DeckAPI.new()
+julia> deck = DeckAPI.new() # Create a new 'deck' using the API
 ┌ Debug:  GET  https://deckofcardsapi.com/api/deck/new?deck_count=1
 └ @ RestClient
 ┌ Debug:  200  80 bytes (saved to /tmp/api-get.dump) from https://deckofcardsapi.com/api/deck/new?deck_count=1
