@@ -21,6 +21,8 @@ Define [`globalconfig`](@ref) for the current module as `expr`.
 This is a minor convenience macro to avoid having to write the slightly awkward
 `RestClient.globalconfig(::Val{@__MODULE__}) = expr`.
 
+See also: [`globalconfig`](@ref), [`RequestConfig`](@ref).
+
 # Examples
 
 ```julia

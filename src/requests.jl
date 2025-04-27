@@ -12,6 +12,8 @@ Validate and perform the request `req`, and return the result.
 
 The specific behaviour is determined by the `kind` of the request, which
 corresponds to an HTTP method name (`:get`, `:post`, etc.).
+
+See also: [`Request`](@ref).
 """
 function perform end
 
