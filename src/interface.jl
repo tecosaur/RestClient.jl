@@ -10,6 +10,8 @@ Return the global configuration for the given module.
 
 This is used in [`@endpoint`](@ref) generated API functions.
 
+See also: [`@globalconfig`](@ref), [`RequestConfig`](@ref).
+
 !!! warning
     Be careful not to accidentally define this function in a way that generates
     a new `RequestConfig` every time it is called, as this will cause state information
