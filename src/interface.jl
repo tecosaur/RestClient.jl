@@ -282,9 +282,86 @@ Fetch the next page of results after `response`.
 If there are no more pages, or this method is not available for the given
 endpoint, return `nothing`.
 
-The generic `::List` implementation returns `nothing`.
+The generic `List` implementation returns `nothing`.
+
+See the extended help for implementation suggestions.
+
+# Extended help
+
+There are two more methods that can be implemented to support pagination:
+
+    nextpage(request::Request) -> Union{Request, Nothing}
+    nextpage(endpoint::AbstractEndpoint) -> Union{AbstractEndpoint, Nothing}
+
+When implementing this method, a good approach to follow is:
+1. Implement [`thispagenumber`](@ref) and [`remainingpages`](@ref).
+   These are both *optional*, but pass through the information to the
+   `List` display method, which is nice to have.
+2. Consider how the request should be modified to fetch the next page,
+   and accordingly implement `nextpage` for either the endpoint,
+   request, or list.
+3. Create a modified endpoint or request using `RestClient.setfield`
+4. When implementing the `List`-based method, call [`perform`](@ref) with the modified request
+
+For example, [randomuser.me](https://randomuser.me/) has a paginated API, and so you could
+implement support for it with:
+
+```julia
+@globalconfig RequestConfig("https://randomuser.me/api/")
+
+@jsondef struct User
+    gender::String
+    name::@NamedTuple{title::String, first::String, last::String}
+    email::String
+    location::@NamedTuple{country::String, state::String, city::String}
+    # ...and lots more
+end
+
+@jsondef struct UsersResponse <: ListResponse{User}
+    results::Vector{User}
+    info::@NamedTuple{seed::String, page::Int, results::Int, version::String}
+end
+
+@endpoint struct UsersEndpoint
+    users(; page, results, seed) -> "?{page}&{results}&{seed}" -> UsersResponse
+    page::Int = 1
+    results::Union{Int, Nothing} = 5
+    seed::Union{String, Nothing}
+end
+
+# Pagination implementation
+
+RestClient.thispagenumber(users::UsersEndpoint) = users.page
+
+RestClient.nextpage(users::UsersEndpoint) =
+    RestClient.setfield(users, :page, users.page + 1)
+```
+
+This can then be used like so:
+
+```julia-repl
+julia> userlist = users(seed = "abc")
+List{User} holding 5 items, page 1:
+  [...]
+
+julia> nextpage(userlist)
+List{User} holding 5 items, page 2:
+  [...]
+```
 """
-function nextpage(@nospecialize ::List)
+function nextpage(list::List)
+    nextreq = nextpage(list.request)
+    isnothing(nextreq) && return
+    perform(nextreq)
+end
+
+function nextpage(req::Request)
+    nextep = nextpage(req.endpoint)
+    isnothing(nextep) && return
+    setfield(req, :endpoint, nextep)
+end
+
+function nextpage(@nospecialize ::AbstractEndpoint)
     nothing
 end
 
@@ -295,7 +372,15 @@ Return the current page number of `response`, if known.
 
 The generic `::List` implementation returns `nothing`.
 """
-function thispagenumber(@nospecialize ::List)
+function thispagenumber(list::List)
+    thispagenumber(list.request)
+end
+
+function thispagenumber(req::Request)
+    thispagenumber(req.endpoint)
+end
+
+function thispagenumber(@nospecialize ::AbstractEndpoint)
     nothing
 end
 
@@ -306,6 +391,14 @@ Return the number of remaining pages after `response`, if known.
 
 The generic `::List` implementation returns `nothing`.
 """
-function remainingpages(@nospecialize ::List)
+function remainingpages(list::List)
+    remainingpages(list.request)
+end
+
+function remainingpages(req::Request)
+    remainingpages(req.endpoint)
+end
+
+function remainingpages(@nospecialize ::AbstractEndpoint)
     nothing
 end
