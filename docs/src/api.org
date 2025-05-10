@@ -34,7 +34,7 @@ List
 RestClient.globalconfig
 RestClient.validate
 RestClient.perform
-RestClient.pagename
+RestClient.urlpath
 RestClient.headers
 RestClient.parameters
 RestClient.payload

@@ -32,14 +32,14 @@ For a basic API, this can be as simple as:
 
 Using this macro is equivalent to implementing a plain struct, along with these
 endpoint methods:
-- [`pagename`](@ref)
+- [`urlpath`](@ref)
 - [`parameters`](@ref) (if needed)
 - [`payload`](@ref) (optionally)
 - [`responsetype`](@ref)
 
 In our `@endpoint israining() ...` example, in addition to defining the
 `israining` function and an (implicit) `IsrainigEndpoint` struct, the macro will
-generate the implementations `pagename(rain::IsrainingEndpoint) = "checkrain/\$(rain.city)"` and
+generate the implementations `urlpath(rain::IsrainingEndpoint) = "checkrain/\$(rain.city)"` and
 `responsetype(::IsrainingEndpoint) = Bool`.
 
 In addition to applying `@endpoint` to a sequence of arrow forms you can also
@@ -59,7 +59,7 @@ This generates the exact same code as the initial example form.
 For more information on how each component of the shorthand form is interpreted,
 as well as more complex examples, see the extended help section.
 
-See also: [`pagename`](@ref), [`parameters`](@ref), [`payload`](@ref),
+See also: [`urlpath`](@ref), [`parameters`](@ref), [`payload`](@ref),
 [`responsetype`](@ref), [`Request`](@ref), [`globalconfig`](@ref), [`@globalconfig`](@ref).
 
 # Extended help
@@ -220,7 +220,7 @@ struct ShuffleEndpoint <: SingleEndpoint
     remaining::Bool
 end
 
-$(@__MODULE__).pagename(shuf::ShuffleEndpoint) =
+$(@__MODULE__).urlpath(shuf::ShuffleEndpoint) =
     "deck/\$(shuf.deck)/shuffle"
 $(@__MODULE__).parameters(shuf::ShuffleEndpoint) =
     ["remaining" => string(shuf.remaining)]
@@ -247,7 +247,7 @@ macro endpoint(expr::Expr)
     else
         varform(einfo.url; varcontext...), nothing
     end
-    push!(body, defform(:pagename, einfo.structparams, path))
+    push!(body, defform(:urlpath, einfo.structparams, path))
     if !isnothing(params)
         paramvec = Expr(:vect, params...)
         finalparam = :($(Vector{Pair{String, String}})(

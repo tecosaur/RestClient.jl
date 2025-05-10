@@ -99,7 +99,7 @@ end
 function url((; config, endpoint)::Request)
     isnothing(config.baseurl) && throw(ArgumentError("Base URL is not set"))
     params = parameters(config, endpoint)
-    string(config.baseurl, '/', pagename(config, endpoint)::String, url_parameters(params))
+    string(config.baseurl, '/', urlpath(config, endpoint)::String, url_parameters(params))
 end
 
 function addmimes!(headers::AbstractVector{Pair{String, String}}, ::In, ::Out) where {In, Out}

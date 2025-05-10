@@ -13,7 +13,7 @@ semantics.
 # Interface
 
 ```
-pagename([config::RequestConfig], endpoint::AbstractEndpoint) -> String
+urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
 headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 responsetype(endpoint::AbstractEndpoint) -> Union{Type, Nothing}
@@ -21,7 +21,7 @@ validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
 postprocess([response::Downloads.Response], request::Request, data) -> Any
 ```
 
-All of these functions but [`pagename`](@ref) have default implementations.
+All of these functions but [`urlpath`](@ref) have default implementations.
 
 See also: [`Request`](@ref), [`dataformat`](@ref), [`interpretresponse`](@ref).
 """
@@ -157,7 +157,7 @@ Request{:get, MyEndpoint}(RequestConfig(...),MyEndpoint(...))
          │     ╎                               │
          │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
 Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
-         │              ├─▶ pagename ╾───╮     │      ╓┄┄*debug*┄┄╖       │  ╭──────╯
+         │              ├─▶ urlpath ╾────╮     │      ╓┄┄*debug*┄┄╖       │  ╭──────╯
          │              │                ├──▶ url ╾─┬─━─▶ request ┊ ╭─▶ interpret ╾──▶ data
          ├─╴endpoint╶───┼─▶ parameters ╾─╯          │ ┊      ┠────━─┤                   │
          │              │                           ├─━──▶ cache  ┊ │             ╭─────╯

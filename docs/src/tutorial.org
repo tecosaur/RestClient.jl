@@ -123,7 +123,7 @@ In =RestClient=, the bundle of information required to make a request to an
 endpoint is represented with a dedicated struct, subtyping [[@ref][~AbstractEndpoint~]].
 
 The endpoint can then be implemented through the various /endpoint interface
-functions/ ([[@ref][~pagename~]], [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~parameters~]], [[@ref][~responsetype~]],
+functions/ ([[@ref][~urlpath~]], [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~parameters~]], [[@ref][~responsetype~]],
 and [[@ref][~postprocess~]]). We'll start by implementing appropriate methods for the deck
 creation endpoint, then show how this can be simplified using [[@ref][~@endpoint~]]
 shorthand.
@@ -145,7 +145,7 @@ This endpoint is located at either =deck/new= or =desk/new/shuffle= depending on
 whether it should be shuffled.
 
 #+begin_src julia
-RestClient.pagename(new::NewDeckEndpoint) = "deck/new" * ifelse(new.shuffle, "/shuffle", "")
+RestClient.urlpath(new::NewDeckEndpoint) = "deck/new" * ifelse(new.shuffle, "/shuffle", "")
 #+end_src
 
 The deck count is specified using the =deck_count= parameter, and so we should add

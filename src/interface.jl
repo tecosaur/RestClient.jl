@@ -20,7 +20,7 @@ See also: [`@globalconfig`](@ref), [`RequestConfig`](@ref).
 function globalconfig end
 
 """
-    pagename([config::RequestConfig], endpoint::AbstractEndpoint) -> String
+    urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
 
 Return the name of the page for the given `endpoint`.
 
@@ -30,9 +30,9 @@ request.
 !!! note
     Part of the `AbstractEndpoint` interface.
 """
-function pagename end
+function urlpath end
 
-pagename(::RequestConfig, endpoint::AbstractEndpoint) = pagename(endpoint)
+urlpath(::RequestConfig, endpoint::AbstractEndpoint) = urlpath(endpoint)
 
 """
     headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
