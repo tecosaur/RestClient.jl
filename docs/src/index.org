@@ -61,7 +61,7 @@ request:
          │     ╎                               │
          │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
 Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
-         │              ├─▶ pagename ╾───╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
+         │              ├─▶ urlpath ╾────╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
          │              │                ├──▶ url ╾─┬─━─▶ request ╾━┬─▶ interpret ╾──▶ data
          ├─╴endpoint╶───┼─▶ parameters ╾─╯          │               │                   │
          │              │                           │               │             ╭─────╯

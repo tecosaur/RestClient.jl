@@ -8,7 +8,7 @@ using StyledStrings: @styled_str as @S_str
 
 export AbstractEndpoint, SingleEndpoint, ListEndpoint, Request, RequestConfig,
     @endpoint, @globalconfig, globalconfig
-export SingleResponse, ListResponse, Single, List, perform, pagename,
+export SingleResponse, ListResponse, Single, List, perform, urlpath,
     parameters, headers, payload, responsetype, dataformat, mimetype,
     interpretresponse, validate, postprocess, thispagenumber, nextpage,
     remainingpages
@@ -23,7 +23,7 @@ include("utilities.jl")
 include("endpoint.jl")
 
 macro importapi()
-    :(import $(__module__): pagename, parameters, responsetype,
+    :(import $(__module__): urlpath, parameters, responsetype,
       validate, postprocess, thispagenumber, nextpage, remainingpages,
       contents, metadata) |> esc
 end
