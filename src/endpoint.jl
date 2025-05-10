@@ -77,8 +77,10 @@ its fields.
 
 With a `struct` form, all arguments that match a field name will inherit the
 field's type and default value . All the fields of the struct not present in the
-signature will be added as keyword arguments. This makes function forms an easy
-way to prescribe positional, mandatory arguments.
+signature will be added as keyword arguments, with `Union{..., Nothing}` typed
+fields defaulting to `nothing`. This makes function forms an easy way to
+prescribe positional, mandatory arguments with the flexibility to fully specify
+the endpoint with keyword arguments.
 
 ## Struct forms
 
@@ -274,7 +276,8 @@ function generate_funcalls(einfo; mod::Module)
     else
         einfo.func.args[2:end], Expr[]
     end
-    for set in (args, kwargs), (i, arg) in enumerate(set)
+    for set in (args, kwargs), i in eachindex(set)
+        arg = set[i]
         name, type, default = nothing, nothing, nothing
         if Meta.isexpr(arg, :kw, 2)
             arg, default = arg.args
@@ -294,7 +297,10 @@ function generate_funcalls(einfo; mod::Module)
             if isnothing(type)
                 newarg = Expr(:(::), newarg, newtype)
             end
-            if isnothing(default)
+            if isnothing(newdefault) && Meta.isexpr(newtype, :curly) && :Nothing ∈ newtype.args
+                newdefault = :nothing
+            end
+            if !isnothing(newdefault)
                 newarg = Expr(:kw, newarg, newdefault)
             end
             set[i] = newarg
@@ -306,8 +312,9 @@ function generate_funcalls(einfo; mod::Module)
             if !isnothing(field.type)
                 farg = Expr(:(::), farg, field.type)
             end
-            if !isnothing(field.default)
-                farg = Expr(:kw, farg, field.default)
+            default = something(fspecs[field.name].default, field.default, Some(nothing))
+            if !isnothing(default)
+                farg = Expr(:kw, farg, default)
             end
             push!(kwargs, farg)
         end
@@ -503,6 +510,8 @@ function decompose_struct(strux::Expr)
         if Meta.isexpr(line, :(::), 2)
             line, type = line.args
         end
+        line isa Symbol ||
+            throw(ArgumentError("Malformed field $(sprint(show, line)) in @endpoint struct"))
         name::Symbol = line
         push!(fields, (name, type, default))
     end
