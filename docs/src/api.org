@@ -1,5 +1,9 @@
 #+title: API
 
+#+begin_src @meta
+CollapsedDocStrings = true
+#+end_src
+
 * Macros
 
 #+begin_src @docs
