@@ -204,7 +204,7 @@ Base.getindex(single::Single) = single.data
 Holds a list of values of type `T` returned from an API endpoint,
 along with request information and metadata.
 
-See also: [`ListEndpoint`](@ref), [`ListResponse`](@ref).
+See also: [`ListEndpoint`](@ref), [`ListResponse`](@ref), [`nextpage`](@ref).
 """
 struct List{T, E<:ListEndpoint}
     request::Request{<:Any, E}
@@ -267,6 +267,8 @@ function Base.show(io::IO, m::MIME"text/plain", list::List{I, E}) where {I, E}
     {emphasis:$(length(list.items))} item$(ifelse(length(list.items) == 1, \"\", \"s\"))")
     if !isnothing(pageno) && !isnothing(rempages)
         print(io, S", page {emphasis:$(pageno)} of {emphasis:$(pageno+rempages)}")
+    elseif!isnothing(pageno)
+        print(io, S", page {emphasis:$(pageno)}")
     end
     print(io, ':')
     drows = first(displaysize(io)) - 4
