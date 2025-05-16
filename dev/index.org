@@ -49,6 +49,7 @@ See [[@ref][~@endpoint~]] for more information.
 + Response [[@ref RestClient.postprocess][post-processing]]
 + [[@ref Caching-interface][Caching]]
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
++ Rate limiting (by reading the relevant HTTP response headers)
 
 * Request data flow
 
