@@ -267,7 +267,7 @@ function Base.show(io::IO, m::MIME"text/plain", list::List{I, E}) where {I, E}
     {emphasis:$(length(list.items))} item$(ifelse(length(list.items) == 1, \"\", \"s\"))")
     if !isnothing(pageno) && !isnothing(rempages)
         print(io, S", page {emphasis:$(pageno)} of {emphasis:$(pageno+rempages)}")
-    elseif!isnothing(pageno)
+    elseif !isnothing(pageno)
         print(io, S", page {emphasis:$(pageno)}")
     end
     print(io, ':')

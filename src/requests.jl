@@ -131,7 +131,7 @@ end
 function mimeheaders(req::Request, in::Type)
     addmimes!(copy(headers(req)),
               if in !== Nothing dataformat(req.endpoint, in) end,
-              dataformat(req.endpoint, responsetype(req.config, req.endpoint)))
+              dataformat(req.endpoint, responsetype(req.endpoint)))
 end
 
 """
@@ -243,7 +243,7 @@ function debug_response(url::String, res, buf::IOBuffer)
 end
 
 function handle_response(req::Request, res::Downloads.Response, body::IO)
-    dtype = responsetype(req.config, req.endpoint)
+    dtype = responsetype(req.endpoint)
     fmt = dataformat(req.endpoint, dtype)
     data = interpretresponse(body, fmt, dtype)
     close(body)
