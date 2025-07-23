@@ -1,7 +1,7 @@
 name = "RestClient"
 uuid = "e1389577-bcae-4d0f-b368-61b404b8c94c"
 authors = ["TEC <git@tecosaur.net>"]
-version = "1.0.0"
+version = "1.0.1"
 
 [deps]
 BaseDirs = "18cc8868-cbac-4acf-b575-c8ff214dc66f"
