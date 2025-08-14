@@ -139,23 +139,28 @@ end
 
 Call `f(args...; kwargs...)`, handling rate-limit headers appropriately.
 
+The first value returned by `f` must be a `Downloads.Response` object.
+
 If the request is rate-limited, this function will wait until the rate limit
 is reset before retrying the request.
 """
 function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where {F <: Function}
     islocked(reqlock) && @lock reqlock nothing
-    local data
-    try
+    res, rest... = try
         f(args...; kwargs...)
     catch err
         if islocked(reqlock)
             @lock reqlock nothing
             return catch_ratelimit(f, reqlock, args...; kwargs...)
         end
-        @lock reqlock if err isa RequestError && err.response.status ∈ (403, 429)
-            delay = retrydelay(err.response.headers)
-            @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
-            if isa(stdout, Base.TTY)
+        rethrow()
+    end
+    res.status == 200 && return res, rest...
+    @lock reqlock if res.status ∈ (403, 429)
+        delay = retrydelay(res.headers)
+        if delay > 0
+            isinteractive() && @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
+            if isinteractive() && isa(stdout, Base.TTY)
                 print('\n')
                 for wait in 0:delay
                     sleep(1)
@@ -165,10 +170,13 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
             else
                 sleep(delay)
             end
-            return catch_ratelimit(f, reqlock, args...; kwargs...)
+        else
+            sleep(0.1)
         end
-        rethrow()
+        return catch_ratelimit(f, reqlock, args...; kwargs...)
     end
+    res, rest...
+end
 
 """
     retrydelay(headers::Dict{String, String}) -> Int
@@ -333,7 +341,7 @@ function cached_request(req::Request, method::String, payload)
     end
     res, body, wascached = http_cached(
         method, rurl, pldio; headers, timeout=req.config.timeout)
-    if !wascached
+    if !wascached && res.status == 200
         cachesave(req, rurl, headers,
                   if !isnothing(pldio) seekstart(pldio) end,
                   res, body)
@@ -345,6 +353,7 @@ function bare_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
         cached_request, req.config.reqlock, req, method, nothing)
+    res.status == 200 || throw(RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
 
@@ -352,6 +361,7 @@ function payload_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
         cached_request, req.config.reqlock, req, method, payload(req))
+    res.status == 200 || throw(RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
 
