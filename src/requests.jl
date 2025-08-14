@@ -257,7 +257,9 @@ end
 
 const MUNDANE_HEADERS = (
     "server", "date", "transfer-encoding", "connection", "keep-alive", "vary",
-    "access-control-allow-origin", "strict-transport-security")
+    "access-control-allow-origin", "referrer-policy", "strict-transport-security", "alt-svc",
+    # CDN headers
+    "report-to", "reporting-endpoints", "nel", "via", "cf-cache-status", "cf-ray")
 
 function debug_response(url::String, res, buf::IOBuffer)
     face, status, headers, msg = if res isa Downloads.RequestError
@@ -271,13 +273,19 @@ function debug_response(url::String, res, buf::IOBuffer)
         statuscolor = ifelse(200 <= res.status <= 299, :success, :warning)
         statuscolor, res.status, res.headers, S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
     end
+    nhiddenheaders = sum(h -> lowercase(first(h)) ∈ MUNDANE_HEADERS, headers)
     headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, headers)
     strheaders = if isempty(headers)
         S""
     else
         join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
     end
-    S"{inverse,bold,$face: $status } $msg {light,underline:$url}$strheaders"
+    strhiddenheaders = if iszero(nhiddenheaders)
+        S""
+    else
+        S"\n       {emphasis:⋮} {italic,light:$nhiddenheaders hidden (mundane)}"
+    end
+    S"{inverse,bold,$face: $status } $msg {light,underline:$url}$strheaders$strhiddenheaders"
 end
 
 function handle_response(req::Request, res::Downloads.Response, body::IO)
