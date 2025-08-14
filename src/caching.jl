@@ -296,9 +296,7 @@ function cachesave(req::Request, url::String, headers, payload, res::Response, b
     cdir = cachedir()
     isdir(cdir) || mkpath(cdir)
     cfile = joinpath(cdir, cachekey(url, headers, payload) * ".http")
-    open(cfile, "w") do io
-        dumpresponse(io, res, body)
-    end
+    open(io -> dumpresponse(io, res, body), cfile, "w")
     setexpiry(cfile, etime)
     chmod(cfile, 0o100444 & filemode(cfile)) # Make read-only
     nothing

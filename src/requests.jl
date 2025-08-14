@@ -225,11 +225,7 @@ function debug_response(url::String, res, buf::IOBuffer)
         @static if isdefined(Base.Filesystem, :temp_cleanup_later)
             isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
         end
-        open(dumpfile, "w") do io
-            mark(buf)
-            dumpresponse(io, res, buf)
-            reset(buf)
-        end
+        open(io -> dumpresponse(io, res, buf), dumpfile, "w")
         statuscolor = ifelse(200 <= res.status <= 299, :success, :warning)
         statuscolor, res.status, res.headers, S"$(Base.format_bytes(position(buf))) (saved to {bright_magenta:$dumpfile}) from"
     end
