@@ -164,7 +164,7 @@ function expirytime(headers::Vector{Pair{String, String}})
         end
     end
     if !isempty(expiry)
-        dtime = tryparse(HTTP_DATE_FORMAT, expiry)
+        dtime = tryparse(DateTime, expiry, HTTP_DATE_FORMAT)
         !isnothing(dtime) && return trunc(Int, datetime2unix(dtime))
     end
     0
