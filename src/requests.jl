@@ -225,9 +225,9 @@ function debug_response(url::String, res, buf::IOBuffer)
         @static if isdefined(Base.Filesystem, :temp_cleanup_later)
             isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
         end
-        open(io -> dumpresponse(io, res, buf), dumpfile, "w")
+        nb = open(io -> dumpresponse(io, res, buf), dumpfile, "w")
         statuscolor = ifelse(200 <= res.status <= 299, :success, :warning)
-        statuscolor, res.status, res.headers, S"$(Base.format_bytes(position(buf))) (saved to {bright_magenta:$dumpfile}) from"
+        statuscolor, res.status, res.headers, S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
     end
     headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, headers)
     strheaders = if isempty(headers)

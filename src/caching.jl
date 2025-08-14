@@ -16,10 +16,12 @@ const CACHE_STALE_DURATION = 2 * 24 * 60 * 60
 # Request caching and reading
 
 """
-    dumpresponse(io::IO,, res::Response, body::IO)
+    dumpresponse(io::IO,, res::Response, body::IO) -> Int
 
 Dump a response to an IO stream, including the response (`res`) URL, headers,
 and message `body`.
+
+Returns the number of bytes written to the IO stream.
 
 The `body` is restored to its original position after writing.
 """
@@ -32,8 +34,8 @@ function dumpresponse(io::IO, res::Downloads.Response, body::IO)
     println(io)
     mark(body)
     write(io, body)
-    reset(body)
-    nothing
+    bend = position(body)
+    bend - reset(body)
 end
 
 """
