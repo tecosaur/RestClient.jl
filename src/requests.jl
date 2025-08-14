@@ -153,18 +153,7 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
             return catch_ratelimit(f, reqlock, args...; kwargs...)
         end
         @lock reqlock if err isa RequestError && err.response.status ∈ (403, 429)
-            headers = Dict(err.response.headers)
-            delay = @something(
-                tryparse(Int, get(headers, "retry-after", "")::String),
-                let ratelimit = tryparse(Int, get(headers, "x-ratelimit-remaining", "-1"))
-                    if ratelimit === 0
-                        reset = tryparse(Int, get(headers, "x-ratelimit-reset", "-1"))
-                        if !isnothing(reset)
-                            ceil(Int, resettime - time())
-                        end
-                    end
-                end,
-                rethrow())
+            delay = retrydelay(err.response.headers)
             @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
             if isa(stdout, Base.TTY)
                 print('\n')
@@ -180,6 +169,51 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
         end
         rethrow()
     end
+
+"""
+    retrydelay(headers::Dict{String, String}) -> Int
+
+Examine `headers` to find how many seconds should be waited before retrying a request.
+
+Checks (in order):
+- `Retry-After`: whech may be a timestamp or seconds delta
+- `X-RateLimit-Remaining`: if not zero, no delay is needed
+- `X-RateLimit-Reset`: which may be a timestamp, seconds delta, or unix time
+"""
+function retrydelay(headers::Vector{Pair{String, String}})
+    function listsearch(hs::Vector{Pair{String, String}}, key::String, default::String = "")
+        for (hkey, val) in hs
+            key == hkey && return val
+        end
+        default
+    end
+    retryafter = listsearch(headers, "retry-after", "")
+    if isempty(retryafter)
+    elseif all(isdigit, retryafter)
+        delay = tryparse(Int, retryafter)
+        isnothing(delay) || return delay
+    else
+        resettime = tryparse(DateTime, retryafter, HTTP_DATE_FORMAT)
+        isnothing(resettime) ||
+            return max(0, ceil(Int, datetime2unix(resettime) - time()))
+    end
+    ratelimit = tryparse(Int, listsearch(headers, "x-ratelimit-remaining", "-1"))
+    ratelimit === 0 || return 0
+    xreset = listsearch(headers, "x-ratelimit-reset", "")
+    if isempty(xreset)
+    elseif all(isdigit, xreset)
+        resetsec = tryparse(Int, xreset)
+        if isnothing(resetsec)
+        elseif resetsec < 365 * 24 * 60 * 60 # Infer <1y as a delta
+            return resetsec
+        else # Infer >=1y as an absolute time
+            return max(0, resetsec - floor(Int, time()))
+        end
+    else
+        resettime = tryparse(DateTime, xreset, HTTP_DATE_FORMAT)
+        isnothing(resettime) || return max(0, ceil(Int, datetime2unix(resettime) - time()))
+    end
+    0
 end
 
 
