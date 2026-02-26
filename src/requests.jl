@@ -42,6 +42,7 @@ Hello%2C%20world%21
 ```
 """
 function encode_uri_component(io::IO, s::AbstractString)
+    nib2hex(n::UInt8) = n + 0x30 + (((n + 0x6) >> 4) * 0x7)
     # RFC3986 Section 2.1
     # RFC3986 Section 2.3
     issafe(b::UInt8) =
@@ -53,7 +54,7 @@ function encode_uri_component(io::IO, s::AbstractString)
         if issafe(b)
             write(io, b)
         else
-            print(io, '%', uppercase(string(b, base=16)))
+            write(io, UInt8('%'), nib2hex(b >> 4), nib2hex(b & 0xf))
         end
     end
 end
