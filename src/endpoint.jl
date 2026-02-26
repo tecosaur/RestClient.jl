@@ -405,6 +405,7 @@ function extract_forms(expr::Expr; mod::Module)
             push!(efields, (name, type, default))
         end
     end
+    isnothing(efields) && throw(ArgumentError("Unable to extract fields from @endpoint function"))
     # 4: Check for `struct`
     if isnothing(estruct) && !isempty(components) && Meta.isexpr(first(components), :struct)
         sinfo = decompose_struct(popfirst!(components))

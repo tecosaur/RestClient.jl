@@ -261,7 +261,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
             end
         end
         if length(mheaders) == length(headers)
-            mtime = Dates.format(HTTP_DATE_FORMAT, ctime(cfile))
+            mtime = Dates.format(unix2datetime(ctime(cfile)), HTTP_DATE_FORMAT)
             push!(mheaders, "if-modified-since" => mtime)
         end
         eres, buf = http_request(method, url, payload; headers=mheaders, timeout)

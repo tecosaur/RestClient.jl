@@ -149,7 +149,7 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
     islocked(reqlock) && @lock reqlock nothing
     res, rest... = try
         f(args...; kwargs...)
-    catch err
+    catch
         if islocked(reqlock)
             @lock reqlock nothing
             return catch_ratelimit(f, reqlock, args...; kwargs...)
@@ -321,7 +321,7 @@ function http_request(method::String, url::String, payload::Union{<:IO, <:Abstra
     elseif payload isa AbstractString
         IOBuffer(payload)
     end
-    @debug debug_request(method, url, headers, payload) _file=nothing
+    @debug debug_request(method, url, headers, input) _file=nothing
     res = Downloads.request(url; method, output=buf, input, headers, timeout)
     seekstart(buf)
     @debug debug_response(url, res, buf) _file=nothing
@@ -388,9 +388,9 @@ perform(req::Request{:delete}) = payload_request(req, "DELETE")
 function perform(req::Request{:head})
     function head_request(url::String; headers, timeout)
         @debug debug_request("HEAD", url, headers) _file=nothing
-        res = Downloads.request(url; method, headers, timeout)
-        @debug debug_response(url, res, IOBuffer()) _file=nothing
-        res
+        reqres = Downloads.request(url; method = "HEAD", headers, timeout)
+        @debug debug_response(url, reqres, IOBuffer()) _file=nothing
+        reqres
     end
     res = catch_ratelimit(
         head_request, req.config.reqlock, url(req);
