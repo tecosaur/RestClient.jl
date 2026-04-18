@@ -206,7 +206,7 @@ function retrydelay(headers::Vector{Pair{String, String}})
         isnothing(resettime) ||
             return max(0, ceil(Int, datetime2unix(resettime) - time()))
     end
-    ratelimit = tryparse(Int, listsearch(headers, "x-ratelimit-remaining", "-1"))
+    ratelimit = tryparse(Int, listsearch(headers, "x-ratelimit-remaining", "0"))
     ratelimit === 0 || return 0
     xreset = listsearch(headers, "x-ratelimit-reset", "")
     if isempty(xreset)
