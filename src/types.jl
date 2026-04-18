@@ -10,6 +10,9 @@ Usually you will want to subtype either `SingleEndpoint` or `ListEndpoint`,
 which share the same interface as `AbstractEndpoint` but have additional
 semantics.
 
+Cross-cutting concerns (auth, logging, shared validation) are best expressed
+by defining an API-specific abstract subtype and attaching generic methods to it.
+
 # Interface
 
 ```
