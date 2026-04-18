@@ -156,7 +156,7 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
         end
         rethrow()
     end
-    res.status == 200 && return res, rest...
+    res.status ∈ 200:299 && return res, rest...
     @lock reqlock if res.status ∈ (403, 429)
         delay = retrydelay(res.headers)
         if delay > 0
@@ -271,7 +271,7 @@ function debug_response(url::String, res, buf::IOBuffer)
             isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
         end
         nb = open(io -> dumpresponse(io, res, buf), dumpfile, "w")
-        statuscolor = ifelse(200 <= res.status <= 299, :success, :warning)
+        statuscolor = ifelse(res.status ∈ 200:299, :success, :warning)
         statuscolor, res.status, res.headers, S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
     end
     nhiddenheaders = sum(h -> lowercase(first(h)) ∈ MUNDANE_HEADERS, headers)
@@ -350,7 +350,7 @@ function cached_request(req::Request, method::String, payload)
     end
     res, body, wascached = http_cached(
         method, rurl, pldio; headers, timeout=req.config.timeout)
-    if !wascached && res.status == 200
+    if !wascached && res.status ∈ 200:299
         cachesave(req, rurl, headers,
                   if !isnothing(pldio) seekstart(pldio) end,
                   res, body)
@@ -362,7 +362,7 @@ function bare_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
         cached_request, req.config.reqlock, req, method, nothing)
-    res.status == 200 || throw(RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
 
@@ -370,7 +370,7 @@ function payload_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
         cached_request, req.config.reqlock, req, method, payload(req))
-    res.status == 200 || throw(RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
 
@@ -396,6 +396,5 @@ function perform(req::Request{:head})
         head_request, req.config.reqlock, url(req);
         headers=headers(req),
         timeout=req.config.timeout)
-    success = 200 <= res.status <= 299
-    postprocess(res, req, success)
+    postprocess(res, req, res.status ∈ 200:299)
 end
