@@ -132,13 +132,9 @@ Determine the expiry time of a response based on the headers.
 
 The time is returned as a Unix timestamp, or `0` if the response should not be cached.
 
-If set, the `Cache-Control` header is used to determine the expiry time.
-The directives `no-cache`, `no-store`, and `private` prevent caching, while
-`must-revalidate` forces revalidation, and `max-age` and `s-maxage` set the
-expiry time.
-
-If `Cache-Control` is not set, the `Expires` header is used to determine the
-expiry time.
+Follows RFC 9111 §4.2.1: `Cache-Control: max-age`/`s-maxage` takes priority,
+falling back to `Expires`. The directives `no-cache`, `no-store`, and `private`
+prevent caching.
 
 Should the headers not contain any information about expiry, `0` is returned.
 """
@@ -152,16 +148,16 @@ function expirytime(headers::Vector{Pair{String, String}})
             expiry = v
         end
     end
-    isempty(cachecontrol) && return 0
-    directives = map(strip, split(cachecontrol, ','))
-    any(d -> d ∈ ("no-cache", "no-store", "private"), directives) && return 0
-    "must-revalidate" ∈ directives && return trunc(Int, time())
-    for directive in directives
-        if '=' in directive
-            components = split(directive, '=', limit=2)
-            if length(components) == 2 && first(components) ∈ ("max-age", "s-maxage")
-                age = tryparse(UInt, strip(last(components)))
-                !isnothing(age) && return trunc(Int, time()) + age
+    if !isempty(cachecontrol)
+        directives = map(strip, split(cachecontrol, ','))
+        any(d -> d ∈ ("no-cache", "no-store", "private"), directives) && return 0
+        for directive in directives
+            if '=' in directive
+                components = split(directive, '=', limit=2)
+                if length(components) == 2 && first(components) ∈ ("max-age", "s-maxage")
+                    age = tryparse(UInt, strip(last(components)))
+                    !isnothing(age) && return trunc(Int, time()) + age
+                end
             end
         end
     end
@@ -251,6 +247,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
         end
         mheaders = copy(headers)
         @debug S"{inverse,magenta,bold: CACHE } checking validity of stale entry"
+        # Conditional revalidation via ETag/Last-Modified (RFC 9110 §13.1.2, §13.1.3).
         for (k, v) in res.headers
             if k == "etag"
                 push!(mheaders, "if-none-match" => v)
@@ -265,7 +262,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
             push!(mheaders, "if-modified-since" => mtime)
         end
         eres, buf = http_request(method, url, payload; headers=mheaders, timeout)
-        if eres.status == 304
+        if eres.status == 304 # RFC 9110 §15.4.5: Not Modified — cached response still valid
             close(buf)
             @debug S"{inverse,magenta,bold: CACHE } stale entry is valid"
             fperm = filemode(cfile)
