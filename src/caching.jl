@@ -73,8 +73,8 @@ end
 
 cachedir() = BaseDirs.User.cache(BaseDirs.Project("RestClient"))
 
-function cachekey(url::String, headers::Union{<:AbstractVector, <:AbstractDict}, payload::Union{<:IO, Nothing})
-    h = hash(url)
+function cachekey(url::String, method::String, headers::Union{<:AbstractVector, <:AbstractDict}, payload::Union{<:IO, Nothing})
+    h = hash(method, hash(url))
     for (k, v) in headers
         h = hash(v, hash(k, h))
     end
@@ -134,7 +134,7 @@ The time is returned as a Unix timestamp, or `0` if the response should not be c
 
 Follows RFC 9111 §4.2.1: `Cache-Control: max-age`/`s-maxage` takes priority,
 falling back to `Expires`. The directives `no-cache`, `no-store`, and `private`
-prevent caching.
+prevent caching, as does `Vary: *` (RFC 9111 §4.1).
 
 Should the headers not contain any information about expiry, `0` is returned.
 """
@@ -146,6 +146,8 @@ function expirytime(headers::Vector{Pair{String, String}})
             cachecontrol = lowercase(v)
         elseif k == "expires"
             expiry = v
+        elseif k == "vary" && strip(v) == "*"
+            return 0
         end
     end
     if !isempty(cachecontrol)
@@ -223,7 +225,7 @@ Perform an HTTP request, using a cached response if available.
 function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} = nothing;
                      headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
                      timeout::Float64 = Inf)
-    ckey = cachekey(url, headers, payload)
+    ckey = cachekey(url, method, headers, payload)
     cfile = joinpath(cachedir(), ckey * ".http")
     isfile(cfile) || @goto freshreq
     etime = expirytime(cfile)
@@ -282,7 +284,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
     res, buf, false
 end
 
-function cachesave(req::Request, url::String, headers, payload, res::Downloads.Response, body::IO)
+function cachesave(req::Request, url::String, method::String, headers, payload, res::Downloads.Response, body::IO)
     cachetime = cachelifetime(req, res)
     etime = if isnothing(cachetime)
         expirytime(res.headers)
@@ -294,7 +296,7 @@ function cachesave(req::Request, url::String, headers, payload, res::Downloads.R
     iszero(etime) && return
     cdir = cachedir()
     isdir(cdir) || mkpath(cdir)
-    cfile = joinpath(cdir, cachekey(url, headers, payload) * ".http")
+    cfile = joinpath(cdir, cachekey(url, method, headers, payload) * ".http")
     open(io -> dumpresponse(io, res, body), cfile, "w")
     setexpiry(cfile, etime)
     chmod(cfile, 0o100444 & filemode(cfile)) # Make read-only

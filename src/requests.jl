@@ -349,7 +349,7 @@ function cached_request(req::Request, method::String, payload)
     res, body, wascached = http_cached(
         method, rurl, pldio; headers, timeout=req.config.timeout)
     if !wascached && res.status ∈ 200:299
-        cachesave(req, rurl, headers,
+        cachesave(req, rurl, method, headers,
                   if !isnothing(pldio) seekstart(pldio) end,
                   res, body)
     end
