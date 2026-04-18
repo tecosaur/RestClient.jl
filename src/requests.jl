@@ -98,7 +98,6 @@ function url_parameters(params::Vector{Pair{String, String}})
 end
 
 function url((; config, endpoint)::Request)
-    isnothing(config.baseurl) && throw(ArgumentError("Base URL is not set"))
     params = parameters(config, endpoint)
     string(config.baseurl, '/', urlpath(config, endpoint)::String, url_parameters(params))
 end
