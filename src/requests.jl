@@ -345,9 +345,8 @@ function cached_request(req::Request, method::String, payload)
         typeof(payload), format_payload(req.endpoint, payload)
     end
     rurl, headers = url(req), mimeheaders(req, pldtype)
-    if !req.config.cache
+    req.config.cache && method ∈ ("GET", "HEAD") || # RFC 9111 §3: only GET/HEAD are cacheable
         return http_request(method, rurl, pldio; headers, timeout=req.config.timeout)
-    end
     res, body, wascached = http_cached(
         method, rurl, pldio; headers, timeout=req.config.timeout)
     if !wascached && res.status ∈ 200:299
