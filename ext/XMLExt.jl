@@ -52,7 +52,7 @@ extract_attr(::Nothing, ::String) = nothing
 function extract_text(node::AbstractNode)
     textnode = nothing
     for child in children(node)
-        if tag(child) == nothing
+        if isnothing(tag(child))
             textnode = child
             break
         end
@@ -123,7 +123,7 @@ macro xpath(spec::String)
             terminated = true
         elseif component == "*"
             body = :(children($body))
-        elseif '[' in component &&endswith(component, ']')
+        elseif '[' in component && endswith(component, ']')
             path, idx = split(component[1:prevind(component, end)], '[', limit=2)
             if idx == "last()"
                 body = :(let childs = extract_children($body, $(String(path)))

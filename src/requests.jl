@@ -180,12 +180,12 @@ function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where
 end
 
 """
-    retrydelay(headers::Dict{String, String}) -> Int
+    retrydelay(headers::Vector{Pair{String, String}}) -> Int
 
 Examine `headers` to find how many seconds should be waited before retrying a request.
 
 Checks (in order):
-- `Retry-After`: whech may be a timestamp or seconds delta
+- `Retry-After`: which may be a timestamp or seconds delta
 - `X-RateLimit-Remaining`: if not zero, no delay is needed
 - `X-RateLimit-Reset`: which may be a timestamp, seconds delta, or unix time
 """

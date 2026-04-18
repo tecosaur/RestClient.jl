@@ -214,7 +214,7 @@ end
 function contents end
 
 """
-    content(response::SingleResponse{T}) -> T
+    contents(response::SingleResponse{T}) -> T
 
 Return the content of the response.
 """
@@ -227,19 +227,19 @@ function contents(r::R) where {T, R<:SingleResponse{T}}
             if isnothing(cfield)
                 cfield = f
             else
-                throw(ArgumentError("Multiple fields of type $T found in $T, contents(::$(typeof(r))) must be explicitly defined"))
+                throw(ArgumentError("Multiple fields of type $T found in $R, contents(::$(typeof(r))) must be explicitly defined"))
             end
         end
     end
     if isnothing(cfield)
-        throw(ArgumentError("No field of type $T found in $T, contents(::$(typeof(r))) must be explicitly defined"))
+        throw(ArgumentError("No field of type $T found in $R, contents(::$(typeof(r))) must be explicitly defined"))
     else
         getfield(r, cfield)
     end
 end
 
 """
-    content(response::ListResponse{T}) -> Vector{T}
+    contents(response::ListResponse{T}) -> Vector{T}
 
 Return the items of the response.
 """
