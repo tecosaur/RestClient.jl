@@ -16,7 +16,7 @@ const CACHE_STALE_DURATION = 2 * 24 * 60 * 60
 # Request caching and reading
 
 """
-    dumpresponse(io::IO,, res::Response, body::IO) -> Int
+    dumpresponse(io::IO, res::Downloads.Response, body::IO) -> Int
 
 Dump a response to an IO stream, including the response (`res`) URL, headers,
 and message `body`.
@@ -39,9 +39,9 @@ function dumpresponse(io::IO, res::Downloads.Response, body::IO)
 end
 
 """
-    tryreadresponse(io::IO) -> Response
+    tryreadresponse(io::IO) -> Downloads.Response
 
-Read a `Response` from an IO stream including the url, status, and headers.
+Read a `Downloads.Response` from an IO stream including the url, status, and headers.
 
 The message body is not read, and the IO stream is left positioned at the
 beginning of the message body.
@@ -99,7 +99,7 @@ function cachekey(url::String, headers::Union{<:AbstractVector, <:AbstractDict},
 end
 
 """
-    cachelifetime(req::Request, res::Response) -> Union{DateTime, Integer, Nothing}
+    cachelifetime(req::Request, res::Downloads.Response) -> Union{DateTime, Integer, Nothing}
 
 Determine the expiry time of a cached response, based on the request and response.
 
@@ -108,22 +108,22 @@ Determine the expiry time of a cached response, based on the request and respons
 To specialise this function for a specific endpoint, define one of the following methods:
 
 ```
-cachelifetime(req::Request{kind, <:AbstractEndpoint}, res::Response)
-cachelifetime([conf::RequestConfig], endpoint::AbstractEndpoint, res::Response)
+cachelifetime(req::Request{kind, <:AbstractEndpoint}, res::Downloads.Response)
+cachelifetime([conf::RequestConfig], endpoint::AbstractEndpoint, res::Downloads.Response)
 ```
 """
 function cachelifetime end
 
-cachelifetime(req::Request, res::Response) =
+cachelifetime(req::Request, res::Downloads.Response) =
     cachelifetime(req.config, req.endpoint, res)
 
-cachelifetime(@nospecialize(::RequestConfig), endpoint::AbstractEndpoint, res::Response) =
+cachelifetime(@nospecialize(::RequestConfig), endpoint::AbstractEndpoint, res::Downloads.Response) =
     cachelifetime(endpoint, res)
 
-cachelifetime(@nospecialize(::AbstractEndpoint), res::Response) =
+cachelifetime(@nospecialize(::AbstractEndpoint), res::Downloads.Response) =
     cachelifetime(res)
 
-cachelifetime(@nospecialize ::Response) = nothing
+cachelifetime(@nospecialize(_::Downloads.Response)) = nothing
 
 """
     expirytime(headers::Vector{Pair{String, String}}) -> Integer
@@ -220,7 +220,7 @@ end
 """
     http_cached(method::String, url::String, payload::Union{<:IO, Nothing};
                 headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                timeout::Float64 = Inf) -> Tuple{Response, IO, Bool}
+                timeout::Float64 = Inf) -> Tuple{Downloads.Response, IO, Bool}
 
 Perform an HTTP request, using a cached response if available.
 """
@@ -285,7 +285,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
     res, buf, false
 end
 
-function cachesave(req::Request, url::String, headers, payload, res::Response, body::IO)
+function cachesave(req::Request, url::String, headers, payload, res::Downloads.Response, body::IO)
     cachetime = cachelifetime(req, res)
     etime = if isnothing(cachetime)
         expirytime(res.headers)

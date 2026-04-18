@@ -362,7 +362,7 @@ function bare_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
         cached_request, req.config.reqlock, req, method, nothing)
-    res.status ∈ 200:299 || throw(RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(Downloads.RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
 
@@ -370,7 +370,7 @@ function payload_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
         cached_request, req.config.reqlock, req, method, payload(req))
-    res.status ∈ 200:299 || throw(RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(Downloads.RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
 
