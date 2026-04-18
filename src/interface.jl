@@ -106,6 +106,7 @@ This is used for POST requests, and is sent as the body of the request.
 """
 function payload end
 
+payload(@nospecialize ::AbstractEndpoint) = nothing
 payload(::RequestConfig, endpoint::AbstractEndpoint) = payload(endpoint)
 payload((; config, endpoint)::Request) = payload(config, endpoint)
 
