@@ -322,7 +322,7 @@ function cleancache()
     cachefiles = readdir(cdir, join=true)
     isempty(cachefiles) && return
     for i in eachindex(cachefiles)
-        j = rand(axes(cachefiles, 1))
+        j = rand(i:length(cachefiles))
         cachefiles[i], cachefiles[j] = cachefiles[j], cachefiles[i]
     end
     bsize = clamp(length(cachefiles) ÷ 6, 1, CLEANUP_BLOCK_MAX_SIZE)
