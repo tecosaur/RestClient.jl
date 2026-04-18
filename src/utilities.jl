@@ -8,8 +8,7 @@ function setfield(x::T, field::Symbol, value) where {T}
     fvals = ((getfield(x, f) for f in fieldnames(T))...,)
     fidx = findfirst(==(field), fieldnames(T))
     isnothing(fidx) && throw(ArgumentError("Field $field not found in $T"))
-    value isa fieldtype(T, field) || throw(ArgumentError("Field $field must be of type $(fieldtype(T, field)), got $(typeof(value))"))
-    fvals = Base.setindex(fvals, value, fidx)
+    fvals = Base.setindex(fvals, convert(fieldtype(T, field), value), fidx)
     T(fvals...)
 end
 
