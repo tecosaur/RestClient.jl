@@ -12,8 +12,16 @@ const AbstractNode = XML.AbstractXMLNode
 function parsexml end
 
 function RestClient.interpretresponse(data::IO, ::RestClient.XMLFormat, ::Type{T}) where {T}
-    xml = read(data, LazyNode)
-    parsexml(T, xml)
+    root = read(data, LazyNode)
+    # `read` returns a document wrapper with a nil tag — descend to its root element.
+    if isnothing(tag(root))
+        for child in children(root)
+            isnothing(tag(child)) && continue
+            root = child
+            break
+        end
+    end
+    parsexml(T, root)
 end
 
 function writexml end
@@ -44,7 +52,8 @@ struct XMLMultipleChildren{N <: AbstractNode} <: XMLParseException
 end
 
 function extract_attr(node::AbstractNode, attr::String)
-    get(attributes(node), attr, nothing)
+    attrs = attributes(node)
+    if !isnothing(attrs) get(attrs, attr, nothing) end
 end
 
 extract_attr(::Nothing, ::String) = nothing
@@ -110,7 +119,9 @@ Supported components:
 macro xpath(spec::String)
     body = :node
     terminated = false
-    for component in eachsplit(spec, '/')
+    components = collect(eachsplit(spec, '/'))
+    for (i, component) in enumerate(components)
+        is_last = i == length(components)
         if terminated
             throw(ArgumentError("Unreachable component in XPath: $component"))
         elseif isempty(component)
@@ -135,19 +146,40 @@ macro xpath(spec::String)
                 body = :(get(extract_children($body, $(String(path))), $intidx, nothing))
             end
         else
-            body = :(extract_children($body, $(String(component))))
+            # Terminal segment returns the matching child vector (so unwrapped
+            # arrays work); intermediate segments return a single child for
+            # `text()` / `@attr` to consume.
+            body = if is_last
+                :(extract_children($body, $(String(component))))
+            else
+                :(extract_child($body, $(String(component))))
+            end
         end
     end
     Expr(:->, :node, body)
 end
 
-parsexml(::Type{Union{T, Nothing}}, ::Nothing) where {T} = nothing
+parsexml(::Type{Any}, value) = value
 parsexml(::Type{String}, content::String) = XML.unescape(content)
 parsexml(::Type{Symbol}, content::String) = Symbol(parsexml(String, content))
 parsexml(::Type{T}, content::String) where {T} = parse(T, parsexml(String, content))
-parsexml(::Type{Union{T, Nothing}}, content::String) where {T} = parsexml(T, content)
-parsexml(::Type{Any}, value) = value
 parsexml(::Type{Vector{T}}, nodes::Vector{<:AbstractNode}) where {T} = [parsexml(T, n) for n in nodes]
+parsexml(::Type{T}, node::AbstractNode) where {T <: Union{AbstractString, Number, Bool}} =
+    parsexml(T, something(extract_text(node), ""))
+parsexml(::Type{Vector{T}}, ::Nothing) where {T} = T[]
+parsexml(::Type{T}, ::Nothing) where {T} =
+    throw(ArgumentError("Required XML field of type `$T` is missing or empty"))
+
+parsexml(::Type{Union{T, Nothing}}, ::Nothing) where {T} = nothing
+function parsexml(::Type{Union{T, Nothing}}, x) where {T}
+    if x isa Vector{<:AbstractNode}
+        # Empty vector ≡ no match. Otherwise, unwrap to the first element
+        # unless the field genuinely wants a vector.
+        isempty(x) && return nothing
+        T <: Vector || (x = first(x))
+    end
+    parsexml(T, x)
+end
 
 # Construction
 
