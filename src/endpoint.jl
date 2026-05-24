@@ -257,7 +257,16 @@ macro endpoint(expr::Expr)
                 $paramvec))))
         push!(body, defform(:parameters, einfo.structparams, finalparam))
     end
-    push!(body, defform(:responsetype, einfo.structparams, einfo.out))
+    # `responsetype` takes a single endpoint argument (no `config`), so it
+    # needs its own emission path, not the two-arg `defform`.
+    rt_def = if isnothing(einfo.structparams)
+        self = :($ANAPHORIC_VAR::$(einfo.structname))
+        :($(@__MODULE__).responsetype($self) = $(einfo.out))
+    else
+        self = :($ANAPHORIC_VAR::$(einfo.structname){$(einfo.structparams...)})
+        :($(@__MODULE__).responsetype($self) where {$(einfo.structparams...)} = $(einfo.out))
+    end
+    push!(body, rt_def)
     # Function (optional)
     if !isnothing(einfo.func)
         for fn in generate_funcalls(einfo; mod=__module__)

@@ -76,11 +76,15 @@ Singleton type for raw response formats.
 struct RawFormat <: AbstractFormat end
 
 """
-    JSONFormat <: AbstractFormat
+    JSONFormat{backend} <: AbstractFormat
 
-Singleton type for JSON request/response formats.
+Singleton type for JSON request/response formats. The `backend` parameter
+selects the JSON implementation: `:json` for JSON.jl, `:json3` for JSON3.jl.
+
+The zero-argument constructor `JSONFormat()` picks an available backend
+at the time of construction.
 """
-struct JSONFormat <: AbstractFormat end
+struct JSONFormat{backend} <: AbstractFormat end
 
 """
     XMLFormat <: AbstractFormat

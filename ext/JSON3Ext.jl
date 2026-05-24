@@ -4,21 +4,16 @@
 module JSON3Ext
 
 using RestClient
-import RestClient: @jsondef
 using JSON3, StructTypes
 
-function RestClient.interpretresponse(data::IO, ::RestClient.JSONFormat, ::Type{T}) where {T}
+RestClient.interpretresponse(data::IO, ::RestClient.JSONFormat{:json3}, ::Type{T}) where {T} =
     JSON3.read(data, T)
-end
 
-RestClient.mimetype(::Type{RestClient.JSONFormat}) = "application/json"
-
-function RestClient.writepayload(dest::IO, ::RestClient.JSONFormat, data)
+RestClient.writepayload(dest::IO, ::RestClient.JSONFormat{:json3}, data) =
     JSON3.write(dest, data)
-end
 
-macro jsondef(opt::QuoteNode, kindname::Symbol, struc::Expr)
-    option = opt.value
+function RestClient._jsondef_expand(::Val{:json3}, source::LineNumberNode,
+                                    option::Symbol, kind::Symbol, struc::Expr)
     Meta.isexpr(struc, :struct, 3) ||
         throw(ArgumentError("@jsondef expects a struct definition"))
     Meta.isexpr(struc.args[3], :block) ||
@@ -33,9 +28,9 @@ macro jsondef(opt::QuoteNode, kindname::Symbol, struc::Expr)
         Bool = :BoolType,
         Nothing = :NullType
     )
-    kindname ∈ propertynames(kindmap) ||
+    kind ∈ propertynames(kindmap) ||
         throw(ArgumentError("@jsondef expects a valid kind, one of: $(join(propertynames(kindmap), ", "))"))
-    structkind = getproperty(kindmap, kindname)
+    structkind = getproperty(kindmap, kind)
     fields = @NamedTuple{
         name::Symbol,
         json::Union{String, Nothing},
@@ -53,7 +48,7 @@ macro jsondef(opt::QuoteNode, kindname::Symbol, struc::Expr)
     else
         structlabel::Symbol, false
     end
-    lastline = __source__
+    lastline = source
     for line in structdef.args
         if line isa LineNumberNode
             lastline = line
@@ -97,7 +92,7 @@ macro jsondef(opt::QuoteNode, kindname::Symbol, struc::Expr)
               end)
     end
     structredef = Expr(:struct, false, structdecl, Expr(:block, structbody...))
-    push!(body, esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, structredef)))
+    push!(body, esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), source, structredef)))
     # Show with kwargs
     if option != :noshow
         fieldvaldefaults = map(fields) do (; name, default)
@@ -130,34 +125,22 @@ macro jsondef(opt::QuoteNode, kindname::Symbol, struc::Expr)
     else
         esc(structname)
     end
-    push!(body, :(StructTypes.StructType(::Type{$structref}) = StructTypes.$structkind()))
+    stt = GlobalRef(StructTypes, :StructType)
+    stn = GlobalRef(StructTypes, :names)
+    stkind = GlobalRef(StructTypes, structkind)
+    push!(body, :($stt(::Type{$structref}) = $stkind()))
     if any(f -> !isnothing(f.json) && String(f.name) != f.json, fields)
         namemap = Expr[]
         for (; name, json) in fields
             jname = if isnothing(json) name else Symbol(json) end
             push!(namemap, :(($(QuoteNode(name)), $(QuoteNode(jname)))))
         end
-        push!(body, :(StructTypes.names(::Type{$structref}) = $(Expr(:tuple, namemap...))))
+        push!(body, :($stn(::Type{$structref}) = $(Expr(:tuple, namemap...))))
     end
     # Declare that this struct is JSON formatted
-    push!(body, :($RestClient.dataformat(::Type{$structref}) = JSONFormat()))
+    push!(body, :(RestClient.dataformat(::Type{$structref}) = RestClient.JSONFormat{:json3}()))
     # Return the generated code
     Expr(:block, body...)
-end
-
-macro jsondef(kind::Symbol, struc::Expr)
-    Expr(:macrocall, GlobalRef(RestClient, Symbol("@jsondef")),
-         __source__, QuoteNode(:default), kind, struc) |> esc
-end
-
-macro jsondef(struc::Expr)
-    Expr(:macrocall, GlobalRef(RestClient, Symbol("@jsondef")),
-         __source__, :Struct, struc) |> esc
-end
-
-macro jsondef(opt::QuoteNode, struc::Expr)
-    Expr(:macrocall, GlobalRef(RestClient, Symbol("@jsondef")),
-         __source__, opt, :Struct, struc) |> esc
 end
 
 end

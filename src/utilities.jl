@@ -33,28 +33,60 @@ macro globalconfig(expr::Expr)
 end
 
 """
-    @jsondef [kind] struct ... end
+    _jsondef_expand(::Val{backend}, source::LineNumberNode, option::Symbol, kind::Symbol, struc::Expr) -> Expr
 
-Define a struct that can be used with `JSON3`.
+Expand a `@jsondef` struct definition for the given JSON `backend`
+(`:json` for JSON.jl, `:json3` for JSON3.jl).
+
+Implemented by a package extension.
+"""
+function _jsondef_expand end
+
+function _jsondef_backend(mod::Module)
+    hasjson  = !isnothing(Base.get_extension(@__MODULE__, :JSONExt))
+    hasjson3 = !isnothing(Base.get_extension(@__MODULE__, :JSON3Ext))
+    hasjson || hasjson3 ||
+        throw(ArgumentError("@jsondef requires JSON or JSON3 to be loaded"))
+    hasjson  || return :json3
+    hasjson3 || return :json
+    # `jl_module_usings` is an internal API but stable since at least 1.0.
+    usings = ccall(:jl_module_usings, Vector{Any}, (Any,), mod)
+    inmodjson  = any(m -> nameof(m) === :JSON,  usings)
+    inmodjson3 = any(m -> nameof(m) === :JSON3, usings)
+    inmodjson && !inmodjson3 && return :json
+    inmodjson3 && !inmodjson && return :json3
+    throw(ArgumentError(
+        "@jsondef in $mod is ambiguous: both JSON and JSON3 extensions are loaded. \
+         `using` only one of them in this module."))
+end
+
+"""
+    @jsondef [:noshow] [kind] struct ... end
+
+Define a struct that can be read from and written as JSON.
 
 This macro conveniently combines the following pieces:
 - `@kwdef` to define keyword constructors for the struct.
 - Custom `Base.show` method to show the struct with keyword arguments,
-  omitting default values.
-- `StructTypes.StructType` to define the struct type, and
-  `StructTypes.names` (if needed) to define the JSON field mapping.
+  omitting default values (suppress with the `:noshow` option).
+- Registration of JSON field-name mapping with the active JSON backend.
 - `RestClient.dataformat` to declare that this struct is JSON-formatted.
 
 Note the `name."json_field"` syntax demonstrated in the examples, that allows
 for declaration of the JSON object key that should be mapped to the field.
 
-Optionally the JSON representation `kind` can be specified. It
-defaults to `Struct`, but can any of: `Struct`, `Dict`, `Array`,
-`Vector`, `String`, `Number`, `Bool`, `Nothing`.
+The optional `kind` argument selects the JSON representation, defaulting
+to `Struct`. Both backends support `Struct`, `Dict`, `Array`, `Vector`,
+`Nothing`, and `String`; for `String`, the user must define `Base.string`
+and a `T(::AbstractString)` constructor. The JSON3 backend additionally
+supports `Number` and `Bool`; with the JSON.jl backend these require
+user-defined `StructUtils.lift` / `StructUtils.lower` methods.
 
-!!! warning "Soft JSON3 dependency"
-    This macro is implemented in a package extension, and so
-    requires `JSON3` to be loaded before it can be used.
+!!! warning "Soft JSON dependency"
+    This macro is implemented in package extensions, and so
+    requires either `JSON` or `JSON3` to be loaded before it can be used.
+    If both are loaded, the backend is chosen based on which of `JSON`
+    or `JSON3` is `using`'d in the calling module.
 
 # Examples
 
@@ -67,12 +99,25 @@ defaults to `Struct`, but can any of: `Struct`, `Dict`, `Array`,
 end
 ```
 """
-macro jsondef(arg::Any)
-    if arg isa Expr
-        throw(ArgumentError("@jsondef requires JSON3 to be loaded"))
-    else
+macro jsondef(args...)
+    option, kind, struc = _jsondef_parse_args(args)
+    struc isa Expr ||
         throw(ArgumentError("@jsondef expects a struct definition"))
+    _jsondef_expand(Val(_jsondef_backend(__module__)), __source__, option, kind, struc)
+end
+
+function _jsondef_parse_args(args::Tuple)
+    option, kind, struc = :default, :Struct, nothing
+    for arg in args
+        if arg isa QuoteNode && arg.value isa Symbol
+            option = arg.value
+        elseif arg isa Symbol
+            kind = arg
+        elseif arg isa Expr
+            struc = arg
+        end
     end
+    option, kind, struc
 end
 
 """
