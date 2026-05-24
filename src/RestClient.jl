@@ -13,12 +13,14 @@ export SingleResponse, ListResponse, Single, List, perform, urlpath,
     interpretresponse, validate, postprocess, thispagenumber, nextpage,
     remainingpages
 export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
+export FormFormat, MultipartFormat, BinaryFormat, @formdef, @multipartdef
 export setfield
 
 include("types.jl")
 include("interface.jl")
 include("caching.jl")
 include("requests.jl")
+include("forms.jl")
 include("utilities.jl")
 include("endpoint.jl")
 
@@ -32,6 +34,10 @@ macro reexport()
     :(export Single, List, nextpage)
 end
 
-__init__() = atexit(cleancache)
+function __init__()
+    global MULTIPART_BOUNDARY = "----" * string(rand(UInt64); base = 16)
+    global MULTIPART_MIME = "multipart/form-data; boundary=" * MULTIPART_BOUNDARY
+    atexit(cleancache)
+end
 
 end
