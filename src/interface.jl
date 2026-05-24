@@ -157,11 +157,29 @@ Return the MIME type for the given format, if known.
 mimetype(::Type) = nothing
 
 mimetype(::Type{RawFormat}) = "text/plain"
+mimetype(::Type{<:JSONFormat}) = "application/json"
+
+"""
+    JSONFormat()
+
+Construct a `JSONFormat` singleton for whichever JSON backend is loaded.
+JSON.jl takes priority if both are loaded; throws if neither is.
+"""
+function JSONFormat()
+    hasjson  = !isnothing(Base.get_extension(@__MODULE__, :JSONExt))
+    hasjson3 = !isnothing(Base.get_extension(@__MODULE__, :JSON3Ext))
+    hasjson  && return JSONFormat{:json}()
+    hasjson3 && return JSONFormat{:json3}()
+    throw(ArgumentError("No JSON backend loaded; load JSON or JSON3"))
+end
 
 """
     interpretresponse(data::IO, fmt::AbstractFormat, ::Type{T}) -> value::T
 
 Interpret `data` as a response of type `T` according to `fmt`.
+
+For `JSONFormat`, the backend-specific methods are implemented in package
+extensions (`JSONExt` for JSON.jl, `JSON3Ext` for JSON3.jl).
 """
 function interpretresponse end
 
