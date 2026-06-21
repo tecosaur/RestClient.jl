@@ -35,6 +35,26 @@ end
 
 See [[@ref][~@jsondef~]] and [[@ref][~@xmldef~]] for more information.
 
+** Define request payloads
+
+For endpoints that send a body, payload types can be defined just as concisely.
+=@jsondef= types double as JSON payloads, while form submissions have dedicated
+macros:
+
+#+begin_src julia
+@formdef struct Login           # application/x-www-form-urlencoded
+    username::String
+    remember."remember-me"::Bool = false
+end
+
+@multipartdef struct Upload     # multipart/form-data
+    file::Vector{UInt8}         # sent as an octet-stream part
+    metadata::Item              # an @jsondef field → JSON part
+end
+#+end_src
+
+See [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]] for more information.
+
 ** Declare endpoints
 
 #+begin_src julia
@@ -49,6 +69,7 @@ See [[@ref][~@endpoint~]] for more information.
 + Response [[@ref RestClient.postprocess][post-processing]]
 + [[@ref Caching-interface][Caching]]
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
++ Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
 + Rate limiting (by reading the relevant HTTP response headers)
 
 * Request data flow

@@ -11,6 +11,8 @@ CollapsedDocStrings = true
 @endpoint
 @jsondef
 @xmldef
+@formdef
+@multipartdef
 #+end_src
 
 * Request types
@@ -74,6 +76,9 @@ RestClient.AbstractFormat
 RestClient.RawFormat
 RestClient.JSONFormat
 RestClient.XMLFormat
+RestClient.FormFormat
+RestClient.MultipartFormat
+RestClient.BinaryFormat
 RestClient.dataformat
 RestClient.interpretresponse
 RestClient.writepayload
