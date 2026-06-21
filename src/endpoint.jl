@@ -392,10 +392,10 @@ function extract_forms(expr::Expr; mod::Module)
     # 3: Extract fields from function arguments
     if !isnothing(efunc) && isnothing(estruct)
         efields = @NamedTuple{name::Symbol, type::Any, default::Any}[]
-        fargs = if isempty(efunc.args)
+        fargs = if length(efunc.args) <= 1
             Expr[]
-        elseif Meta.isexpr(first(efunc.args), :parameters)
-            vcat(efunc.args[3:end], efunc.args[1].args)
+        elseif Meta.isexpr(efunc.args[2], :parameters)
+            vcat(efunc.args[3:end], efunc.args[2].args)
         else
             efunc.args[2:end]
         end
