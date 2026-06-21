@@ -202,7 +202,7 @@ end
     end
 else
     expirytime_xattr(::String) = nothing
-    setexpiry(::String) = nothing
+    setexpiry(::String, ::Integer) = nothing
 end
 
 function expirytime_read(path::String)
