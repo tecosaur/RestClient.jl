@@ -135,47 +135,55 @@ function mimeheaders(req::Request, in::Type)
 end
 
 """
-    catch_ratelimit(f::Function, reqlock::ReentrantLock, args...; kwargs...)
+    catch_ratelimit(f::Function, gate::RateGate, args...; kwargs...)
 
 Call `f(args...; kwargs...)`, handling rate-limit headers appropriately.
 
 The first value returned by `f` must be a `Downloads.Response` object.
 
 If the request is rate-limited, this function will wait until the rate limit
-is reset before retrying the request.
+is reset before retrying the request. Concurrent calls sharing `gate` observe
+a single shared backoff: only one task sleeps, the rest wait on the deadline
+held by the gate (see [`RateGate`](@ref)).
 """
-function catch_ratelimit(f::F, reqlock::ReentrantLock, args...; kwargs...) where {F <: Function}
-    islocked(reqlock) && @lock reqlock nothing
-    res, rest... = try
-        f(args...; kwargs...)
-    catch
-        if islocked(reqlock)
-            @lock reqlock nothing
-            return catch_ratelimit(f, reqlock, args...; kwargs...)
+function catch_ratelimit(f::F, gate::RateGate, args...; kwargs...) where {F <: Function}
+    while true
+        while (@atomic gate.nextallowed) - time() > 0
+            lock(gate.lock) # block until the in-progress backoff releases
+            unlock(gate.lock)
         end
-        rethrow()
+        res, rest... = f(args...; kwargs...)
+        res.status ∉ (403, 429) && return res, rest...
+        backoff!(gate, retrydelay(res.headers))
     end
-    res.status ∈ 200:299 && return res, rest...
-    @lock reqlock if res.status ∈ (403, 429)
-        delay = retrydelay(res.headers)
-        if delay > 0
-            isinteractive() && @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
-            if isinteractive() && isa(stdout, Base.TTY)
-                print('\n')
-                for wait in 0:delay
-                    sleep(1)
-                    print(ANSI_CLEAR_LINE, S" Waited {emphasis:$wait} seconds\n")
-                end
-                print(ANSI_CLEAR_LINE)
-            else
-                sleep(delay)
-            end
-        else
+end
+
+function backoff!(gate::RateGate, delay::Real)
+    @lock gate.lock begin
+        (@atomic gate.nextallowed) - time() > 0 && return
+        @atomic gate.nextallowed = max(gate.nextallowed, time() + delay)
+        if delay <= 0
             sleep(0.1)
+        elseif isinteractive()
+            @noinline alert_sleep(delay)
+        else
+            sleep(delay)
         end
-        return catch_ratelimit(f, reqlock, args...; kwargs...)
     end
-    res, rest...
+end
+
+function alert_sleep(delay::Real)
+    @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
+    if isa(stdout, Base.TTY)
+        print('\n')
+        for waited in 0:delay
+            sleep(1)
+            print(ANSI_CLEAR_LINE, S" Waited {emphasis:$waited} seconds\n")
+        end
+        print(ANSI_CLEAR_LINE)
+    else
+        sleep(delay)
+    end
 end
 
 """
@@ -205,8 +213,8 @@ function retrydelay(headers::Vector{Pair{String, String}})
         isnothing(resettime) ||
             return max(0, ceil(Int, datetime2unix(resettime) - time()))
     end
-    ratelimit = tryparse(Int, listsearch(headers, "x-ratelimit-remaining", "0"))
-    ratelimit === 0 || return 0
+    ratelimit = something(tryparse(Int, listsearch(headers, "x-ratelimit-remaining", "0")), 0)
+    ratelimit == 0 || return 0
     xreset = listsearch(headers, "x-ratelimit-reset", "")
     if isempty(xreset)
     elseif all(isdigit, xreset)
@@ -242,7 +250,7 @@ function debug_request(method::String, url::String, headers, payload::Union{IO, 
             end
             println(io)
             mark(payload)
-            write(dumpfile, payload)
+            write(io, payload)
             reset(payload)
         end
         S"$(Base.format_bytes(position(payload))) (saved to {bright_magenta:$dumpfile}) sent to "
@@ -359,7 +367,7 @@ end
 function bare_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
-        cached_request, req.config.reqlock, req, method, nothing)
+        cached_request, req.config.rategate, req, method, nothing)
     res.status ∈ 200:299 || throw(Downloads.RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
@@ -367,7 +375,7 @@ end
 function payload_request(req::Request, method::String)
     validate(req) || throw(ArgumentError("Request is not well-formed"))
     res, body = catch_ratelimit(
-        cached_request, req.config.reqlock, req, method, payload(req))
+        cached_request, req.config.rategate, req, method, payload(req))
     res.status ∈ 200:299 || throw(Downloads.RequestError(res.url, res.status, "", res))
     handle_response(req, res, body)
 end
@@ -388,10 +396,10 @@ function perform(req::Request{:head})
         @debug debug_request("HEAD", url, headers) _file=nothing
         reqres = Downloads.request(url; method = "HEAD", headers, timeout)
         @debug debug_response(url, reqres, IOBuffer()) _file=nothing
-        reqres
+        (reqres,)
     end
-    res = catch_ratelimit(
-        head_request, req.config.reqlock, url(req);
+    res, = catch_ratelimit(
+        head_request, req.config.rategate, url(req);
         headers=headers(req),
         timeout=req.config.timeout)
     postprocess(res, req, res.status ∈ 200:299)

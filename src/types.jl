@@ -97,6 +97,22 @@ struct XMLFormat <: AbstractFormat end
 # Requests
 
 """
+    RateGate
+
+Per-config coordination point for rate-limit backoff.
+
+`nextallowed` is a shared deadline (a `time()` value, `0.0` when open) read
+atomically on the request fast path. When ratelimiting occurs, concurrent
+requests can share a single backoff, coordinated by the lock.
+"""
+mutable struct RateGate
+    const lock::ReentrantLock
+    @atomic nextallowed::Float64
+end
+
+RateGate() = RateGate(ReentrantLock(), 0.0)
+
+"""
     RequestConfig
 
 The general configuration for a request to the API, not tied to any specific endpoint.
@@ -121,22 +137,22 @@ See also: [`@globalconfig`](@ref), [`Request`](@ref).
 
 ```julia-repl
 julia> RequestConfig("https://api.example.com")
-RequestConfig("https://api.example.com", ReentrantLock(), nothing, Inf, true)
+RequestConfig("https://api.example.com", RateGate(ReentrantLock(), 0.0), nothing, Inf, true)
 
 julia> RequestConfig("https://api.example.com", key = ENV["API_SECRET_KEY"])
-RequestConfig("https://api.example.com", ReentrantLock(), "*****", Inf, true)
+RequestConfig("https://api.example.com", RateGate(ReentrantLock(), 0.0), "*****", Inf, true)
 ```
 """
 struct RequestConfig
     baseurl::String
-    reqlock::ReentrantLock
+    rategate::RateGate
     key::Union{Nothing, String}
     timeout::Float64
     cache::Bool
 end
 
 RequestConfig(baseurl::String; key::Union{Nothing, String}=nothing, timeout::Real = Inf, cache::Bool = true) =
-    RequestConfig(baseurl, ReentrantLock(), key, Float64(timeout), cache)
+    RequestConfig(baseurl, RateGate(), key, Float64(timeout), cache)
 
 """
     Request{kind, E<:AbstractEndpoint}
