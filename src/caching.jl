@@ -189,7 +189,7 @@ end
 @static if Sys.islinux()
     function expirytime_xattr(path::String)
         unixtime = Ref{Int64}()
-        nb = @ccall getxattr(path::Cstring, "user.expirytime"::Cstring, unixtime::Ptr{Int64}, sizeof(Int64)::Csize_t)::Csize_t
+        nb = @ccall getxattr(path::Cstring, "user.expirytime"::Cstring, unixtime::Ptr{Int64}, sizeof(Int64)::Csize_t)::Cssize_t
         if nb > 0
             unixtime[]
         end
