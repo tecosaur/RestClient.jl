@@ -72,23 +72,26 @@ end
 parameters(::RequestConfig, endpoint::AbstractEndpoint) = parameters(endpoint)
 
 """
-    validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
+    validate([config::RequestConfig], endpoint::AbstractEndpoint) ->
+        Union{Nothing, AbstractString, AbstractVector{<:AbstractString}}
 
 Check if the request to `endpoint` according to `config` is valid.
 
-This is called before the request is made, and can be used to check
-if the request is well-formed. This is the appropriate place to
-emit warnings about potential issues with the request.
+The return value determines whether the request proceeds and, if not, what
+problem to report:
+- `nothing` or `String[]` means the request is valid and should proceed
+- a string or vector of strings means the request is invalid and should be aborted, with the string(s) as the reason(s)
 
-Return `true` if the request should proceed, `false` otherwise.
+This is also the appropriate place to emit warnings about non-critical potential
+issues with the request, using `@warn` or `@debug`.
 
-The default implementation always returns `true`.
+The default implementation returns `nothing` (proceed).
 
 !!! note
     Part of the `AbstractEndpoint` interface.
 """
 function validate(@nospecialize ::AbstractEndpoint)
-    true
+    nothing
 end
 
 validate(::RequestConfig, endpoint::AbstractEndpoint) = validate(endpoint)

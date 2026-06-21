@@ -364,19 +364,38 @@ function cached_request(req::Request, method::String, payload)
     res, body
 end
 
+function check_validation(req::Request)
+    issues = validate(req)
+    isnothing(issues) && return
+    # Legacy support for boolean validation
+    if issues === true
+        return
+    elseif issues === false
+        throw(MalformedRequest(req, ["Request is not well-formed"]))
+    end
+    # Standard behaviour
+    throw(if issues isa AbstractString
+        MalformedRequest(req, [issues])
+    elseif issues isa AbstractVector{<:AbstractString}
+        MalformedRequest(req, issues)
+    else
+        ArgumentError("validate returned $(typeof(issues)); expected Bool, AbstractString, or AbstractVector{<:AbstractString}")
+    end)
+end
+
 function bare_request(req::Request, method::String)
-    validate(req) || throw(ArgumentError("Request is not well-formed"))
+    check_validation(req)
     res, body = catch_ratelimit(
         cached_request, req.config.rategate, req, method, nothing)
-    res.status ∈ 200:299 || throw(Downloads.RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
     handle_response(req, res, body)
 end
 
 function payload_request(req::Request, method::String)
-    validate(req) || throw(ArgumentError("Request is not well-formed"))
+    check_validation(req)
     res, body = catch_ratelimit(
         cached_request, req.config.rategate, req, method, payload(req))
-    res.status ∈ 200:299 || throw(Downloads.RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
     handle_response(req, res, body)
 end
 

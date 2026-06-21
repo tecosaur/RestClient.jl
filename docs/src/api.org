@@ -34,6 +34,19 @@ ListResponse
 List
 #+end_src
 
+* Errors
+
+A failed [[@ref][~perform~]] raises one of these. A request that does not validate raises
+a [[@ref][~MalformedRequest~]] before anything is sent; an unsuccessful HTTP status raises
+a [[@ref][~ResponseError~]] carrying the server's response body. A transport failure (DNS,
+connection refused, TLS, timeout) surfaces as the underlying
+=Downloads.RequestError=.
+
+#+begin_src @docs
+ResponseError
+MalformedRequest
+#+end_src
+
 * Request interface
 
 #+begin_src @docs

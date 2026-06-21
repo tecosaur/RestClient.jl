@@ -14,6 +14,7 @@ export SingleResponse, ListResponse, Single, List, perform, urlpath,
     remainingpages
 export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
 export FormFormat, MultipartFormat, @formdef, @multipartdef
+export MalformedRequest, ResponseError
 export setfield
 
 include("types.jl")

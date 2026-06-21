@@ -202,6 +202,62 @@ end
 Request{kind}(config::RequestConfig, endpoint::E) where {kind, E <: AbstractEndpoint} =
     Request{kind, E}(config, endpoint)
 
+"""
+    MalformedRequest <: Exception
+
+An exception type for requests that fail validation.
+
+See also: [`validate`](@ref), [`Request`](@ref).
+"""
+struct MalformedRequest{R <: Request, S <: AbstractString} <: Exception
+    request::R
+    issues::Vector{S}
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::MalformedRequest))
+    print(io, "Malformed request:")
+    if isempty(ex.issues)
+        print(io, " (no details provided)")
+    elseif length(ex.issues) == 1
+        print(io, ' ', ex.issues[1])
+    else
+        for issue in ex.issues
+            print(io, "\n  • ", issue)
+        end
+    end
+end
+
+"""
+    ResponseError <: Exception
+
+An exception type for requests that complete but return an unsuccessful HTTP
+status (outside `200:299`).
+
+Unlike a bare transport failure, the server's response is available: `response`
+holds the status and headers, and `body` holds the raw response body, which APIs
+routinely use to explain *why* a request failed.
+
+See also: [`perform`](@ref), [`Request`](@ref).
+"""
+struct ResponseError{R <: Request} <: Exception
+    request::R
+    response::Downloads.Response
+    body::Vector{UInt8}
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
+    print(io, "HTTP ", ex.response.status)
+    isempty(ex.response.message) || print(io, ' ', ex.response.message)
+    print(io, " from ", ex.response.url)
+    isempty(ex.body) && return
+    bodystr = map(c -> if isvalid(c) && (isprint(c) || isspace(c)); c else '�' end, String(ex.body))
+    if ncodeunits(bodystr) <= 512
+        print(io, "\n  ", rstrip(bodystr))
+    else
+        print(io, "\n  ", SubString(bodystr, 1, thisind(bodystr, 512)), " …")
+    end
+end
+
 
 # Generic response forms
 
