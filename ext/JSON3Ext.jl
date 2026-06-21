@@ -12,7 +12,7 @@ RestClient.interpretresponse(data::IO, ::RestClient.JSONFormat{:json3}, ::Type{T
 RestClient.writepayload(dest::IO, ::RestClient.JSONFormat{:json3}, data) =
     JSON3.write(dest, data)
 
-function RestClient._jsondef_expand(::Val{:json3}, source::LineNumberNode,
+function RestClient._jsondef_expand(::Val{:json3}, source::LineNumberNode, mod::Module,
                                     option::Symbol, kind::Symbol, struc::Expr)
     Meta.isexpr(struc, :struct, 3) ||
         throw(ArgumentError("@jsondef expects a struct definition"))
@@ -119,27 +119,34 @@ function RestClient._jsondef_expand(::Val{:json3}, source::LineNumberNode,
                 end
             end)
     end
-    # Create the StructType definition
     structref = if isparametric
         Expr(:(<:), esc(structname))
     else
         esc(structname)
     end
-    stt = GlobalRef(StructTypes, :StructType)
-    stn = GlobalRef(StructTypes, :names)
-    stkind = GlobalRef(StructTypes, structkind)
-    push!(body, :($stt(::Type{$structref}) = $stkind()))
-    if any(f -> !isnothing(f.json) && String(f.name) != f.json, fields)
-        namemap = Expr[]
-        for (; name, json) in fields
-            jname = if isnothing(json) name else Symbol(json) end
-            push!(namemap, :(($(QuoteNode(name)), $(QuoteNode(jname)))))
+    fmtexpr = :(RestClient.JSONFormat{:json3}())
+    wrapfield = RestClient._jsondef_wrapper_field(kind, [f.type for f in fields], mod)
+    if !isnothing(wrapfield)
+        append!(body, RestClient._jsondef_wrapper_methods(esc(structname), fmtexpr))
+    elseif kind ∈ (:Dict, :Array, :Vector)
+        # Non-wrapper: `dataformat` only — a StructType here would parse a
+        # fielded struct as dict/array-like, which is wrong.
+    else
+        stt = GlobalRef(StructTypes, :StructType)
+        stn = GlobalRef(StructTypes, :names)
+        stkind = GlobalRef(StructTypes, structkind)
+        push!(body, :($stt(::Type{$structref}) = $stkind()))
+        if any(f -> !isnothing(f.json) && String(f.name) != f.json, fields)
+            namemap = Expr[]
+            for (; name, json) in fields
+                jname = if isnothing(json) name else Symbol(json) end
+                push!(namemap, :(($(QuoteNode(name)), $(QuoteNode(jname)))))
+            end
+            push!(body, :($stn(::Type{$structref}) = $(Expr(:tuple, namemap...))))
         end
-        push!(body, :($stn(::Type{$structref}) = $(Expr(:tuple, namemap...))))
     end
     # Declare that this struct is JSON formatted
-    push!(body, :(RestClient.dataformat(::Type{$structref}) = RestClient.JSONFormat{:json3}()))
-    # Return the generated code
+    push!(body, :(RestClient.dataformat(::Type{$structref}) = $fmtexpr))
     Expr(:block, body...)
 end
 

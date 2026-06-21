@@ -2,6 +2,23 @@
 # SPDX-License-Identifier: MPL-2.0
 
 """
+    JSONFormat()
+
+Construct a `JSONFormat` singleton for whichever JSON backend is loaded.
+JSON.jl takes priority if both are loaded; throws if neither is.
+"""
+function JSONFormat()
+    hasjson  = !isnothing(Base.get_extension(@__MODULE__, :JSONExt))
+    hasjson3 = !isnothing(Base.get_extension(@__MODULE__, :JSON3Ext))
+    hasjson  && return JSONFormat{:json}()
+    hasjson3 && return JSONFormat{:json3}()
+    throw(ArgumentError("No JSON backend loaded; load JSON or JSON3"))
+end
+
+mimetype(::Type{RawFormat}) = "text/plain"
+mimetype(::Type{<:JSONFormat}) = "application/json"
+
+"""
     setfield(x::T, field::Symbol, value) -> ::T
 """
 function setfield(x::T, field::Symbol, value) where {T}
@@ -33,7 +50,7 @@ macro globalconfig(expr::Expr)
 end
 
 """
-    _jsondef_expand(::Val{backend}, source::LineNumberNode, option::Symbol, kind::Symbol, struc::Expr) -> Expr
+    _jsondef_expand(::Val{backend}, source::LineNumberNode, mod::Module, option::Symbol, kind::Symbol, struc::Expr) -> Expr
 
 Expand a `@jsondef` struct definition for the given JSON `backend`
 (`:json` for JSON.jl, `:json3` for JSON3.jl).
@@ -41,6 +58,46 @@ Expand a `@jsondef` struct definition for the given JSON `backend`
 Implemented by a package extension.
 """
 function _jsondef_expand end
+
+"""
+    _jsondef_wrapper_field(kind::Symbol, fieldtypes, mod::Module) -> Union{Any, Nothing}
+
+Return the field type expression for a single-field container wrapper, or
+`nothing` for any other shape. The type is resolved in `mod`; a forward
+reference (unevaluable) falls back to `nothing`.
+"""
+function _jsondef_wrapper_field(kind::Symbol, fieldtypes, mod::Module)
+    kind ∈ (:Dict, :Array, :Vector) || return nothing
+    length(fieldtypes) == 1 || return nothing
+    ftype = only(fieldtypes)
+    isnothing(ftype) && return nothing
+    T = try Core.eval(mod, ftype) catch; return nothing end
+    T isa Type || return nothing
+    iswrapper = if kind === :Dict
+        T <: AbstractDict
+    else
+        T <: AbstractVector
+    end
+    if iswrapper ftype end
+end
+
+"""
+    _jsondef_wrapper_methods(structname, fmtexpr) -> Vector{Expr}
+
+Emit `interpretresponse`/`writepayload` methods for a single-field container
+wrapper, delegating to the wrapped field's own type (`fieldtype(T, 1)`).
+"""
+function _jsondef_wrapper_methods(structname, fmtexpr)
+    fmttype = :(typeof($fmtexpr))
+    Expr[
+        :(function RestClient.interpretresponse(io::IO, fmt::$fmttype, ::Type{T}) where {T <: $structname}
+              T(RestClient.interpretresponse(io, fmt, fieldtype(T, 1)))
+          end),
+        :(function RestClient.writepayload(io::IO, fmt::$fmttype, x::$structname)
+              RestClient.writepayload(io, fmt, getfield(x, 1))
+          end),
+    ]
+end
 
 function _jsondef_backend(mod::Module)
     hasjson  = !isnothing(Base.get_extension(@__MODULE__, :JSONExt))
@@ -82,6 +139,17 @@ and a `T(::AbstractString)` constructor. The JSON3 backend additionally
 supports `Number` and `Bool`; with the JSON.jl backend these require
 user-defined `StructUtils.lift` / `StructUtils.lower` methods.
 
+For an open-ended JSON object or array, a struct wrapping a *single*
+`AbstractDict` (`kind=Dict`) or `AbstractVector` (`kind=Array`/`Vector`) field
+decodes the whole payload into that field (recursively) and wraps it. Any other
+shape declares only `dataformat`, leaving the backend integration to the user.
+
+```julia
+@jsondef Dict struct Translations
+    entries::Dict{String, String}   # {"en": "Hello", "fr": "Bonjour"} → Translations(...)
+end
+```
+
 !!! warning "Soft JSON dependency"
     This macro is implemented in package extensions, and so
     requires either `JSON` or `JSON3` to be loaded before it can be used.
@@ -103,7 +171,7 @@ macro jsondef(args...)
     option, kind, struc = _jsondef_parse_args(args)
     struc isa Expr ||
         throw(ArgumentError("@jsondef expects a struct definition"))
-    _jsondef_expand(Val(_jsondef_backend(__module__)), __source__, option, kind, struc)
+    _jsondef_expand(Val(_jsondef_backend(__module__)), __source__, __module__, option, kind, struc)
 end
 
 function _jsondef_parse_args(args::Tuple)

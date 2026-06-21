@@ -15,7 +15,7 @@ RestClient.writepayload(dest::IO, ::RestClient.JSONFormat{:json}, data) =
 const JSON_KINDS_SUPPORTED = (:Struct, :Dict, :Array, :Vector, :Nothing, :String)
 const JSON_KINDS_NEED_USER_METHODS = (:Number, :Bool)
 
-function RestClient._jsondef_expand(::Val{:json}, source::LineNumberNode,
+function RestClient._jsondef_expand(::Val{:json}, source::LineNumberNode, mod::Module,
                                     option::Symbol, kind::Symbol, struc::Expr)
     kind ∈ JSON_KINDS_SUPPORTED ||
         if kind ∈ JSON_KINDS_NEED_USER_METHODS
@@ -86,10 +86,11 @@ function RestClient._jsondef_expand(::Val{:json}, source::LineNumberNode,
     body = Expr[
         esc(Expr(:macrocall, GlobalRef(StructUtils, Symbol("@kwarg")), source, taggedstruct)),
     ]
-    if kind === :Dict
-        push!(body, :($(GlobalRef(StructUtils, :dictlike))(::Type{$structref}) = true))
-    elseif kind === :Array || kind === :Vector
-        push!(body, :($(GlobalRef(StructUtils, :arraylike))(::Type{$structref}) = true))
+    fmtexpr = :(RestClient.JSONFormat{:json}())
+    if kind ∈ (:Dict, :Array, :Vector)
+        wrapfield = RestClient._jsondef_wrapper_field(kind, [f.type for f in fields], mod)
+        isnothing(wrapfield) ||
+            append!(body, RestClient._jsondef_wrapper_methods(esc(structname), fmtexpr))
     elseif kind === :Nothing
         push!(body, :($(GlobalRef(StructUtils, :nulllike))(::Type{$structref}) = true))
     elseif kind === :String
@@ -118,7 +119,7 @@ function RestClient._jsondef_expand(::Val{:json}, source::LineNumberNode,
             end
         end)
     end
-    push!(body, :(RestClient.dataformat(::Type{$structref}) = RestClient.JSONFormat{:json}()))
+    push!(body, :(RestClient.dataformat(::Type{$structref}) = $fmtexpr))
     Expr(:block, body...)
 end
 
