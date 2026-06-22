@@ -456,6 +456,8 @@ function extract_forms(expr::Expr; mod::Module)
             :SingleEndpoint
         elseif outtype <: ListResponse || outtype <: Vector
             :ListEndpoint
+        elseif outtype <: Stream
+            :StreamEndpoint
         else
             :AbstractEndpoint
         end

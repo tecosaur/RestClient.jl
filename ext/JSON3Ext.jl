@@ -6,7 +6,7 @@ module JSON3Ext
 using RestClient
 using JSON3, StructTypes
 
-RestClient.interpretresponse(data::IO, ::RestClient.JSONFormat{:json3}, ::Type{T}) where {T} =
+RestClient.interpretresponse(data::AbstractVector{UInt8}, ::RestClient.JSONFormat{:json3}, ::Type{T}) where {T} =
     JSON3.read(data, T)
 
 RestClient.writepayload(dest::IO, ::RestClient.JSONFormat{:json3}, data) =

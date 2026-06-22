@@ -6,7 +6,7 @@ module JSONExt
 using RestClient
 using JSON, StructUtils
 
-RestClient.interpretresponse(data::IO, ::RestClient.JSONFormat{:json}, ::Type{T}) where {T} =
+RestClient.interpretresponse(data::AbstractVector{UInt8}, ::RestClient.JSONFormat{:json}, ::Type{T}) where {T} =
     JSON.parse(data, T)
 
 RestClient.writepayload(dest::IO, ::RestClient.JSONFormat{:json}, data) =

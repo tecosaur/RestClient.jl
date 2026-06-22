@@ -11,8 +11,8 @@ const AbstractNode = XML.AbstractXMLNode
 
 function parsexml end
 
-function RestClient.interpretresponse(data::IO, ::RestClient.XMLFormat, ::Type{T}) where {T}
-    root = read(data, LazyNode)
+function RestClient.interpretresponse(data::AbstractVector{UInt8}, ::RestClient.XMLFormat, ::Type{T}) where {T}
+    root = read(IOBuffer(data), LazyNode)
     # `read` returns a document wrapper with a nil tag — descend to its root element.
     if isnothing(tag(root))
         for child in children(root)

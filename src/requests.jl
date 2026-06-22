@@ -299,8 +299,9 @@ end
 function handle_response(req::Request, res::Downloads.Response, body::IO)
     dtype = responsetype(req.endpoint)
     fmt = dataformat(req.endpoint, dtype)
-    data = interpretresponse(body, fmt, dtype)
+    bytes = read(body)
     close(body)
+    data = interpretresponse(bytes, fmt, dtype)
     postprocess(res, req, data)
 end
 

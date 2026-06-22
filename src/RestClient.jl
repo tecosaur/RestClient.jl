@@ -15,12 +15,14 @@ export SingleResponse, ListResponse, Single, List, perform, urlpath,
 export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
 export FormFormat, MultipartFormat, @formdef, @multipartdef
 export MalformedRequest, ResponseError
+export Stream, StreamEndpoint, SSEvent, isstreamend
 export setfield
 
 include("types.jl")
 include("interface.jl")
 include("caching.jl")
 include("requests.jl")
+include("streaming.jl")
 include("forms.jl")
 include("utilities.jl")
 include("endpoint.jl")

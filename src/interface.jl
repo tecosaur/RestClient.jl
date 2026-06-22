@@ -123,13 +123,13 @@ Return the type of the response for the given endpoint.
 
 Together with `dataformat`, this is used to parse the response.
 
-If `IO` (the default implementation), the response is not parsed at all.
+If `Vector{UInt8}` (the default implementation), the response data is provided raw.
 
 !!! note
     Part of the `AbstractEndpoint` interface.
 """
 function responsetype(::AbstractEndpoint)
-    IO
+    Vector{UInt8}
 end
 
 """
@@ -142,14 +142,11 @@ Using the default `dataformat(::Type)` method, the format is [`RawFormat`](@ref)
 
 A `dataformat(::Type)` method is automatically defined when invoking [`@jsondef`](@ref).
 """
-function dataformat(::Type{IO})
-    RawFormat()
-end
+dataformat(@nospecialize(::Type)) = RawFormat()
 
 dataformat(@nospecialize(::AbstractEndpoint), T::Type) = dataformat(T)
 
 dataformat(::Type{Vector{T}}) where T = dataformat(T)
-
 dataformat(::Type{<:Dict{<:Union{String, Integer, Float64}, T}}) where T = dataformat(T)
 
 """
@@ -160,7 +157,7 @@ Return the MIME type for the given format, if known.
 mimetype(::Type) = nothing
 
 """
-    interpretresponse(data::IO, fmt::AbstractFormat, ::Type{T}) -> value::T
+    interpretresponse(data::AbstractVector{UInt8}, fmt::AbstractFormat, ::Type{T}) -> value::T
 
 Interpret `data` as a response of type `T` according to `fmt`.
 
@@ -169,9 +166,8 @@ extensions (`JSONExt` for JSON.jl, `JSON3Ext` for JSON3.jl).
 """
 function interpretresponse end
 
-function interpretresponse(data::IO, ::RawFormat, @nospecialize ::Type)
-    data
-end
+interpretresponse(data::AbstractVector{UInt8}, ::RawFormat, @nospecialize ::Type) =
+    Vector{UInt8}(data)
 
 """
     writepayload(dest::IO, fmt::AbstractFormat, data)

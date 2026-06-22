@@ -90,8 +90,8 @@ wrapper, delegating to the wrapped field's own type (`fieldtype(T, 1)`).
 function _jsondef_wrapper_methods(structname, fmtexpr)
     fmttype = :(typeof($fmtexpr))
     Expr[
-        :(function RestClient.interpretresponse(io::IO, fmt::$fmttype, ::Type{T}) where {T <: $structname}
-              T(RestClient.interpretresponse(io, fmt, fieldtype(T, 1)))
+        :(function RestClient.interpretresponse(data::AbstractVector{UInt8}, fmt::$fmttype, ::Type{T}) where {T <: $structname}
+              T(RestClient.interpretresponse(data, fmt, fieldtype(T, 1)))
           end),
         :(function RestClient.writepayload(io::IO, fmt::$fmttype, x::$structname)
               RestClient.writepayload(io, fmt, getfield(x, 1))
