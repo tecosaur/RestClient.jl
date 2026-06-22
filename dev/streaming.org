@@ -1,0 +1,176 @@
+#+title: Streaming
+
+Some APIs do not hand back a response in one piece. A chat completion arrives a
+token at a time, an activity feed pushes events as they happen, a log endpoint
+emits lines for as long as you care to listen. Waiting for the whole body
+defeats the point: you want each piece as it lands, and you want to start acting
+on it before the next one arrives.
+
+=RestClient= models this with a third response disposition, [[@ref][~Stream~]], alongside
+[[@ref][~Single~]] and [[@ref][~List~]]. A streaming endpoint yields a lazy iterator of decoded
+elements; you iterate it, and each step blocks until the next element has been
+read off the wire and parsed. The disposition is a type, selected through the
+endpoint's output type, exactly as ~Single~ and ~List~ are.
+
+* How streaming fits together
+
+A streamed body has two layers, and =RestClient= keeps them separate:
+
++ Framing :: how the byte stream is divided into messages. /Server-Sent Events/
+  (=text/event-stream=) separate events with a blank line; /NDJSON/ (newline-delimited
+  JSON) puts one record per line. These are the two framings shipped out of the box.
++ Interpretation :: how each message's payload becomes a typed value. This is the
+  same machinery that parses a buffered response. A [[@ref][~@jsondef~]] type is decoded
+  identically whether it arrives whole, in an SSE event, or as an NDJSON line.
+
+The framing is a property of the /stream/; the element type is a property of the
+/payload/. They are independent, so the same element type can appear in a
+buffered endpoint and a streaming one with no change. A ~Stream{T, F}~ carries the
+framing ~F~ as a symbol (=:SSE= or =:NDJSON=), defaulting to =:SSE=.
+
+* Declaring a streaming endpoint
+
+Name ~Stream{T}~ as the output type and the endpoint streams. The element type is
+an ordinary [[@ref][~@jsondef~]] struct:
+
+#+begin_src julia
+@jsondef struct Delta
+    type::String
+    text."delta.text"::Union{String, Nothing} = nothing
+end
+
+# SSE is the default framing, so the common case costs one word:
+@endpoint chat(; messages) -> "messages" -> Stream{Delta}
+#+end_src
+
+For a newline-delimited endpoint, name the framing as the second type parameter:
+
+#+begin_src julia
+@endpoint generate(; prompt) -> "api/generate" -> Stream{Token, :NDJSON}
+#+end_src
+
+The =@endpoint= macro recognises ~Stream~ as an output type and gives the generated
+endpoint the [[@ref][~StreamEndpoint~]] supertype, just as a [[@ref][~ListResponse~]] output produces a
+[[@ref][~ListEndpoint~]]. The =Accept= header is set from the framing automatically
+(=text/event-stream= for SSE, =application/x-ndjson= for NDJSON), so you need not
+set it yourself.
+
+* Consuming a stream
+
+A ~Stream~ is iterable. Each iteration blocks until the next element is available,
+so a ~for~ loop processes elements as the server sends them:
+
+#+begin_src julia
+for delta in chat(messages = msgs)
+    isnothing(delta.text) || print(delta.text)
+end
+#+end_src
+
+Everything that works on an iterator works here. ~collect~ gathers the stream into
+a vector once it completes; ~reduce~ folds it as it arrives:
+
+#+begin_src julia
+collect(chat(messages = msgs))            # Vector{Delta}, once the stream ends
+reduce(merge_delta, chat(messages = msgs)) # you supply merge_delta
+#+end_src
+
+How partial results combine into a final answer is left to you, because it is
+API-specific: Anthropic's incremental deltas differ from OpenAI's, and
+=RestClient= would have to pick one to bake in. It represents the typed stream and
+lets you fold it as the API demands.
+
+* Knowing when to stop
+
+By default a stream ends when the connection closes, which is correct for any
+stream and all that the SSE specification itself promises. Many APIs instead mark the
+end /in band/, with a sentinel value or a terminal event, and expect the client to
+stop there. You declare that rule by defining [[@ref][~isstreamend~]] for your endpoint:
+
+#+begin_src julia
+# OpenAI closes the stream with a `data: [DONE]` sentinel:
+isstreamend(::ChatEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
+
+# Anthropic sends a terminal event type instead:
+isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
+#+end_src
+
+The predicate runs on each frame /before/ it is decoded or emitted, so a
+terminator never reaches your loop. It inspects the undecoded frame through the
+frame's own accessors: ~fr.data~ is the raw payload bytes, ~fr.event~ and ~fr.id~ the
+SSE metadata.
+
+#+begin_warning
+The endpoint type a method dispatches on must match the one =@endpoint= generated.
+The function form ~chat(...)~ creates a struct named ~ChatEndpoint~ (that is,
+~titlecase(funcname) * "Endpoint"~), so the ~isstreamend~ method must be written on
+~ChatEndpoint~, as above. If you want a name you control, use the explicit struct
+form ~@endpoint struct MessagesEndpoint ... end~ and dispatch on that.
+#+end_warning
+
+* Reading SSE event types and ids
+
+By default each element /is/ the decoded payload, which is what most consumers
+want. When you need the surrounding SSE metadata --- the ~event~ type an API
+dispatches on, or the ~id~ used for resumption --- name [[@ref][~SSEvent~]] as the element
+type. Each element is then the whole event, which both destructures and exposes
+named fields:
+
+#+begin_src julia
+@endpoint chat(; messages) -> "messages" -> Stream{SSEvent{Delta}}
+
+for (event, delta) in chat(messages = msgs)
+    event == "message_stop" && break
+    isnothing(delta) || print(delta.text)
+end
+
+# or by field, with the id also available:
+for ev in chat(messages = msgs)
+    ev.event == "content_block_delta" && handle(ev.data)
+end
+#+end_src
+
+~SSEvent~ follows the WHATWG event model: ~event~ is reset for each event, while ~id~
+is /sticky/ and carries forward until the server changes it. =RestClient= does not
+reconnect on your behalf, so it never sends ~Last-Event-ID~ itself; an endpoint
+that wants to resume reads ~ev.id~ and supplies it on a fresh request. ~SSEvent~ is
+SSE-specific: NDJSON elements have no event metadata and stay the bare decoded
+value.
+
+* Cancellation
+
+A ~Stream~ holds an open connection and a couple of background tasks, so it must be
+closed when you are done. Draining it to completion closes it for you. To stop
+early, ~close~ it; and because a ~Stream~ is a plain value, you can hand it to
+another task and close it from there:
+
+#+begin_src julia
+stream = chat(messages = msgs)
+@spawn (stop_requested() && close(stream))  # a UI button, a timeout, a supervisor
+for delta in stream
+    print(delta.text)
+end
+#+end_src
+
+Closing a stream ends a blocked iteration /cleanly/, the way ~break~ would, not by
+raising. You write no ~try~/~catch~ for the cancellation case. A genuine mid-stream
+failure is different: a server that drops the connection partway, or a payload
+that fails to parse, surfaces as a thrown exception when you next iterate, so a
+truncated stream is never silently mistaken for a complete one. A stream you
+simply stop iterating and drop is reclaimed by its finaliser, though closing it
+explicitly is better.
+
+#+begin_info
+Streaming bypasses the response cache (a stream has no settled body to store),
+and the rate limiter acts only on the initial response status. Once frames
+are flowing there is nothing to retry, so a rate-limit response is handled before
+the first element is ever exposed, exactly as for a buffered request.
+#+end_info
+
+* Beyond SSE and NDJSON
+
+The framing layer extends beyond the two shipped framings. A new one (a
+length-prefixed binary protocol, say) is added from outside the package by
+defining a handful of methods ([[@ref][~RestClient.readframe~]] and its companions) on a new
+framing symbol, with no change to ~Stream~, the transport, or cancellation. This is
+a client-library extension point rather than an everyday need; the [[@ref RestClient.readframe][reference]]
+documents the methods involved.

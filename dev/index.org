@@ -63,6 +63,17 @@ See [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]] for more information.
 
 See [[@ref][~@endpoint~]] for more information.
 
+** Stream incremental responses
+
+For APIs that deliver a response piece by piece (token streams, event feeds),
+name a [[@ref][~Stream~]] output type and iterate the elements as they arrive:
+
+#+begin_src julia
+@endpoint chat(; messages) -> "messages" -> Stream{Delta}
+#+end_src
+
+See [[file:streaming.md][the streaming manual]] for more information.
+
 ** Extra functionality
 
 + [[@ref Pagination-interface][Pagination]]
@@ -70,6 +81,8 @@ See [[@ref][~@endpoint~]] for more information.
 + [[@ref Caching-interface][Caching]]
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
 + Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
++ [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
++ [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
 + Rate limiting (by reading the relevant HTTP response headers)
 
 * Request data flow
