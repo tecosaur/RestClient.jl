@@ -232,8 +232,7 @@ function stream_request(req::Request, method::String)
     res, body, transfer = catch_ratelimit(
         open_stream, req.config.rategate, method, rurl, pldio;
         headers = hdrs, timeout = req.config.timeout)
-    res.status ∈ 200:299 ||
-        throw(Downloads.RequestError(res.url, res.status, "", res))
+    res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
     dtype = responsetype(req.endpoint)
     fmt = dataformat(req.endpoint, dtype)
     Elt, F = eltype(dtype), framingtype(dtype)

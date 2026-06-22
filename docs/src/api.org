@@ -47,6 +47,29 @@ ResponseError
 MalformedRequest
 #+end_src
 
+* Streaming
+
+#+begin_src @docs
+Stream
+StreamEndpoint
+SSEvent
+isstreamend
+#+end_src
+
+** Framing extension interface
+
+These methods define a stream framing. The shipped =:SSE= and =:NDJSON= framings
+cover the common cases; a client library implementing a new framing defines these.
+
+#+begin_src @docs
+RestClient.StreamFormat
+RestClient.readframe
+RestClient.framestate
+RestClient.framedata
+RestClient.remake
+RestClient.elementpayload
+#+end_src
+
 * Request interface
 
 #+begin_src @docs

@@ -19,6 +19,7 @@ makedocs(;
     pages=[
         "Introduction" => "index.md",
         "Tutorial" => "tutorial.md",
+        "Streaming" => "streaming.md",
         "API" => "api.md",
     ],
     format=Documenter.HTML(assets=["assets/favicon.ico"]),
