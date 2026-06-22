@@ -19,6 +19,8 @@ See also: [`@globalconfig`](@ref), [`RequestConfig`](@ref).
 """
 function globalconfig end
 
+globalauthdefault(::Val) = (NoAuth(), :off)
+
 """
     urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
 
@@ -51,7 +53,15 @@ function headers(::AbstractEndpoint)
 end
 
 headers(::RequestConfig, endpoint::AbstractEndpoint) = headers(endpoint)
-headers((; config, endpoint)::Request) = headers(config, endpoint)
+
+function headers((; config, endpoint)::Request)
+    own = headers(config, endpoint)
+    if authpolicy(endpoint) !== :off
+        authinfo = authheaders(authscheme(endpoint), config.key)
+        isnothing(authinfo) || push!(own, authinfo)
+    end
+    own
+end
 
 """
     parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
@@ -70,6 +80,55 @@ function parameters(::AbstractEndpoint)
 end
 
 parameters(::RequestConfig, endpoint::AbstractEndpoint) = parameters(endpoint)
+
+function parameters((; config, endpoint)::Request)
+    own = parameters(config, endpoint)
+    if authpolicy(endpoint) !== :off
+        authinfo = authparams(authscheme(endpoint), config.key)
+        isnothing(authinfo) || push!(own, authinfo)
+    end
+    own
+end
+
+"""
+    authscheme(endpoint::AbstractEndpoint) -> AuthScheme
+
+Return how `endpoint` authenticates: the [`AuthScheme`](@ref) describing where the
+request's secret (`config.key`) is placed on the wire. The library applies it to
+`key` automatically, so a standard scheme needs no [`headers`](@ref) method.
+
+The default is [`NoAuth`](@ref). Declare a scheme once per API, typically on a
+shared endpoint supertype:
+
+```julia
+RestClient.authscheme(::MyAPIEndpoint) = BearerAuth()          # Authorization: Bearer <key>
+RestClient.authscheme(::OtherEndpoint) = HeaderAuth("X-API-Key")
+```
+
+For a scheme the provided ones do not cover (request signing, OAuth flows), read
+`config.key` in a [`headers`](@ref) method directly instead.
+
+!!! note
+    Part of the `AbstractEndpoint` interface.
+"""
+authscheme(::AbstractEndpoint) = NoAuth()
+
+"""
+    authpolicy(endpoint::AbstractEndpoint) -> Symbol
+
+How `endpoint` uses authentication, one of:
+
+- `:off` — never send auth (the default);
+- `:optional` — apply the [`authscheme`](@ref) to the request's `key` if one is set,
+  but do not require it;
+- `:required` — apply it, and reject a request whose `config.key` is `nothing` during
+  validation, before sending, rather than relying on the server to return 401.
+
+The [`@endpoint`](@ref) macro sets this from the module's `@globalconfig auth=`
+default, or per endpoint via an `:auth` (required), `:authoption` (optional), or
+`:noauth` (off) marker.
+"""
+authpolicy(::AbstractEndpoint) = :off
 
 """
     validate([config::RequestConfig], endpoint::AbstractEndpoint) ->

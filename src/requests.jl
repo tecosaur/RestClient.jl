@@ -97,10 +97,8 @@ function url_parameters(params::Vector{Pair{String, String}})
     end
 end
 
-function url((; config, endpoint)::Request)
-    params = parameters(config, endpoint)
-    string(config.baseurl, '/', urlpath(config, endpoint)::String, url_parameters(params))
-end
+url(req::Request) = string(req.config.baseurl, '/', urlpath(req.config, req.endpoint)::String,
+                           url_parameters(parameters(req)))
 
 function addmimes!(headers::AbstractVector{Pair{String, String}}, ::In, ::Out) where {In, Out}
     setheaders = map(lowercase ∘ first, headers)
@@ -367,6 +365,16 @@ end
 
 function check_validation(req::Request)
     issues = validate(req)
+    if authpolicy(req.endpoint) === :required && isnothing(req.config.key)
+        autherr = "this endpoint requires authentication, but the request config has no key set (RequestConfig(url; key = ...))"
+        if isnothing(issues)
+            issues = autherr
+        elseif issues isa AbstractString
+            issues = [issues, autherr]
+        elseif issues isa AbstractVector{<:AbstractString}
+            push!(issues, autherr)
+        end
+    end
     isnothing(issues) && return
     # Legacy support for boolean validation
     if issues === true

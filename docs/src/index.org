@@ -82,6 +82,7 @@ See [[file:streaming.md][the streaming manual]] for more information.
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
 + Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
 + [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
++ [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
 + Rate limiting (by reading the relevant HTTP response headers)
 
 * Request data flow

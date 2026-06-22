@@ -230,8 +230,8 @@ $(@__MODULE__).parameters(shuf::ShuffleEndpoint) =
 $(@__MODULE__).responsetype(shuf::ShuffleEndpoint) = Deck
 ```
 """
-macro endpoint(expr::Expr)
-    einfo = extract_forms(expr; mod=__module__)
+macro endpoint(args...)
+    einfo = extract_forms(args; mod=__module__)
     efields = Symbol[f.name for f in einfo.fields]
     body = Expr[]
     # Standard components: struct, page, parameters, responsetype
@@ -268,6 +268,17 @@ macro endpoint(expr::Expr)
         :($(@__MODULE__).responsetype($self) where {$(einfo.structparams...)} = $(einfo.out))
     end
     push!(body, rt_def)
+    # Authentication (emit only the non-default methods, to avoid noise).
+    authself(name) = if isnothing(einfo.structparams)
+        :($(@__MODULE__).$name($ANAPHORIC_VAR::$(einfo.structname)))
+    else
+        :($(@__MODULE__).$name($ANAPHORIC_VAR::$(einfo.structname){$(einfo.structparams...)}) where {$(einfo.structparams...)})
+    end
+    scheme, policy = einfo.auth
+    scheme isa NoAuth ||
+        push!(body, :($(authself(:authscheme)) = $scheme))
+    policy === :off ||
+        push!(body, :($(authself(:authpolicy)) = $(QuoteNode(policy))))
     # Function (optional)
     if !isnothing(einfo.func)
         for fn in generate_funcalls(einfo; mod=__module__)
@@ -275,6 +286,21 @@ macro endpoint(expr::Expr)
         end
     end
     esc(Expr(:block, body...))
+end
+
+const AUTH_MARKERS = (:auth, :authoption, :noauth)
+
+function resolve_auth(marker::Union{Symbol, Nothing}, mod::Module)
+    scheme, policy = globalauthdefault(Val(mod))
+    if marker === :noauth
+        (NoAuth(), :off)
+    elseif marker === :auth
+        (scheme, :required)
+    elseif marker === :authoption
+        (scheme, :optional)
+    else
+        (scheme, policy)
+    end
 end
 
 function generate_funcalls(einfo; mod::Module)
@@ -354,7 +380,17 @@ function generate_funcalls(einfo; mod::Module)
     f1, f2
 end
 
-function extract_forms(expr::Expr; mod::Module)
+function extract_forms(args::Tuple; mod::Module)
+    marker, expr = if length(args) == 2 && first(args) isa QuoteNode
+        first(args).value ∈ AUTH_MARKERS ||
+            throw(ArgumentError("unknown @endpoint marker `:$(first(args).value)`; expected one of $AUTH_MARKERS"))
+        first(args).value, last(args)
+    elseif length(args) == 1
+        nothing, only(args)
+    else
+        throw(ArgumentError("@endpoint expects an endpoint form, optionally preceded by an auth marker $AUTH_MARKERS"))
+    end
+    eauth = resolve_auth(marker, mod)
     efunc, esuper, estruct, estructname, estructparams, efields, ein, emethod, eurl, eout = ntuple(_ -> nothing, 10)
     components = if Meta.isexpr(expr, :struct)
         sinfo = decompose_struct(expr)
@@ -483,7 +519,7 @@ function extract_forms(expr::Expr; mod::Module)
         estruct = Expr(:struct, false, Expr(:<:, estructname, esuper), Expr(:block, fieldlines...))
     end
     (; func=efunc, structdef=estruct, structname=estructname, structparams=estructparams,
-     fields=efields, in=ein, method=emethod, url=eurl, out=eout)
+     fields=efields, in=ein, method=emethod, url=eurl, out=eout, auth=eauth)
 end
 
 function decompose_struct(strux::Expr)

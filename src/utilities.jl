@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: © 2025 TEC <contact@tecosaur.net>
 # SPDX-License-Identifier: MPL-2.0
 
+using Base64: base64encode
+
 """
     JSONFormat()
 
@@ -19,6 +21,30 @@ mimetype(::Type{RawFormat}) = "text/plain"
 mimetype(::Type{<:JSONFormat}) = "application/json"
 
 """
+    authheaders(scheme::AuthScheme, key) -> Union{Pair{String, String}, Nothing}
+
+The header `scheme` contributes for secret `key`, or `nothing` for a parameter-based
+or absent scheme, or when `key` is `nothing`. Appended to an endpoint's own
+[`headers`](@ref) when the endpoint's [`authpolicy`](@ref) is not `:off`.
+"""
+function authheaders(::AuthScheme, ::Union{String, Nothing}) end
+
+authheaders(::BearerAuth, key::String) = "Authorization" => "Bearer $key"
+authheaders(::BasicAuth, key::String) = "Authorization" => "Basic " * base64encode(key)
+authheaders(a::HeaderAuth, key::String) = a.name => key
+
+"""
+    authparams(scheme::AuthScheme, key) -> Union{Pair{String, String}, Nothing}
+
+The query parameter `scheme` contributes for secret `key`, or `nothing` for a
+header-based or absent scheme, or when `key` is `nothing`. Appended to an endpoint's
+own [`parameters`](@ref) when the endpoint's [`authpolicy`](@ref) is not `:off`.
+"""
+function authparams(::AuthScheme, ::Union{String, Nothing}) end
+
+authparams(a::QueryAuth, key::String) = a.name => key
+
+"""
     setfield(x::T, field::Symbol, value) -> ::T
 """
 function setfield(x::T, field::Symbol, value) where {T}
@@ -30,23 +56,55 @@ function setfield(x::T, field::Symbol, value) where {T}
 end
 
 """
-    @globalconfig expr
+    @globalconfig config [auth=scheme | auth=(scheme, policy)]
 
-Define [`globalconfig`](@ref) for the current module as `expr`.
+Define [`globalconfig`](@ref) for the current module as `config`, and optionally a
+module-wide authentication default applied to endpoints defined with [`@endpoint`](@ref).
 
-This is a minor convenience macro to avoid having to write the slightly awkward
-`RestClient.globalconfig(::Val{@__MODULE__}) = expr`.
+This avoids having to write the slightly awkward
+`RestClient.globalconfig(::Val{@__MODULE__}) = config` by hand. Similarly, the
+optional `auth` clause defines a
+`RestClient.globalauthdefault(::Val{@__MODULE__})` method. The `auth` argument
+is may take one of two forms:
 
-See also: [`globalconfig`](@ref), [`RequestConfig`](@ref).
+- `auth = scheme`: the [`AuthScheme`](@ref) endpoints in this module use (e.g.
+  `BearerAuth()`); the request's `key` is applied to it. With no policy given, the
+  policy is `:off` — declare the scheme, but send it only where an endpoint opts in.
+- `auth = (scheme, policy)`: also set the [`authpolicy`](@ref), one of:
+  - `:off` — never send auth (the scheme is declared but unused here);
+  - `:optional` — send the `key` if one is set, but do not require it;
+  - `:required` — send the `key`, and reject a request that has none before sending.
+
+See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 
 # Examples
 
 ```julia
 @globalconfig RequestConfig("https://api.example.com")
+# Send a Bearer token on every endpoint when a key is set:
+@globalconfig RequestConfig("https://api.example.com") auth=(BearerAuth(), :optional)
+# Require a key on every endpoint (mark public ones `:noauth`):
+@globalconfig RequestConfig("https://api.example.com") auth=(BearerAuth(), :required)
 ```
 """
-macro globalconfig(expr::Expr)
-    :($(@__MODULE__).globalconfig(::Val{$__module__}) = $expr)
+macro globalconfig(config::Expr, opts::Expr...)
+    scheme, policy = :($(@__MODULE__).NoAuth()), QuoteNode(:off)
+    for opt in opts
+        Meta.isexpr(opt, :(=), 2) && first(opt.args) === :auth ||
+            throw(ArgumentError("@globalconfig accepts only an `auth=...` option, got `$opt`"))
+        val = opt.args[2]
+        if Meta.isexpr(val, :tuple, 2)
+            scheme, policy = val.args
+            policy isa QuoteNode && policy.value ∈ AUTH_POLICIES ||
+                throw(ArgumentError("auth policy must be one of $AUTH_POLICIES, got `$policy`"))
+        else
+            scheme = val
+        end
+    end
+    quote
+        $(@__MODULE__).globalconfig(::Val{$__module__}) = $(esc(config))
+        $(@__MODULE__).globalauthdefault(::Val{$__module__}) = ($(esc(scheme)), $policy)
+    end
 end
 
 """

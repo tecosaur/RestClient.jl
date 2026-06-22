@@ -80,6 +80,24 @@ RestClient.urlpath
 RestClient.headers
 RestClient.parameters
 RestClient.payload
+RestClient.authscheme
+RestClient.authpolicy
+#+end_src
+
+* Authentication
+
+An endpoint declares which scheme it authenticates with via an [[@ref][~authscheme~]]
+method, and whether a key is off/optional/required via [[@ref][~authpolicy~]]; the secret
+itself is the [[@ref][~RequestConfig~]]'s =key=. Both are usually set in one place with
+[[@ref][~@globalconfig~]]'s =auth== option.
+
+#+begin_src @docs
+AuthScheme
+BearerAuth
+BasicAuth
+HeaderAuth
+QueryAuth
+NoAuth
 #+end_src
 
 * Response interface

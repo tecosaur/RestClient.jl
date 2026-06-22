@@ -16,6 +16,7 @@ export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
 export FormFormat, MultipartFormat, @formdef, @multipartdef
 export MalformedRequest, ResponseError
 export Stream, StreamEndpoint, SSEvent, isstreamend
+export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth, authscheme, authpolicy
 export setfield
 
 include("types.jl")

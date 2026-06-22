@@ -94,6 +94,84 @@ Singleton type for XML request/response formats.
 struct XMLFormat <: AbstractFormat end
 
 
+# Authentication
+
+# A scheme describes *how* an API expects its secret to be presented — as a Bearer
+# header, Basic credential, a custom header, or a query parameter. This is an API fact,
+# so a wrapper declares it once with an `authscheme` method on its endpoint (like
+# `urlpath` or `responsetype`); the *secret* itself is the runtime `key` on a
+# `RequestConfig`. The library combines the two and applies the result to every request
+# automatically (see `headers`/`parameters` for a `Request`), so the common schemes need
+# no per-endpoint `headers` method. A scheme the library does not model (request signing,
+# OAuth flows) is still served by defining a `headers`/`parameters` method directly,
+# reading `config.key`.
+
+# The authentication policies an endpoint may follow (see `authpolicy`): never send
+# auth, send the key when present, or require a key before sending.
+const AUTH_POLICIES = (:off, :optional, :required)
+
+"""
+    AuthScheme
+
+Supertype for authentication schemes: *how* an API presents its secret on the wire.
+A scheme holds only API-specific shape (e.g. a header name), never the secret — the
+secret is the `key` of a [`RequestConfig`](@ref). Declare a scheme for an endpoint
+with [`authscheme`](@ref), and it is applied to `key` on every request.
+
+The provided schemes are [`BearerAuth`](@ref), [`BasicAuth`](@ref),
+[`HeaderAuth`](@ref), [`QueryAuth`](@ref), and [`NoAuth`](@ref) (the default).
+
+Non-standard authentication schemes can be handled by adjusting
+[`headers`](@ref) and [`parameters`](@ref) of endpoints on a case-by-case basis.
+"""
+abstract type AuthScheme end
+
+"""
+    NoAuth() <: AuthScheme
+
+No authentication: the default [`authscheme`](@ref). Contributes nothing, regardless
+of `key`.
+"""
+struct NoAuth <: AuthScheme end
+
+"""
+    BearerAuth() <: AuthScheme
+
+Bearer-token authentication: the `key` is sent as `Authorization: Bearer <key>`. The
+common scheme for OAuth2 access tokens and most modern token-based APIs.
+"""
+struct BearerAuth <: AuthScheme end
+
+"""
+    BasicAuth() <: AuthScheme
+
+HTTP Basic authentication (RFC 7617): the `key` (a `"username:password"` string) is
+sent as `Authorization: Basic <base64>`. Set `key = "user:pass"` on the config.
+"""
+struct BasicAuth <: AuthScheme end
+
+"""
+    HeaderAuth(name) <: AuthScheme
+
+The `key` is sent in the named request header, e.g. `HeaderAuth("X-API-Key")`. For
+APIs that authenticate with a custom header rather than `Authorization`.
+"""
+struct HeaderAuth <: AuthScheme
+    name::String
+end
+
+"""
+    QueryAuth(name) <: AuthScheme
+
+The `key` is sent as the named URL query parameter, e.g. `QueryAuth("api_key")`. For
+APIs that authenticate via the query string. Prefer a header scheme where the API
+allows it: query parameters are more likely to be logged by proxies and servers.
+"""
+struct QueryAuth <: AuthScheme
+    name::String
+end
+
+
 # Requests
 
 """
