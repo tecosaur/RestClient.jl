@@ -1,0 +1,139 @@
+#+title: API
+
+#+begin_src @meta
+CollapsedDocStrings = true
+#+end_src
+
+* Macros
+
+#+begin_src @docs
+@globalconfig
+@endpoint
+@jsondef
+@xmldef
+@formdef
+@multipartdef
+#+end_src
+
+* Request types
+
+#+begin_src @docs
+Request
+RequestConfig
+AbstractEndpoint
+SingleEndpoint
+ListEndpoint
+#+end_src
+
+* Response types
+
+#+begin_src @docs
+SingleResponse
+Single
+ListResponse
+List
+#+end_src
+
+* Errors
+
+A failed [[@ref][~perform~]] raises one of these. A request that does not validate raises
+a [[@ref][~MalformedRequest~]] before anything is sent; an unsuccessful HTTP status raises
+a [[@ref][~ResponseError~]] carrying the server's response body. A transport failure (DNS,
+connection refused, TLS, timeout) surfaces as the underlying
+=Downloads.RequestError=.
+
+#+begin_src @docs
+ResponseError
+MalformedRequest
+#+end_src
+
+* Streaming
+
+#+begin_src @docs
+Stream
+StreamEndpoint
+SSEvent
+isstreamend
+#+end_src
+
+** Framing extension interface
+
+These methods define a stream framing. The shipped =:SSE= and =:NDJSON= framings
+cover the common cases; a client library implementing a new framing defines these.
+
+#+begin_src @docs
+RestClient.StreamFormat
+RestClient.readframe
+RestClient.framestate
+RestClient.framedata
+RestClient.remake
+RestClient.elementpayload
+#+end_src
+
+* Request interface
+
+#+begin_src @docs
+RestClient.globalconfig
+RestClient.validate
+RestClient.perform
+RestClient.urlpath
+RestClient.headers
+RestClient.parameters
+RestClient.payload
+RestClient.authscheme
+RestClient.authpolicy
+#+end_src
+
+* Authentication
+
+An endpoint declares which scheme it authenticates with via an [[@ref][~authscheme~]]
+method, and whether a key is off/optional/required via [[@ref][~authpolicy~]]; the secret
+itself is the [[@ref][~RequestConfig~]]'s =key=. Both are usually set in one place with
+[[@ref][~@globalconfig~]]'s =auth== option.
+
+#+begin_src @docs
+AuthScheme
+BearerAuth
+BasicAuth
+HeaderAuth
+QueryAuth
+NoAuth
+#+end_src
+
+* Response interface
+
+#+begin_src @docs
+RestClient.responsetype
+RestClient.postprocess
+RestClient.contents
+RestClient.metadata
+#+end_src
+
+* Pagination interface
+
+#+begin_src @docs
+RestClient.nextpage
+RestClient.thispagenumber
+RestClient.remainingpages
+#+end_src
+
+* Caching interface
+
+#+begin_src @docs
+RestClient.cachelifetime
+#+end_src
+
+* Content formatting
+
+#+begin_src @docs
+RestClient.AbstractFormat
+RestClient.RawFormat
+RestClient.JSONFormat
+RestClient.XMLFormat
+RestClient.FormFormat
+RestClient.MultipartFormat
+RestClient.dataformat
+RestClient.interpretresponse
+RestClient.writepayload
+RestClient.mimetype
+#+end_src

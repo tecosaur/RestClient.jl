@@ -1,0 +1,110 @@
+#+title: RestClient.jl
+
+As simple as a RESTful API may be, there's often a fair bit of boilerplate
+involved in making well-formed requests, handling serialisation and
+deserialisation, request limiting, and result pagination.
+
+=RestClient= aims to take care of as much of this boilerplate as possible without
+compromising on flexibility. See [[file:tutorial.md][the tutorial]] for a sense of what this looks
+like in practice.
+
+* Getting started
+** Set the API configuration
+
+#+begin_src julia
+@globalconfig RequestConfig("https://api.example.com")
+#+end_src
+
+See [[@ref][~@globalconfig~]] and [[@ref][~RequestConfig~]] for more information.
+
+** Define response types
+
+#+begin_src julia
+@jsondef struct Item
+    id."item_id"::Int
+    name::String
+    description::String
+end
+
+@xmldef struct Item
+    id."@id"::Int
+    name."@name"::String
+    description."text()"::String
+end
+#+end_src
+
+See [[@ref][~@jsondef~]] and [[@ref][~@xmldef~]] for more information.
+
+** Define request payloads
+
+For endpoints that send a body, payload types can be defined just as concisely.
+=@jsondef= types double as JSON payloads, while form submissions have dedicated
+macros:
+
+#+begin_src julia
+@formdef struct Login           # application/x-www-form-urlencoded
+    username::String
+    remember."remember-me"::Bool = false
+end
+
+@multipartdef struct Upload     # multipart/form-data
+    file::Vector{UInt8}         # sent as an octet-stream part
+    metadata::Item              # an @jsondef field → JSON part
+end
+#+end_src
+
+See [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]] for more information.
+
+** Declare endpoints
+
+#+begin_src julia
+@endpoint item(id::Int) -> "items/{id}" -> Item
+#+end_src
+
+See [[@ref][~@endpoint~]] for more information.
+
+** Stream incremental responses
+
+For APIs that deliver a response piece by piece (token streams, event feeds),
+name a [[@ref][~Stream~]] output type and iterate the elements as they arrive:
+
+#+begin_src julia
+@endpoint chat(; messages) -> "messages" -> Stream{Delta}
+#+end_src
+
+See [[file:streaming.md][the streaming manual]] for more information.
+
+** Extra functionality
+
++ [[@ref Pagination-interface][Pagination]]
++ Response [[@ref RestClient.postprocess][post-processing]]
++ [[@ref Caching-interface][Caching]]
++ [[@ref RestClient.AbstractFormat][Custom data formats]]
++ Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
++ [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
++ [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
++ Rate limiting (by reading the relevant HTTP response headers)
+
+* Request data flow
+
+As detailed in the [[@ref][~Request~]] docstring, this is the flow of calls when making a
+request:
+
+#+begin_example
+         ╭─╴config╶────────────────────────────╮
+         │     ╎                               │
+         │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
+Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
+         │              ├─▶ urlpath ╾────╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
+         │              │                ├──▶ url ╾─┬─━─▶ request ╾━┬─▶ interpret ╾──▶ data
+         ├─╴endpoint╶───┼─▶ parameters ╾─╯          │               │                   │
+         │              │                           │               │             ╭─────╯
+         │              ├─▶ parameters ╾────────────┤               ╰─────────╮   │
+         │              │                           │                      postprocess ╾──▶ result
+         │             *╰─▶ payload ─▶ writepayload╶╯                           │
+         │                    ╰─▶ dataformat ╾╯                                 │
+         ╰─────────┬────────────────────────────────────────────────────────────╯
+                   ╰────▶ validate (before initiating the request)
+
+ * Only for POST requests   ╶╶ Optional first argument
+#+end_example
