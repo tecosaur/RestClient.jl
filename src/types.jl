@@ -123,9 +123,8 @@ Other fields are optional, but may be useful for changing the way requests are
 performed or handling authentication. The following additional fields can be
 provided as keyword arguments:
 
-- `key::Union{Nothing, String}`: An authentication key used to authorise requests.
-  This only serves to hold the key, because of the varied ways that authentication
-  may be performed implementation is left to individual endpoints.
+- `key::Union{Nothing, String}`: The secret used to authenticate requests.
+  How it is presented on the wire is declared by endpoints.
 - `timeout::Float64`: The timeout for the request, in seconds. This is passed to
   `Downloads.download` and defaults to `Inf`.
 - `cache::Bool`: Whether to cache the response, using lifetime information from
@@ -136,11 +135,11 @@ See also: [`@globalconfig`](@ref), [`Request`](@ref).
 # Examples
 
 ```julia-repl
-julia> RequestConfig("https://api.example.com")
-RequestConfig("https://api.example.com", RateGate(ReentrantLock(), 0.0), nothing, Inf, true)
+julia> RequestConfig("https://api.example.com", timeout = 5, cache = false)
+RequestConfig("https://api.example.com"; timeout = 5.0, cache = false)
 
 julia> RequestConfig("https://api.example.com", key = ENV["API_SECRET_KEY"])
-RequestConfig("https://api.example.com", RateGate(ReentrantLock(), 0.0), "*****", Inf, true)
+RequestConfig("https://api.example.com"; key = "*****", cache = true)
 ```
 """
 struct RequestConfig
@@ -151,8 +150,30 @@ struct RequestConfig
     cache::Bool
 end
 
-RequestConfig(baseurl::String; key::Union{Nothing, String}=nothing, timeout::Real = Inf, cache::Bool = true) =
+RequestConfig(baseurl::String; key::Union{Nothing, String} = nothing,
+              timeout::Real = Inf, cache::Bool = true) =
     RequestConfig(baseurl, RateGate(), key, Float64(timeout), cache)
+
+function Base.show(io::IO, rc::RequestConfig)
+    show(io, RequestConfig)
+    print(io, '(')
+    show(io, rc.baseurl)
+    if isnothing(rc.key)
+        print(io, "; ")
+    elseif get(io, :limit, false) === true
+        print(io, S"; key = \"{shadow:*****}\", ")
+    else
+        print(io, "; key = ")
+        show(io, rc.key)
+        print(io, ", ")
+    end
+    if rc.timeout != Inf
+        print(io, "timeout = ")
+        show(io, rc.timeout)
+        print(io, ", ")
+    end
+    print(io, "cache = ", rc.cache, ')')
+end
 
 """
     Request{kind, E<:AbstractEndpoint}
