@@ -62,8 +62,13 @@ function extract_text(node::AbstractNode)
     textnode = nothing
     for child in children(node)
         if isnothing(tag(child))
-            textnode = child
-            break
+            # Skip whitespace-only runs: XML.jl >= 0.4 preserves inter-element
+            # whitespace as text nodes, which would otherwise be picked here.
+            v = value(child)
+            if !isnothing(v) && !all(isspace, v)
+                textnode = child
+                break
+            end
         end
     end
     if !isnothing(textnode)
