@@ -124,7 +124,7 @@ mutable struct Stream{T, F}
     const body::Base.BufferStream
     const cancelled::Threads.Atomic{Bool}
     function Stream{T, F}(items, response, body, cancelled) where {T, F}
-        finalizer(close, new{T, F}(items, response, body, cancelled))
+        finalizer(closefinalized, new{T, F}(items, response, body, cancelled))
     end
 end
 
@@ -137,6 +137,23 @@ framingtype(::Type{<:Stream{T, F}}) where {T, F} = F
 # Flag the cancel before closing items, so the framer's EOF reconciliation can tell
 # a deliberate cancel from a server truncation (both collapse the transfer alike).
 Base.close(s::Stream) = (s.cancelled[] = true; close(s.items); close(s.body))
+
+# A finalizer must not wait on a lock, so close inline when both locks are free,
+# and only otherwise from a task (always spawning can crash the JIT at exit).
+function closefinalized(s::Stream)
+    if trylock(s.items)
+        try
+            if trylock(s.body.lock)
+                try close(s) finally unlock(s.body.lock) end
+                return
+            end
+        finally
+            unlock(s.items)
+        end
+    end
+    Threads.@spawn close(s)
+    nothing
+end
 
 dataformat(S::Type{<:Stream}) =
     StreamFormat{framingtype(S)}(dataformat(elementpayload(eltype(S))))
