@@ -205,6 +205,7 @@ const AC = AuthClient
             msg = sprint(showerror, err)
             @test occursin("500", msg)
             @test occursin("boom", msg)
+            @test err.body == codeunits("boom")      # still intact once shown
         end
     end
     @testset "pagination" begin

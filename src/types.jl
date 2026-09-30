@@ -404,7 +404,7 @@ function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     isempty(ex.response.message) || print(io, ' ', ex.response.message)
     print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
     isempty(ex.body) && return
-    bodystr = map(c -> if isvalid(c) && (isprint(c) || isspace(c)); c else '�' end, String(ex.body))
+    bodystr = map(c -> if isvalid(c) && (isprint(c) || isspace(c)); c else '�' end, String(copy(ex.body)))
     if ncodeunits(bodystr) <= 512
         print(io, "\n  ", rstrip(bodystr))
     else
