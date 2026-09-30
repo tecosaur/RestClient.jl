@@ -158,9 +158,8 @@ the empty string is returned.
 # Examples
 
 ```julia
-julia> url_parameters([("foo", "bar"), ("baz", "qux")])
+julia> url_parameters(["foo" => "bar", "baz" => "qux"])
 "?foo=bar&baz=qux"
-
 
 julia> url_parameters(Pair{String, String}[])
 ""

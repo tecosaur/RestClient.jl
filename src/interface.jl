@@ -13,9 +13,9 @@ This is used in [`@endpoint`](@ref) generated API functions.
 See also: [`@globalconfig`](@ref), [`RequestConfig`](@ref).
 
 !!! warning
-    Be careful not to accidentally define this function in a way that generates
-    a new `RequestConfig` every time it is called, as this will cause state information
-    (like rate limits) to be lost between requests.
+    If you define this yourself rather than with `@globalconfig`, return the same
+    `RequestConfig` each time (e.g. a `const`): a new one on every call loses state,
+    such as rate limits, between requests.
 """
 function globalconfig end
 
@@ -66,7 +66,7 @@ end
 
 Return URI parameters for the given `endpoint`.
 
-This are combined with the endpoint URL to form the full query URL.
+These are combined with the endpoint URL to form the full query URL.
 
 The default implementation returns an empty list.
 
@@ -131,7 +131,7 @@ authpolicy(endpoint::AbstractEndpoint) = last(globalauthdefault(Val(parentmodule
 
 """
     validate([config::RequestConfig], endpoint::AbstractEndpoint) ->
-        Union{Nothing, AbstractString, AbstractVector{<:AbstractString}}
+        Union{Nothing, Bool, AbstractString, AbstractVector{<:AbstractString}}
 
 Check if the request to `endpoint` according to `config` is valid.
 
@@ -139,6 +139,7 @@ The return value determines whether the request proceeds and, if not, what
 problem to report:
 - `nothing` or `String[]` means the request is valid and should proceed
 - a string or vector of strings means the request is invalid and should be aborted, with the string(s) as the reason(s)
+- `true` or `false` means valid or invalid, without a reason
 
 This is also the appropriate place to emit warnings about non-critical potential
 issues with the request, using `@warn` or `@debug`.
@@ -160,7 +161,8 @@ validate((; config, endpoint)::Request) = validate(config, endpoint)
 
 Return the payload for the given `endpoint`.
 
-This is used for POST requests, and is sent as the body of the request.
+This is sent as the body of the request, whatever its method (e.g. `:post`, `:put`,
+`:patch`, or `:query`).
 
 !!! note
     Part of the `AbstractEndpoint` interface.

@@ -47,7 +47,21 @@ function authparams(::AuthScheme, ::Union{String, Nothing}) end
 authparams(a::QueryAuth, key::String) = a.name => key
 
 """
-    setfield(x::T, field::Symbol, value) -> ::T
+    setfield(x::T, field::Symbol, value) -> T
+
+Return a copy of `x` with `field` set to `value` (converted to the field's type),
+leaving `x` itself unchanged. Useful for deriving the next request from an
+immutable endpoint, as in a [`nextpage`](@ref) method.
+
+# Errors
+
+`ArgumentError` if `T` has no field named `field`.
+
+# Examples
+
+```julia
+nextpage(e::PagedEndpoint) = setfield(e, :page, e.page + 1)
+```
 """
 function setfield(x::T, field::Symbol, value) where {T}
     fvals = ((getfield(x, f) for f in fieldnames(T))...,)
@@ -67,7 +81,7 @@ This avoids having to write the slightly awkward
 `RestClient.globalconfig(::Val{@__MODULE__}) = config` by hand. Similarly, the
 optional `auth` clause defines a
 `RestClient.globalauthdefault(::Val{@__MODULE__})` method. The `auth` argument
-is may take one of two forms:
+may take one of two forms:
 
 - `auth = scheme`: the [`AuthScheme`](@ref) endpoints in this module use (e.g.
   `BearerAuth()`); the request's `key` is applied to it. With no policy given, the

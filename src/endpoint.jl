@@ -37,7 +37,7 @@ endpoint methods:
 - [`responsetype`](@ref)
 
 In our `@endpoint israining() ...` example, in addition to defining the
-`israining` function and an (implicit) `IsrainigEndpoint` struct, the macro will
+`israining` function and an (implicit) `IsrainingEndpoint` struct, the macro will
 generate the implementations `urlpath(rain::IsrainingEndpoint) = "checkrain/\$(rain.city)"` and
 `responsetype(::IsrainingEndpoint) = Bool`.
 
@@ -65,9 +65,9 @@ See also: [`urlpath`](@ref), [`parameters`](@ref), [`payload`](@ref),
 
 ## Function forms
 
-Should you chose to include a function call as the first arrow form, a function
+Should you choose to include a function call as the first arrow form, a function
 definition with a matching signature will be generated. This requires
-[`globalconfig(::Val{@__Module__})`](@ref globalconfig) to be defined, as is
+[`globalconfig(::Val{@__MODULE__})`](@ref globalconfig) to be defined, as is
 done by [`@globalconfig`](@ref).
 
 Without a `struct` form, the arguments of the function will be used to generate
@@ -119,22 +119,22 @@ endpoint's, so a string there is its URL; a docstring for the first field goes
 after it.
 
 ```
-@endpoint ApiEndpoint
+@endpoint struct ApiEndpoint
     api(target; count) -> ...
     target::String
     count::Int = 1
 end
 ```
 
-This makes no difference to the generated code, and is purely a matter of
-personal preference (I prefer explicit structs for more complex forms).
+This makes no difference to the generated code; the explicit struct form can be
+clearer for more complex endpoints.
 
 ## Payload forms
 
 HTTP methods like `:post`, `:put`, and `:patch` include a content payload (also
 referred to as the request body). The payload can be specified with a _payload
 form_ that names a field of the endpoint struct, names a global variable, or is
-an expression is evaluated to generate the payload value (with the current
+an expression evaluated to generate the payload value (with the current
 endpoint available through the anaphoric variable `$ANAPHORIC_VAR`).
 
 Unless otherwise specified, an endpoint that includes a payload is assumed to be
@@ -152,11 +152,11 @@ This is equivalent to the explicit HTTP method form:
 
 In this example `content` is a `String`, and so a `:post` request is made to
 `"\$BASEURL/create"` with `content` as the payload/body. More complex types are
-encoded according with [`writepayload`](@ref) according to [`dataformat`](@ref).
+encoded by [`writepayload`](@ref), according to their [`dataformat`](@ref).
 
 ## URL forms
 
-The endpoint URL is represent by a string, relative to the base URL of the API
+The endpoint URL is represented by a string, relative to the base URL of the API
 (a leading `/` is stripped). Such paths usually consist of a path component, and
 optionally a query component.
 
@@ -172,13 +172,15 @@ global variables) by surrounding them with curly braces.
 ```
 
 Parameters with a value of `nothing` are omitted from the query string, and a
-component without a value (`?verbose`) is sent as written.
+component without a value (`?verbose`) is sent as written. Other values are
+converted with `string`, so to send a collection (say, a `Vector` as repeated
+keys), define a [`parameters`](@ref) method instead.
 
 For convenience, a parameter by the same name as the field can be referred to by
 the field name alone (e.g. `?{var}` instead of `?var={var}`).
 
 In more complex cases, arbitrary Julia code can be included in the curly braces.
-This code will be evaluated with the endpoint value bound the the anaphoric
+This code will be evaluated with the endpoint value bound to the anaphoric
 variable `$ANAPHORIC_VAR` as well as `$CONFIG_VAR` for the request
 configuration.
 
@@ -262,7 +264,7 @@ end
 $(@__MODULE__).urlpath(shuf::ShuffleEndpoint) =
     "deck/\$(shuf.deck)/shuffle"
 $(@__MODULE__).parameters(shuf::ShuffleEndpoint) =
-    ["remaining" => string(shuf.remaining)]
+    ["remaining" => ifelse(shuf.remaining, "1", "0")]
 $(@__MODULE__).responsetype(shuf::ShuffleEndpoint) = Deck
 ```
 """
@@ -460,7 +462,7 @@ function extract_forms(args::Tuple; mod::Module)
         if Meta.isexpr(subject, :call)
             efunc = subject
         else
-            throw(ArgumentError("Supertype declarations may be applied the function or stuct"))
+            throw(ArgumentError("A supertype declaration may only be applied to the function or struct form"))
         end
     end
     # 2: Check for `func(...)` (but not `:func(...)`, that's a HTTP method spec)

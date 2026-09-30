@@ -106,5 +106,5 @@ Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │    
          ╰─────────┬────────────────────────────────────────────────────────────╯
                    ╰────▶ validate (before initiating the request)
 
- * Only for POST requests   ╶╶ Optional first argument
+ * Only with a payload      ╶╶ Optional first argument
 #+end_example
