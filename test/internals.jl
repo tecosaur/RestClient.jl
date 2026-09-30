@@ -112,6 +112,16 @@ end
     @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> "a" * x
 end
 
+@testset "URL templates" begin
+    interp(str; kw...) = RestClient.interp_curlies(str; varname = :self, localvars = Symbol[],
+                                                   knownfields = [:x], mod = @__MODULE__, kw...)
+    @test interp("a\\{b}") == "a{b}"                         # escaped brace is literal
+    @test interp("a\\\\b") == "a\\b"                         # escaped backslash
+    @test interp("a//b///{x}//c"; ispath = true) ==
+        Expr(:call, GlobalRef(Base, :string), "a/b/", :($(RestClient.encode_uri_component)(self.x)), "/c")
+    @test interp("a//b") == "a//b"                           # only paths are collapsed
+end
+
 # A trailing result type may be omitted: the body is discarded and the endpoint
 # returns `nothing`. The result type is distinguished from a payload by shape, so
 # `in -> url` (payload, no result) parses as well as a bare `url`.

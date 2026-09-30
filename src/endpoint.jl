@@ -639,7 +639,7 @@ function parse_endpoint_url(url::String; kwargs...)
         url, nothing
     end
     path = chopprefix(path, "/")
-    isnothing(query) && return interp_curlies(String(path); percentescape=true, kwargs...), nothing
+    isnothing(query) && return interp_curlies(String(path); ispath=true, kwargs...), nothing
     components = split(query, '&')
     parameters = Expr[]
     function mkparam(key, val)
@@ -663,43 +663,49 @@ function parse_endpoint_url(url::String; kwargs...)
             throw(ArgumentError("Invalid query component $comp"))
         end
     end
-    interp_curlies(String(path); percentescape=true, kwargs...), parameters
+    interp_curlies(String(path); ispath=true, kwargs...), parameters
 end
 
 """
-    interp_curlies(str::String; filename::String = "unknown", kwargs...)
+    interp_curlies(str::String; filename::String = "unknown", ispath::Bool = false, kwargs...)
 
 Interpret `{curly}` expressions in `str` with `varform` (passing through `kwargs`).
+A backslash makes the next character literal (e.g. `\\{`).
+
+With `ispath`, interpolated values are percent-encoded and runs of `/` in the
+literal text are collapsed.
 """
-function interp_curlies(str::String; filename::String = "unknown", percentescape::Bool=false, kwargs...)
+function interp_curlies(str::String; filename::String = "unknown", ispath::Bool = false, kwargs...)
     components = Union{String, Expr}[]
-    lastidx = idx = firstindex(str)
-    escaped = false
-    while idx < ncodeunits(str)
-        if escaped
-            escaped = false
-            idx += 1
-        elseif str[idx] == '\\'
-            escaped = true
-            idx += 1
-        elseif str[idx] == '{'
-            lastidx < idx &&
-                push!(components, str[lastidx:prevind(str, idx)])
+    literal = IOBuffer()
+    function flushliteral()
+        text = String(take!(literal))
+        ispath && (text = replace(text, r"/{2,}" => "/"))
+        isempty(text) || push!(components, text)
+    end
+    idx = firstindex(str)
+    while idx <= lastindex(str)
+        char = str[idx]
+        if char == '\\' && idx < lastindex(str)
+            idx = nextind(str, idx)
+            print(literal, str[idx])
+            idx = nextind(str, idx)
+        elseif char == '{'
+            flushliteral()
             expr, idx = Meta.parseatom(str, idx; filename)
             Meta.isexpr(expr, :braces, 1) ||
                 throw(ArgumentError("Expected single {curly} form in URL, instead saw $expr"))
-            exval = first(expr.args)
-            exvar = varform(exval; kwargs...)
-            push!(components, if percentescape; :($encode_uri_component($exvar)) else exvar end)
-            lastidx = idx
+            exvar = varform(first(expr.args); kwargs...)
+            push!(components, if ispath; :($encode_uri_component($exvar)) else exvar end)
         else
+            print(literal, char)
             idx = nextind(str, idx)
         end
     end
-    if lastidx <= lastindex(str)
-        push!(components, str[lastidx:end])
-    end
-    if length(components) == 1
+    flushliteral()
+    if isempty(components)
+        ""
+    elseif length(components) == 1
         first(components)
     else
         Expr(:call, GlobalRef(Base, :string), components...)
