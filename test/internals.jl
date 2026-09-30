@@ -18,6 +18,10 @@ sample_response(; status = 200,
                            "cache-control" => "max-age=600"]) =
     Response("https", "https://api.example.com/thing", status,
              "HTTP/1.1 $status OK", Pair{String, String}[headers...])
+
+# Fixtures
+struct PagedListEP <: ListEndpoint end
+RestClient.urlpath(::PagedListEP) = "p"
 struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
@@ -348,5 +352,20 @@ end
     @testset "path with a query" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
         @test RestClient.url(req) == "http://x/search?q=1&api_key=k"
+    end
+end
+
+@testset "responses" begin
+    @testset "List display" begin
+        list = RestClient.List{String, PagedListEP}(
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}())
+        bullets(rows; limit = true) = count(startswith("  • "), split(
+            sprint(show, MIME("text/plain"), list; context = (:displaysize => (rows, 80), :limit => limit)), '\n'))
+        shown = sprint(show, MIME("text/plain"), list; context = (:displaysize => (14, 80), :limit => true))
+        @test bullets(14) == 7                                   # 14 rows - 4 margin - 3 marker
+        @test occursin("93 items omitted", shown)
+        @test occursin("\"1\"", shown) && occursin("\"100\"", shown)
+        @test bullets(2) == 2
+        @test bullets(14; limit = false) == 100                  # e.g. written to a file
     end
 end
