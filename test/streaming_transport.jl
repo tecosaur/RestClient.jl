@@ -49,6 +49,35 @@ function run(with_stream_server, slow_interval)
     end
 end
 
+# The transfer can't finish (and free its curl handle) while the head is read,
+# because its first body write is held until then.
+@testset "head gate" begin
+    body = Base.BufferStream()
+    gate = RestClient.HeadGate(body)
+    writer = Threads.@spawn (write(gate, "first"); write(gate, "second"))
+    @test take!(gate.signal) === :body
+    sleep(0.1)
+    @test !istaskdone(writer)                   # held at the first write
+    @test bytesavailable(body) == 0
+    notify(gate.released)
+    wait(writer)
+    close(body)
+    @test read(body, String) == "firstsecond"   # then everything passes through
+end
+
+# Short bodies finish soonest, so many in turn exercise reading the head of a
+# finishing transfer (which once yielded garbage statuses, or crashed).
+@testset "head of a finishing transfer" begin
+    with_stream_server() do base
+        statuses = map(1:500) do _
+            (; response, body, transfer) = open_get("$base/ndjson")
+            quietclose(body, transfer)
+            response.status
+        end
+        @test all(==(200), statuses)
+    end
+end
+
 @testset "transport failure" begin
     # nothing is listening on this port → RequestError, not a bogus Response
     @test_throws RequestError open_get("http://127.0.0.1:1/x"; timeout = 2.0)
