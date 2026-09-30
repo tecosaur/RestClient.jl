@@ -36,6 +36,10 @@ module XMLClient
         # optional scalar via a child-node path: exercises node-unwrap, not the String path
         size."size"::Union{Int, Nothing} = nothing
     end
+    @xmldef struct NothingDefaults
+        maybe."@m"::Union{Int, Nothing}     # defaults to nothing
+        flags."flag"::Vector{Nothing}       # doesn't: Nothing is only a parameter
+    end
     @xmldef struct Untyped
         text."@t"             # untyped field holding an attribute string
         node."child"          # untyped field holding child node(s)
@@ -60,6 +64,11 @@ end
     @test book.year == 1937                   # @attr parsed to Int
     @test book.ratio == 0.5                   # @attr parsed to Float64
     @test book.isbn == "978-0"                # optional present
+end
+
+@testset "`nothing` defaults" begin
+    @test XC.NothingDefaults(flags = Nothing[]).maybe === nothing
+    @test_throws UndefKeywordError XC.NothingDefaults()
 end
 
 @testset "optional" begin

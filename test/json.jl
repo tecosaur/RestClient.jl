@@ -31,6 +31,10 @@ module JSONClient
     @jsondef Dict struct Scores
         values::Dict{String, Int}
     end
+    @jsondef struct NothingDefaults
+        maybe::Union{Int, Nothing}          # defaults to nothing
+        flags::Dict{String, Nothing}        # doesn't: Nothing is only a parameter
+    end
 end
 
 const JC = JSONClient
@@ -69,6 +73,11 @@ end
         back = jsonparse(JC.Item, jsonwrite(orig))
         @test back.name == orig.name && back.id == orig.id
     end
+end
+
+@testset "`nothing` defaults" begin
+    @test JC.NothingDefaults(flags = Dict{String, Nothing}()).maybe === nothing
+    @test_throws UndefKeywordError JC.NothingDefaults()
 end
 
 @testset "show" begin
