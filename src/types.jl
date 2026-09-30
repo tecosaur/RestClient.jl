@@ -348,7 +348,7 @@ end
 function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     print(io, "HTTP ", ex.response.status)
     isempty(ex.response.message) || print(io, ' ', ex.response.message)
-    print(io, " from ", ex.response.url)
+    print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
     isempty(ex.body) && return
     bodystr = map(c -> if isvalid(c) && (isprint(c) || isspace(c)); c else '�' end, String(ex.body))
     if ncodeunits(bodystr) <= 512

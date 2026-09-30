@@ -34,7 +34,6 @@ How many times a rate-limited request is attempted before giving up.
 """
 const RATELIMIT_MAX_ATTEMPTS = 5
 
-
 """
     encode_uri_component(io::IO, str::AbstractString)
 
@@ -231,18 +230,44 @@ end
 
 # Utility functions
 
-function debug_request(method::String, url::String, headers, payload::Union{IO, Nothing} = nothing)
+# The header and (URI-encoded) parameter values `req`'s auth adds, to redact from debug output
+function authsecrets(req::Request)
+    secrets = String[]
+    authpolicy(req.endpoint) === :off && return secrets
+    scheme, key = authscheme(req.endpoint), req.config.key
+    authheader = authheaders(scheme, key)
+    isnothing(authheader) || push!(secrets, last(authheader))
+    authparam = authparams(scheme, key)
+    isnothing(authparam) || push!(secrets, encode_uri_component(last(authparam)))
+    filter!(!isempty, secrets)
+end
+
+redactsecrets(str::AbstractString, secrets::Vector{String}) =
+    if isempty(secrets) str else replace(str, (secret => "*****" for secret in secrets)...) end
+
+const DEBUG_DIR = Ref("")
+const DEBUG_DIR_LOCK = ReentrantLock()
+
+# A private (0o700), per-session directory for debug dumps, created on first use.
+function debugfile(name::String)
+    dir = @lock DEBUG_DIR_LOCK begin
+        isempty(DEBUG_DIR[]) && (DEBUG_DIR[] = mktempdir(prefix = "restclient-debug-"))
+        DEBUG_DIR[]
+    end
+    joinpath(dir, name)
+end
+
+function debug_request(method::String, url::String, headers, payload::Union{IO, Nothing} = nothing;
+                       secrets::Vector{String} = String[])
+    url = redactsecrets(url, secrets)
     payloadinfo = if isnothing(payload)
         S""
     else
-        dumpfile = joinpath(tempdir(), "rest-request.http")
-        @static if isdefined(Base.Filesystem, :temp_cleanup_later)
-            isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
-        end
+        dumpfile = debugfile("request.http")
         open(dumpfile, "w") do io
             println(io, method, ' ', url)
             for (k, v) in headers
-                println(io, k, ": ", v)
+                println(io, k, ": ", redactsecrets(v, secrets))
             end
             println(io)
             mark(payload)
@@ -254,7 +279,7 @@ function debug_request(method::String, url::String, headers, payload::Union{IO, 
     strheaders = if isempty(headers)
         S""
     else
-        join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
+        join((S"\n       {emphasis:$k:} $(redactsecrets(v, secrets))" for (k, v) in headers), "")
     end
     S"{inverse,bold,magenta: $method } $payloadinfo{light,underline:$url}$strheaders"
 end
@@ -265,20 +290,16 @@ const MUNDANE_HEADERS = (
     # CDN headers
     "report-to", "reporting-endpoints", "nel", "via", "cf-cache-status", "cf-ray")
 
-function debug_response(url::String, res, buf::IOBuffer)
-    face, status, headers, msg = if res isa Downloads.RequestError
-        :error, res.response.status, res.response.headers, res.response.message
-    else
-        dumpfile = joinpath(tempdir(), "rest-response.http")
-        @static if isdefined(Base.Filesystem, :temp_cleanup_later)
-            isfile(dumpfile) || Base.Filesystem.temp_cleanup_later(dumpfile)
-        end
-        nb = open(io -> dumpresponse(io, res, buf), dumpfile, "w")
-        statuscolor = ifelse(res.status ∈ 200:299, :success, :warning)
-        statuscolor, res.status, res.headers, S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
-    end
-    nhiddenheaders = sum(h -> lowercase(first(h)) ∈ MUNDANE_HEADERS, headers)
-    headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, headers)
+function debug_response(url::String, res::Downloads.Response, buf::IOBuffer;
+                        secrets::Vector{String} = String[])
+    url = redactsecrets(url, secrets)
+    dumpfile = debugfile("response.http")
+    shownres = Downloads.Response(res.proto, redactsecrets(res.url, secrets), res.status, res.message, res.headers)
+    nb = open(io -> dumpresponse(io, shownres, buf), dumpfile, "w")
+    face = ifelse(res.status ∈ 200:299, :success, :warning)
+    msg = S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
+    nhiddenheaders = sum(h -> lowercase(first(h)) ∈ MUNDANE_HEADERS, res.headers; init = 0)
+    headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, res.headers)
     strheaders = if isempty(headers)
         S""
     else
@@ -289,7 +310,7 @@ function debug_response(url::String, res, buf::IOBuffer)
     else
         S"\n       {emphasis:⋮} {italic,light:$nhiddenheaders hidden (mundane)}"
     end
-    S"{inverse,bold,$face: $status } $msg {light,underline:$url}$strheaders$strhiddenheaders"
+    S"{inverse,bold,$face: $(res.status) } $msg {light,underline:$url}$strheaders$strhiddenheaders"
 end
 
 function handle_response(req::Request, res::Downloads.Response, body::IO)
@@ -304,32 +325,14 @@ end
 
 # HTTP method implementations
 
-function http_request(method::String, url::String, ::Nothing = nothing;
+function http_request(method::String, url::String, payload::Union{IO, Nothing} = nothing;
                       headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                      timeout::Float64 = Inf)
+                      timeout::Float64 = Inf, secrets::Vector{String} = String[])
     buf = IOBuffer()
-    @debug debug_request(method, url, headers) _file=nothing
-    res = Downloads.request(url; method, output=buf, headers, timeout)
+    @debug debug_request(method, url, headers, payload; secrets) _file=nothing
+    res = Downloads.request(url; method, output=buf, input=payload, headers, timeout)
     seekstart(buf)
-    @debug debug_response(url, res, buf) _file=nothing
-    res isa Downloads.RequestError && throw(res)
-    res, buf
-end
-
-function http_request(method::String, url::String, payload::Union{<:IO, <:AbstractString, Nothing};
-                      headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                      timeout::Float64 = Inf)
-    buf = IOBuffer()
-    input = if payload isa IO
-        payload
-    elseif payload isa AbstractString
-        IOBuffer(payload)
-    end
-    @debug debug_request(method, url, headers, input) _file=nothing
-    res = Downloads.request(url; method, output=buf, input, headers, timeout)
-    seekstart(buf)
-    @debug debug_response(url, res, buf) _file=nothing
-    res isa Downloads.RequestError && throw(res)
+    @debug debug_response(url, res, buf; secrets) _file=nothing
     res, buf
 end
 
@@ -363,11 +366,11 @@ end
 
 function cached_request(req::Request, method::String, pldtype::Type, pldio::Union{IO, Nothing})
     rurl, headers = url(req), mimeheaders(req, pldtype)
+    timeout, secrets = req.config.timeout, authsecrets(req)
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
         method ∈ ("GET", "HEAD") # RFC 9111 §3: only GET/HEAD are cacheable
-    iscacheable || return http_request(method, rurl, pldio; headers, timeout=req.config.timeout)
-    res, body, wascached = http_cached(
-        method, rurl, pldio; headers, timeout=req.config.timeout)
+    iscacheable || return http_request(method, rurl, pldio; headers, timeout, secrets)
+    res, body, wascached = http_cached(method, rurl, pldio; headers, timeout, secrets)
     if !wascached && res.status ∈ 200:299
         cachesave(req, rurl, method, headers,
                   if !isnothing(pldio) seekstart(pldio) end,
@@ -424,16 +427,12 @@ perform(req::Request{:delete}) = payload_request(req, "DELETE", payload(req))
 
 function perform(req::Request{:head})
     check_validation(req)
-    function head_request(url::String; headers, timeout)
-        @debug debug_request("HEAD", url, headers) _file=nothing
-        reqres = Downloads.request(url; method = "HEAD", headers, timeout)
-        @debug debug_response(url, reqres, IOBuffer()) _file=nothing
-        (reqres,)
+    rurl, hdrs, secrets = url(req), headers(req), authsecrets(req)
+    res, = catch_ratelimit(req.config.rategate; maxwait = req.config.timeout) do
+        @debug debug_request("HEAD", rurl, hdrs; secrets) _file=nothing
+        headres = Downloads.request(rurl; method = "HEAD", headers = hdrs, timeout = req.config.timeout)
+        @debug debug_response(rurl, headres, IOBuffer(); secrets) _file=nothing
+        (headres,)
     end
-    res, = catch_ratelimit(
-        head_request, req.config.rategate, url(req);
-        maxwait=req.config.timeout,
-        headers=headers(req),
-        timeout=req.config.timeout)
     postprocess(res, req, res.status ∈ 200:299)
 end

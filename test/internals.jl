@@ -166,6 +166,11 @@ RestClient.headers(::SharedHeadersEP) = SHARED_HEADERS
 RestClient.parameters(::SharedHeadersEP) = SHARED_PARAMS
 RestClient.authscheme(::SharedHeadersEP) = BearerAuth()
 RestClient.authpolicy(::SharedHeadersEP) = :optional
+struct QueryEP <: AbstractEndpoint end
+RestClient.urlpath(::QueryEP) = "p"
+RestClient.authscheme(::QueryEP) = QueryAuth("api_key")
+RestClient.authpolicy(::QueryEP) = :optional
+
 @testset "validation results" begin
     keyed = RequestConfig("http://x"; key = "k")
     check(issues; config = keyed) =
@@ -257,6 +262,23 @@ end
     @test_throws ArgumentError once()
 end
 
+@testset "debug output redacts auth secrets" begin
+    breq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), SharedHeadersEP())
+    qreq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), QueryEP())
+    @test RestClient.authsecrets(breq) == ["Bearer s3cr/t"]
+    @test RestClient.authsecrets(qreq) == ["s3cr%2Ft"]
+    secrets = [RestClient.authsecrets(breq); RestClient.authsecrets(qreq)]
+    shown = string(RestClient.debug_request("GET", RestClient.url(qreq), RestClient.headers(breq),
+                                            IOBuffer("body"); secrets))
+    @test !occursin("s3cr", shown)
+    @test occursin("api_key=*****", shown)
+    @test occursin("Authorization: *****", shown)
+    # ...and from a ResponseError's display
+    res = Response("http", RestClient.url(qreq), 500, "HTTP/1.1 500", Pair{String, String}[])
+    shownerror = sprint(showerror, RestClient.ResponseError(qreq, res, UInt8[]))
+    @test !occursin("s3cr", shownerror)
+    @test occursin("api_key=*****", shownerror)
+end
 
 @testset "List display elides the middle" begin
     list = RestClient.List{String, PagedListEP}(

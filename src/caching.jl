@@ -224,7 +224,7 @@ Perform an HTTP request, using a cached response if available.
 """
 function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} = nothing;
                      headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                     timeout::Float64 = Inf)
+                     timeout::Float64 = Inf, secrets::Vector{String} = String[])
     ckey = cachekey(url, method, headers, payload)
     cfile = joinpath(cachedir(), ckey * ".http")
     isfile(cfile) || @goto freshreq
@@ -237,7 +237,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
             rm(cfile)
             @goto freshreq
         end
-        @debug debug_request("CACHE", url, headers, payload)
+        @debug debug_request("CACHE", url, headers, payload; secrets)
         res, io, true
     elseif etime + CACHE_STALE_DURATION >= ceil(Int, time())
         io = open(cfile)
@@ -263,7 +263,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
             mtime = Dates.format(unix2datetime(ctime(cfile)), HTTP_DATE_FORMAT)
             push!(mheaders, "if-modified-since" => mtime)
         end
-        eres, buf = http_request(method, url, payload; headers=mheaders, timeout)
+        eres, buf = http_request(method, url, payload; headers=mheaders, timeout, secrets)
         if eres.status == 304 # RFC 9110 §15.4.5: Not Modified — cached response still valid
             close(buf)
             @debug S"{inverse,magenta,bold: CACHE } stale entry is valid"
@@ -280,7 +280,7 @@ function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} 
         @goto freshreq
     end
     @label freshreq
-    res, buf = http_request(method, url, payload; headers, timeout)
+    res, buf = http_request(method, url, payload; headers, timeout, secrets)
     res, buf, false
 end
 
