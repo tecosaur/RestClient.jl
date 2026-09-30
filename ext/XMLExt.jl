@@ -24,11 +24,9 @@ function RestClient.interpretresponse(data::AbstractVector{UInt8}, ::RestClient.
     parsexml(T, root)
 end
 
-function writexml end
-
-function RestClient.writepayload(dest::IO, ::RestClient.XMLFormat, data)
-    writexml(dest, data)
-end
+RestClient.writepayload(::IO, ::RestClient.XMLFormat, ::T) where {T} =
+    throw(ArgumentError("Cannot send a $T as XML: @xmldef types are only read from responses. \
+                         To send one, define `RestClient.writepayload(io::IO, ::RestClient.XMLFormat, data::$T)`."))
 
 RestClient.mimetype(::Type{RestClient.XMLFormat}) = "application/xml"
 
@@ -36,20 +34,15 @@ RestClient.mimetype(::Type{RestClient.XMLFormat}) = "application/xml"
 
 abstract type XMLParseException <: Exception end
 
-struct XMLMissingAttribute{N <: AbstractNode} <: XMLParseException
-    node::N
-    attr::String
-end
-
-struct XMLMissingChild{N <: AbstractNode} <: XMLParseException
-    node::N
-    tag::String
-end
-
 struct XMLMultipleChildren{N <: AbstractNode} <: XMLParseException
     node::N
     tag::String
 end
+
+Base.showerror(io::IO, ex::XMLMultipleChildren) =
+    print(io, "Expected one <", ex.tag, "> in <", tag(ex.node), ">, but found several. \
+               Select one with an index (`", ex.tag, "[1]`), or take them all with a \
+               Vector-typed field.")
 
 function extract_attr(node::AbstractNode, attr::String)
     attrs = attributes(node)
@@ -143,7 +136,9 @@ macro xpath(spec::String)
             else
                 intidx = tryparse(Int, idx)
                 isnothing(intidx) && throw(ArgumentError("Unrecognised index form: [$idx]"))
-                body = :(get(extract_children($body, $(String(path))), $intidx, nothing))
+                body = :(let childs = extract_children($body, $(String(path)))
+                             if !isnothing(childs) get(childs, $intidx, nothing) end
+                         end)
             end
         else
             # Terminal segment returns the matching child vector (so unwrapped
@@ -161,6 +156,7 @@ end
 
 parsexml(::Type{Any}, value) = value
 parsexml(::Type{Any}, content::String) = XML.unescape(content)
+parsexml(::Type{Any}, ::Nothing) = nothing
 parsexml(::Type{String}, content::String) = XML.unescape(content)
 parsexml(::Type{Symbol}, content::String) = Symbol(parsexml(String, content))
 parsexml(::Type{T}, content::String) where {T} = parse(T, parsexml(String, content))
@@ -171,17 +167,23 @@ parsexml(::Type{T}, node::AbstractNode) where {T <: Union{AbstractString, Number
 parsexml(::Type{T}, ::Nothing) where {T} =
     throw(ArgumentError("Required XML field of type `$T` is missing or empty"))
 
+# A single-valued field takes exactly one of the matching children
+function parsexml(::Type{T}, nodes::Vector{<:AbstractNode}) where {T}
+    isempty(nodes) && return parsexml(T, nothing)
+    length(nodes) == 1 ||
+        throw(ArgumentError("Expected one <$(tag(first(nodes)))> element for a field of type \
+                             `$T`, but found $(length(nodes)); use a Vector-typed field to take all"))
+    parsexml(T, only(nodes))
+end
+parsexml(::Type{Any}, nodes::Vector{<:AbstractNode}) = nodes
+
 parsexml(::Type{Union{T, Nothing}}, ::Nothing) where {T} = nothing
 parsexml(::Type{Union{T, Nothing}}, content::String) where {T} = parsexml(T, content)
-function parsexml(::Type{Union{T, Nothing}}, x) where {T}
-    if x isa Vector{<:AbstractNode}
-        # Empty vector ≡ no match. Otherwise, unwrap to the first element
-        # unless the field genuinely wants a vector.
-        isempty(x) && return nothing
-        T <: Vector || (x = first(x))
-    end
-    parsexml(T, x)
+function parsexml(::Type{Union{T, Nothing}}, nodes::Vector{<:AbstractNode}) where {T}
+    isempty(nodes) && return nothing
+    parsexml(T, if T <: Vector nodes else first(nodes) end)
 end
+parsexml(::Type{Union{T, Nothing}}, x) where {T} = parsexml(T, x)
 
 # Construction
 
@@ -259,7 +261,7 @@ macro xmldef(struc::Expr)
         esc(structname)
     end
     fieldparsers = Any[]
-    for (; xml, type, default) in fields
+    for (i, (; xml, default)) in enumerate(fields)
         node = if !isnothing(xml)
             ex = Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")),
                       __source__, xml)
@@ -267,11 +269,21 @@ macro xmldef(struc::Expr)
         else
             :node
         end
-        ftype = if isnothing(type) Any else esc(type) end
-        push!(fieldparsers, :(parsexml($ftype, $node)))
+        parsefield(from) = :(parsexml(fieldtype(S, $i), $from))
+        push!(fieldparsers, if isnothing(default) parsefield(node) else
+            :(let found = $node
+                  if isnothing(found) || found isa Vector && isempty(found)
+                      $(esc(default))
+                  else
+                      $(parsefield(:found))
+                  end
+              end)
+        end)
     end
-    push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{$structref}, node::$AbstractNode)
-                      $(structref)($(fieldparsers...))
+    push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{S}, node::$AbstractNode) where {S <: $(esc(structname))}
+                      S isa UnionAll &&
+                          throw(ArgumentError("Cannot parse XML as $S without its type parameters (e.g. $S{Int})"))
+                      S($(fieldparsers...))
                   end))
     # Declare that this struct is XML formatted
     push!(body, :($RestClient.dataformat(::Type{$structref}) = XMLFormat()))

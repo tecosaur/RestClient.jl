@@ -268,6 +268,11 @@ subset of supported XPath components are:
 - `nodetag[i]` to extract the `i`-th child of type `nodetag`
 - `nodetag[last()]` to extract the last child of type `nodetag`
 
+A field whose XPath matches nothing takes its default value. Unlike plain
+`@kwdef`, a default can't refer to other fields. A `Vector` field takes every
+matching element, a `Union{…, Nothing}` field the first of several, and any
+other field requires exactly one.
+
 !!! warning "Soft XML dependency"
     This macro is implemented in a package extension, and so
     requires `XML` to be loaded before it can be used.
