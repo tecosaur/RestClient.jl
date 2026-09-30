@@ -326,6 +326,7 @@ end
         @test_throws MalformedRequest check(false)
         @test_throws MalformedRequest check("bad")
         @test_throws ArgumentError check(42)
+        @test MalformedRequest(Request{:get}(keyed, PlainEP()), [SubString("ab", 1, 1)]).issues == ["a"]
         @testset "missing key" begin
             issues = ["bad"]
             err = try check(issues; config = RequestConfig("http://x")) catch e; e end

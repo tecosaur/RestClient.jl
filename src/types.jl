@@ -363,10 +363,13 @@ An exception type for requests that fail validation.
 
 See also: [`validate`](@ref), [`Request`](@ref).
 """
-struct MalformedRequest{R <: Request, S <: AbstractString} <: Exception
+struct MalformedRequest{R <: Request} <: Exception
     request::R
-    issues::Vector{S}
+    issues::Vector{String}
 end
+
+MalformedRequest(request::Request, issues::AbstractVector{<:AbstractString}) =
+    MalformedRequest{typeof(request)}(request, collect(String, issues))
 
 function Base.showerror(io::IO, @nospecialize(ex::MalformedRequest))
     print(io, "Malformed request:")
