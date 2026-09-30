@@ -55,6 +55,9 @@ module IntegrationClient
     @endpoint login(; form::LoginForm) -> form -> "echo" -> Echoed
     @endpoint multiupload(; form::UploadForm) -> form -> "echo" -> Echoed
     @endpoint exists(path::String) -> :head("{path}") -> Bool
+    @endpoint notify(; item::Item) -> item -> :post("echo")   # no result type ⇒ returns nothing
+    @endpoint touch_() -> "items/1"                           # bare URL, no result type
+    @endpoint ping_cacheable() -> "cacheable"                  # cacheable route, no result type
     @endpoint limited() -> "ratelimited" -> Item
     @endpoint throttled() -> "throttled" -> Item
     @endpoint cached() -> "cacheable" -> Item
@@ -126,6 +129,25 @@ const AC = AuthClient
         @testset "empty" begin
             with_server() do baseurl, _
                 @test isempty(IC.search(cfg(baseurl), q = "x", limit = 0))
+            end
+        end
+    end
+    @testset "no result type" begin
+        @testset "discarded" begin
+            # The server replies 200 with a JSON body; the endpoint declares no
+            # result type, so the body is dropped and the call returns nothing.
+            with_server() do baseurl, _
+                @test IC.notify(cfg(baseurl), item = IC.Item("event", 1)) === nothing
+                @test IC.touch_(cfg(baseurl)) === nothing
+            end
+        end
+        @testset "never cached" begin
+            with_server() do baseurl, state
+                IC.ping_cacheable(cfg(baseurl)); IC.ping_cacheable(cfg(baseurl))
+                @test state.requests == 2
+                @test !isfile(joinpath(RestClient.cachedir(),
+                                       RestClient.cachekey("$baseurl/cacheable", "GET",
+                                                           Pair{String, String}[], nothing) * ".http"))
             end
         end
     end

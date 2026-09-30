@@ -19,7 +19,7 @@ by defining an API-specific abstract subtype and attaching generic methods to it
 urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
 headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
-responsetype(endpoint::AbstractEndpoint) -> Union{Type, Nothing}
+responsetype(endpoint::AbstractEndpoint) -> Type
 validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
 postprocess([response::Downloads.Response], request::Request, data) -> Any
 ```
