@@ -432,6 +432,9 @@ end
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
         @test RestClient.url(req) == "http://x/search?q=1&api_key=k"
     end
+    @testset "base URL with a trailing slash" begin
+        @test RestClient.url(Request{:get}(RequestConfig("http://x/api/"), PlainEP())) == "http://x/api/p"
+    end
     @testset "auth leaves endpoint lists" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())
         for _ in 1:2
