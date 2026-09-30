@@ -27,6 +27,19 @@ struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
 RestClient.authpolicy(::QueryPathEP) = :optional
+
+struct OneContent <: SingleResponse{Int}
+    note::String
+    value::Int
+end
+struct TwoContents <: SingleResponse{Int}
+    a::Int
+    b::Int
+end
+struct ListContent <: ListResponse{String}
+    total::Int
+    items::Vector{String}
+end
 struct Row
     a::Int
     b::String
@@ -361,6 +374,11 @@ end
 end
 
 @testset "responses" begin
+    @testset "contents" begin
+        @test @inferred(RestClient.contents(OneContent("n", 3))) === 3
+        @test @inferred(RestClient.contents(ListContent(1, ["x"]))) == ["x"]
+        @test_throws ArgumentError RestClient.contents(TwoContents(1, 2))
+    end
     @testset "List as a table" begin
         rows = RestClient.List{Row, PagedListEP}(
             Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}())
