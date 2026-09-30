@@ -350,12 +350,9 @@ function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     isempty(ex.response.message) || print(io, ' ', ex.response.message)
     print(io, " from ", ex.response.url)
     isempty(ex.body) && return
-    bodystr = map(c -> if isvalid(c) && (isprint(c) || isspace(c)); c else '�' end, String(ex.body))
-    if ncodeunits(bodystr) <= 512
-        print(io, "\n  ", rstrip(bodystr))
-    else
-        print(io, "\n  ", SubString(bodystr, 1, thisind(bodystr, 512)), " …")
-    end
+    shown = map(c -> if isvalid(c) && (isprint(c) || isspace(c)) c else '�' end,
+                String(ex.body[1:min(end, 512)]))
+    print(io, "\n  ", rstrip(shown), ifelse(length(ex.body) > 512, " …", ""))
 end
 
 

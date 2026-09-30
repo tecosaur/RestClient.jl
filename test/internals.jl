@@ -380,6 +380,15 @@ end
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
         @test RestClient.url(req) == "http://x/search?q=1&api_key=k"
     end
+    @testset "long error bodies" begin
+        req = Request{:get}(RequestConfig("http://x"), PlainEP())
+        res = Response("http", "http://x/p", 500, "HTTP/1.1 500", Pair{String, String}[])
+        body = Vector{UInt8}("x"^511 * "é" * "y"^10_000)          # the cut splits `é`
+        shown = sprint(showerror, RestClient.ResponseError(req, res, body))
+        @test endswith(shown, "x"^511 * "� …")
+        ascii = sprint(showerror, RestClient.ResponseError(req, res, Vector{UInt8}("a"^600)))
+        @test endswith(ascii, "\n  " * "a"^512 * " …")                   # no character split
+    end
 end
 
 @testset "formats" begin
