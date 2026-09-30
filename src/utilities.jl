@@ -10,12 +10,15 @@ Construct a `JSONFormat` singleton for whichever JSON backend is loaded.
 JSON.jl takes priority if both are loaded; throws if neither is.
 """
 function JSONFormat()
-    hasjson  = !isnothing(Base.get_extension(@__MODULE__, :JSONExt))
-    hasjson3 = !isnothing(Base.get_extension(@__MODULE__, :JSON3Ext))
-    hasjson  && return JSONFormat{:json}()
-    hasjson3 && return JSONFormat{:json3}()
-    throw(ArgumentError("No JSON backend loaded; load JSON or JSON3"))
+    backends = loadedjsonbackends()
+    isempty(backends) && throw(ArgumentError("No JSON backend loaded; load JSON or JSON3"))
+    JSONFormat{first(backends)}()
 end
+
+# The JSON backends whose extensions are loaded, JSON.jl's first.
+loadedjsonbackends() =
+    [backend for (backend, ext) in ((:json, :JSONExt), (:json3, :JSON3Ext))
+         if !isnothing(Base.get_extension(@__MODULE__, ext))]
 
 mimetype(::Type{<:JSONFormat}) = "application/json"
 
@@ -164,12 +167,9 @@ function _jsondef_wrapper_methods(structname, fmtexpr)
 end
 
 function _jsondef_backend(mod::Module)
-    hasjson  = !isnothing(Base.get_extension(@__MODULE__, :JSONExt))
-    hasjson3 = !isnothing(Base.get_extension(@__MODULE__, :JSON3Ext))
-    hasjson || hasjson3 ||
-        throw(ArgumentError("@jsondef requires JSON or JSON3 to be loaded"))
-    hasjson  || return :json3
-    hasjson3 || return :json
+    backends = loadedjsonbackends()
+    isempty(backends) && throw(ArgumentError("@jsondef requires JSON or JSON3 to be loaded"))
+    length(backends) == 1 && return only(backends)
     # `jl_module_usings` is an internal API but stable since at least 1.0.
     usings = ccall(:jl_module_usings, Vector{Any}, (Any,), mod)
     inmodjson  = any(m -> nameof(m) === :JSON,  usings)
