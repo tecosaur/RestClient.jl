@@ -43,6 +43,16 @@ struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
 RestClient.authpolicy(::QueryPathEP) = :optional
+struct QueryEP <: AbstractEndpoint end
+RestClient.urlpath(::QueryEP) = "p"
+RestClient.authscheme(::QueryEP) = QueryAuth("api_key")
+RestClient.authpolicy(::QueryEP) = :optional
+struct TokenAuth <: AuthScheme end
+RestClient.authheaders(::TokenAuth, key::String) = "X-Token" => "Token $key"
+struct CustomSchemeEP <: AbstractEndpoint end
+RestClient.urlpath(::CustomSchemeEP) = "p"
+RestClient.authscheme(::CustomSchemeEP) = TokenAuth()
+RestClient.authpolicy(::CustomSchemeEP) = :optional
 
 RestClient.@multipartdef struct OddNames
     a."we\"ird"::String
@@ -456,6 +466,37 @@ end
         end
         @test SHARED_HEADERS == ["X-A" => "1"]
         @test SHARED_PARAMS == ["a" => "1"]
+    end
+    @testset "secrets redacted" begin
+        breq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), SharedHeadersEP())
+        qreq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), QueryEP())
+        @test RestClient.authsecrets(breq) == (header = "Authorization", param = nothing)
+        @test RestClient.authsecrets(qreq) == (header = nothing, param = "api_key")
+        @test RestClient.authsecrets(Request{:get}(RequestConfig("http://x"; key = "k"), PlainEP())) ==
+            (header = nothing, param = nothing)                  # policy :off sends no key
+        secrets = (header = "Authorization", param = "api_key")
+        shown = string(RestClient.debug_request("GET", RestClient.url(qreq), RestClient.headers(breq),
+                                                IOBuffer("body"); secrets))
+        @test !occursin("s3cr", shown)
+        @test occursin("api_key=*****", shown)
+        @test occursin("Authorization: *****", shown)
+        @test occursin("X-A: 1", shown)                          # other headers are left alone
+        @test occursin("4 bytes", shown)                         # the payload's size
+        # A custom scheme's header is found through its `authheaders` method
+        creq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), CustomSchemeEP())
+        shown = string(RestClient.debug_request("GET", RestClient.url(creq), RestClient.headers(creq),
+                                                nothing; secrets = RestClient.authsecrets(creq)))
+        @test occursin("X-Token: *****", shown)
+        # Only the auth parameter's value is hidden, however short the key
+        shortreq = Request{:get}(RequestConfig("http://api.example.com"; key = "e"), QueryEP())
+        @test RestClient.redactsecrets("http://api.example.com/p?name=eve&api_key=e&x=1",
+                                       RestClient.authsecrets(shortreq)) ==
+            "http://api.example.com/p?name=eve&api_key=*****&x=1"
+        # ...and from a ResponseError's display
+        res = Response("http", RestClient.url(qreq), 500, "HTTP/1.1 500", Pair{String, String}[])
+        shownerror = sprint(showerror, RestClient.ResponseError(qreq, res, UInt8[]))
+        @test !occursin("s3cr", shownerror)
+        @test occursin("api_key=*****", shownerror)
     end
     @testset "long error bodies" begin
         req = Request{:get}(RequestConfig("http://x"), PlainEP())

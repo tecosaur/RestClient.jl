@@ -103,9 +103,10 @@ struct XMLFormat <: AbstractFormat end
 # `urlpath` or `responsetype`); the *secret* itself is the runtime `key` on a
 # `RequestConfig`. The library combines the two and applies the result to every request
 # automatically (see `headers`/`parameters` for a `Request`), so the common schemes need
-# no per-endpoint `headers` method. A scheme the library does not model (request signing,
-# OAuth flows) is still served by defining a `headers`/`parameters` method directly,
-# reading `config.key`.
+# no per-endpoint `headers` method. Other header or query parameter schemes are new
+# `AuthScheme` subtypes; those the library does not model at all (request signing, OAuth
+# flows) are still served by defining a `headers`/`parameters` method directly, reading
+# `config.key`.
 
 # The authentication policies an endpoint may follow (see `authpolicy`): never send
 # auth, send the key when present, or require a key before sending.
@@ -122,8 +123,16 @@ with [`authscheme`](@ref), and it is applied to `key` on every request.
 The provided schemes are [`BearerAuth`](@ref), [`BasicAuth`](@ref),
 [`HeaderAuth`](@ref), [`QueryAuth`](@ref), and [`NoAuth`](@ref) (the default).
 
-Non-standard authentication schemes can be handled by adjusting
-[`headers`](@ref) and [`parameters`](@ref) of endpoints on a case-by-case basis.
+For any other header or query parameter scheme, define a subtype with an
+[`authheaders`](@ref RestClient.authheaders) or
+[`authparams`](@ref RestClient.authparams) method. A scheme's header or parameter
+is hidden in debug output and errors, while a key an endpoint adds itself (in its
+own [`headers`](@ref), [`parameters`](@ref), or [`urlpath`](@ref)) is not.
+
+```julia
+struct TokenAuth <: AuthScheme end
+RestClient.authheaders(::TokenAuth, key::String) = "Authorization" => "Token \$key"
+```
 """
 abstract type AuthScheme end
 
@@ -351,7 +360,7 @@ end
 function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     print(io, "HTTP ", ex.response.status)
     isempty(ex.response.message) || print(io, ' ', ex.response.message)
-    print(io, " from ", ex.response.url)
+    print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
     isempty(ex.body) && return
     shown = map(c -> if isvalid(c) && (isprint(c) || isspace(c)) c else '�' end,
                 String(ex.body[1:min(end, 512)]))

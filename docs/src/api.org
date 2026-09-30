@@ -98,6 +98,8 @@ BasicAuth
 HeaderAuth
 QueryAuth
 NoAuth
+RestClient.authheaders
+RestClient.authparams
 #+end_src
 
 * Response interface

@@ -102,8 +102,9 @@ RestClient.authscheme(::MyAPIEndpoint) = BearerAuth()          # Authorization: 
 RestClient.authscheme(::OtherEndpoint) = HeaderAuth("X-API-Key")
 ```
 
-For a scheme the provided ones do not cover (request signing, OAuth flows), read
-`config.key` in a [`headers`](@ref) method directly instead.
+For a scheme the provided ones do not cover, define a new [`AuthScheme`](@ref); for
+one that can't be expressed as a header or query parameter (request signing, OAuth
+flows), read `config.key` in a [`headers`](@ref) method directly instead.
 
 !!! note
     Part of the `AbstractEndpoint` interface.
