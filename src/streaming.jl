@@ -277,64 +277,45 @@ end
 elementpayload(::Type{SSEvent{T}}) where {T} = T
 
 mutable struct SSEState
-    const scratch::IOBuffer
+    const data::IOBuffer
     id::Union{String, Nothing}
 end
 
 framestate(::StreamFormat{:SSE}) = SSEState(IOBuffer(), nothing)
 
+# WHATWG SSE, with LF or CRLF line endings: an event without data is not
+# dispatched, nor is one unterminated at EOF; `id` is sticky, `retry` and comments
+# are ignored. Lines are read with `readuntil`, which BufferStream locks against
+# its writer.
 function readframe(bs::IO, state::SSEState, ::StreamFormat{:SSE})
-    eof(bs) && return nothing
-    copyuntil(state.scratch, bs, "\n\n"; keep = false)
-    parse_sse_event(take!(state.scratch), state)
-end
-
-# WHATWG SSE parse over one event block, working on the owned `block` bytes: each
-# line's value is its bytes after `field:` and one optional space. `data` values
-# join with \n (built once at the end, in place when there is a single one);
-# `event` is per-event, `id` is sticky on `state`, `retry` and comments are dropped.
-function parse_sse_event(block::Vector{UInt8}, state::SSEState)
-    event = nothing
-    dataranges = UnitRange{Int}[]
-    i, n = firstindex(block), lastindex(block)
-    while i <= n
-        stop = something(findnext(==(UInt8('\n')), block, i), n + 1)
-        lineend = stop - 1                          # inclusive end of this line
-        if lineend < i || block[i] == UInt8(':')    # empty line or comment
-            i = stop + 1; continue
+    event, hasdata = nothing, false
+    while !eof(bs)
+        line = readuntil(bs, UInt8('\n'))
+        !isempty(line) && last(line) == UInt8('\r') && pop!(line)
+        if isempty(line)
+            hasdata && return SSEvent(event, take!(state.data), state.id)
+            event = nothing
+            continue
         end
-        colon = findnext(==(UInt8(':')), view(block, i:lineend), 1)
-        field = if isnothing(colon); i:lineend else i:(i + colon - 2) end
-        vlo = if isnothing(colon); lineend + 1 else i + colon end
-        vlo <= lineend && block[vlo] == UInt8(' ') && (vlo += 1)   # strip one leading space
-        name = view(block, field)
+        first(line) == UInt8(':') && continue
+        colon = findfirst(==(UInt8(':')), line)
+        name, val = if isnothing(colon)
+            line, view(line, 1:0)
+        else
+            vstart = colon + 1 + (colon < length(line) && line[colon+1] == UInt8(' '))
+            view(line, 1:colon-1), view(line, vstart:length(line))
+        end
         if name == b"data"
-            push!(dataranges, vlo:lineend)
+            hasdata && write(state.data, UInt8('\n'))
+            write(state.data, val)
+            hasdata = true
         elseif name == b"event"
-            event = String(block[vlo:lineend])
-        elseif name == b"id"
-            id = block[vlo:lineend]
-            UInt8(0) in id || (state.id = String(id))
+            event = String(val)
+        elseif name == b"id" && UInt8(0) ∉ val
+            state.id = String(val)
         end
-        i = stop + 1
     end
-    SSEvent(event, join_data!(block, dataranges), state.id)
-end
-
-# Combine the `data` value ranges into the payload bytes (joined with \n). A single
-# range shrinks `block` in place (no allocation); multiple ranges copy into one
-# right-sized vector.
-function join_data!(block::Vector{UInt8}, ranges::Vector{UnitRange{Int}})
-    isempty(ranges) && return empty!(block)
-    length(ranges) == 1 && return keepat!(block, ranges[1])
-    out = Vector{UInt8}(undef, sum(length, ranges) + length(ranges) - 1)
-    pos = firstindex(out)
-    for (k, r) in enumerate(ranges)
-        k > 1 && (out[pos] = UInt8('\n'); pos += 1)
-        copyto!(out, pos, block, first(r), length(r))
-        pos += length(r)
-    end
-    out
+    nothing
 end
 
 mimetype(::Type{<:StreamFormat{:SSE}}) = "text/event-stream"
@@ -357,9 +338,13 @@ end
 elementpayload(::Type{NDJSONFrame{T}}) where {T} = T
 
 function readframe(bs::IO, scratch::IOBuffer, ::StreamFormat{:NDJSON})
-    eof(bs) && return nothing
-    copyuntil(scratch, bs, UInt8('\n'); keep = false)
-    NDJSONFrame(take!(scratch))
+    while !eof(bs)
+        copyuntil(scratch, bs, UInt8('\n'); keep = false)
+        line = take!(scratch)
+        !isempty(line) && last(line) == UInt8('\r') && pop!(line)
+        isempty(line) || return NDJSONFrame(line)
+    end
+    nothing
 end
 
 mimetype(::Type{<:StreamFormat{:NDJSON}}) = "application/x-ndjson"

@@ -71,6 +71,9 @@ end
         frames = collectframes(:NDJSON, payload; bytesize)
         @test framedata.(frames) == expected
     end
+    # Blank lines are skipped, and CRLF endings accepted.
+    @test framedata.(collectframes(:NDJSON, "{\"a\":1}\r\n\n\r\n{\"a\":2}\n")) ==
+        [b"{\"a\":1}", b"{\"a\":2}"]
     # Trailing line with no final newline is still emitted.
     @test framedata.(collectframes(:NDJSON, "{\"a\":1}\n{\"a\":2}")) ==
         [b"{\"a\":1}", b"{\"a\":2}"]
@@ -120,7 +123,26 @@ end
     @test [f.data for f in frames] == [b"1", b"2", b"3"]
 end
 
-@testset "SSE framing — trailing event without final blank line" begin
+@testset "SSE framing — an unterminated event at EOF is discarded" begin
     frames = collectframes(:SSE, "data: a\n\ndata: b\n")
-    @test [f.data for f in frames] == [b"a", b"b"]
+    @test [f.data for f in frames] == [b"a"]
+end
+
+@testset "SSE framing — LF and CRLF line endings" begin
+    payload = "event: x\r\ndata: 1\r\n\r\ndata: 2\n\ndata: 3\r\ndata: 4\n\n"
+    # Chunk sizes 1 and 2 split CRLF pairs across reads.
+    for bytesize in (0, 1, 2, 3, 100)
+        frames = collectframes(:SSE, payload; bytesize)
+        @test [f.data for f in frames] == [b"1", b"2", b"3\n4"]
+        @test frames[1].event == "x"
+    end
+end
+
+@testset "SSE framing — events without data are not dispatched" begin
+    frames = collectframes(:SSE, ": keep-alive\n\nevent: ping\n\n\n\ndata: x\n\n")
+    @test length(frames) == 1
+    @test frames[1].event === nothing        # the `ping` type did not carry over
+    @test frames[1].data == b"x"
+    # An empty `data:` line is still data.
+    @test [f.data for f in collectframes(:SSE, "data:\n\n")] == [UInt8[]]
 end
