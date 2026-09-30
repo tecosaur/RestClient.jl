@@ -383,6 +383,7 @@ end
         @test !occursin("s3cr", shown)
         @test occursin("api_key=*****", shown)
         @test occursin("Authorization: *****", shown)
+        @test occursin("4 bytes", shown)                         # the payload's size
         # ...and from a ResponseError's display
         res = Response("http", RestClient.url(qreq), 500, "HTTP/1.1 500", Pair{String, String}[])
         shownerror = sprint(showerror, RestClient.ResponseError(qreq, res, UInt8[]))

@@ -227,7 +227,7 @@ function alert_sleep(delay::Real)
     @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
     if isa(stdout, Base.TTY)
         print('\n')
-        for waited in 0:delay
+        for waited in 1:delay
             sleep(1)
             print(ANSI_CLEAR_LINE, S" Waited {emphasis:$waited} seconds\n")
         end
@@ -323,17 +323,18 @@ function debug_request(method::String, url::String, headers, payload::Union{IO, 
         S""
     else
         dumpfile = debugfile("request.http")
-        open(dumpfile, "w") do io
+        nb = open(dumpfile, "w") do io
             println(io, method, ' ', url)
             for (k, v) in headers
                 println(io, k, ": ", redactsecrets(v, secrets))
             end
             println(io)
             mark(payload)
-            write(io, payload)
+            nbytes = write(io, payload)
             reset(payload)
+            nbytes
         end
-        S"$(Base.format_bytes(position(payload))) (saved to {bright_magenta:$dumpfile}) sent to "
+        S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) sent to "
     end
     strheaders = if isempty(headers)
         S""

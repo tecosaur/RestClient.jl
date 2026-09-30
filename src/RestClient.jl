@@ -44,7 +44,7 @@ function __init__()
     global MULTIPART_MIME = "multipart/form-data; boundary=" * MULTIPART_BOUNDARY
     DOWNLOADER[] = Downloads.Downloader()
     DOWNLOADER[].easy_hook = transferhook
-    atexit(cleancache)
+    ccall(:jl_generating_output, Cint, ()) == 1 || atexit(cleancache)
 end
 
 end
