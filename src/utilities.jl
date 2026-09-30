@@ -67,7 +67,7 @@ This avoids having to write the slightly awkward
 `RestClient.globalconfig(::Val{@__MODULE__}) = config` by hand. Similarly, the
 optional `auth` clause defines a
 `RestClient.globalauthdefault(::Val{@__MODULE__})` method. The `auth` argument
-is may take one of two forms:
+may take one of two forms:
 
 - `auth = scheme`: the [`AuthScheme`](@ref) endpoints in this module use (e.g.
   `BearerAuth()`); the request's `key` is applied to it. With no policy given, the

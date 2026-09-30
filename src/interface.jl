@@ -66,7 +66,7 @@ end
 
 Return URI parameters for the given `endpoint`.
 
-This are combined with the endpoint URL to form the full query URL.
+These are combined with the endpoint URL to form the full query URL.
 
 The default implementation returns an empty list.
 
@@ -128,7 +128,7 @@ authpolicy(::AbstractEndpoint) = :off
 
 """
     validate([config::RequestConfig], endpoint::AbstractEndpoint) ->
-        Union{Nothing, AbstractString, AbstractVector{<:AbstractString}}
+        Union{Nothing, Bool, AbstractString, AbstractVector{<:AbstractString}}
 
 Check if the request to `endpoint` according to `config` is valid.
 
@@ -136,6 +136,7 @@ The return value determines whether the request proceeds and, if not, what
 problem to report:
 - `nothing` or `String[]` means the request is valid and should proceed
 - a string or vector of strings means the request is invalid and should be aborted, with the string(s) as the reason(s)
+- `true` or `false` means valid or invalid, without a reason
 
 This is also the appropriate place to emit warnings about non-critical potential
 issues with the request, using `@warn` or `@debug`.
@@ -157,7 +158,8 @@ validate((; config, endpoint)::Request) = validate(config, endpoint)
 
 Return the payload for the given `endpoint`.
 
-This is used for POST requests, and is sent as the body of the request.
+This is sent as the body of the request, whatever its method (e.g. `:post`, `:put`,
+`:patch`, or `:query`).
 
 !!! note
     Part of the `AbstractEndpoint` interface.

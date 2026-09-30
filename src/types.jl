@@ -20,7 +20,7 @@ urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
 headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 responsetype(endpoint::AbstractEndpoint) -> Type
-validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Bool
+validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Union{Nothing, Bool, AbstractString, AbstractVector{<:AbstractString}}
 postprocess([response::Downloads.Response], request::Request, data) -> Any
 ```
 
@@ -296,7 +296,7 @@ Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │    
          ╰─────────┬────────────────────────────────────────────────────────────╯
                    ╰────▶ validate (before initiating the request)
 
- * Only for POST requests   ╶╶ Optional first argument
+ * Only with a payload      ╶╶ Optional first argument
 ```
 """
 struct Request{kind,E<:AbstractEndpoint}

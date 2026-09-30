@@ -37,7 +37,7 @@ endpoint methods:
 - [`responsetype`](@ref)
 
 In our `@endpoint israining() ...` example, in addition to defining the
-`israining` function and an (implicit) `IsrainigEndpoint` struct, the macro will
+`israining` function and an (implicit) `IsrainingEndpoint` struct, the macro will
 generate the implementations `urlpath(rain::IsrainingEndpoint) = "checkrain/\$(rain.city)"` and
 `responsetype(::IsrainingEndpoint) = Bool`.
 
