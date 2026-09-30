@@ -8,8 +8,8 @@
 using Dates
 using Downloads: Response
 using Tables
-using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse,
-    setexpiry, expirytime_xattr, expirytime_read, HTTP_DATE_FORMAT
+using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse, cachesave,
+    opencacheentry, readcachestamp, CACHE_STALE_DURATION, HTTP_DATE_FORMAT
 
 hdr(pairs...) = Pair{String, String}[pairs...]
 http_date(t) = Dates.format(t, HTTP_DATE_FORMAT)
@@ -21,6 +21,16 @@ sample_response(; status = 200,
              "HTTP/1.1 $status OK", Pair{String, String}[headers...])
 
 # Fixtures
+
+struct CacheEP <: AbstractEndpoint end
+RestClient.urlpath(::CacheEP) = "thing"
+struct DatedCacheEP <: AbstractEndpoint end
+RestClient.urlpath(::DatedCacheEP) = "thing"
+RestClient.cachelifetime(::DatedCacheEP, ::Response) = now(UTC) + Hour(1)
+struct KeyedCacheEP <: AbstractEndpoint end
+RestClient.urlpath(::KeyedCacheEP) = "thing"
+RestClient.authscheme(::KeyedCacheEP) = QueryAuth("api_key")
+RestClient.authpolicy(::KeyedCacheEP) = :required
 struct PlainEP <: AbstractEndpoint end
 RestClient.urlpath(::PlainEP) = "p"
 struct PagedListEP <: ListEndpoint end
@@ -76,6 +86,24 @@ struct ListContent <: ListResponse{String}
     total::Int
     items::Vector{String}
 end
+struct BrokenBody <: IO end
+Base.mark(::BrokenBody) = 0
+Base.eof(::BrokenBody) = false
+Base.readavailable(::BrokenBody) = throw(ArgumentError("unreadable"))
+struct PagedContent <: SingleResponse{ListContent}
+    inner::ListContent
+end
+struct OptionalListContent <: ListResponse{String}
+    total::Int
+    items::Union{Vector{String}, Nothing}
+end
+struct BothListContents <: ListResponse{String}
+    items::Vector{String}
+    extra::Union{Vector{String}, Nothing}
+end
+struct NoListContent <: ListResponse{String}
+    total::Int
+end
 struct Row
     a::Int
     b::String
@@ -121,24 +149,30 @@ end
 end
 
 @testset "caching" begin
+    # RFC 9111, for a private cache
     @testset "freshness" begin
-        now_unix = trunc(Int, time())
-        @test expirytime(hdr()) == 0
-        @test expirytime(hdr("cache-control" => "max-age=notanumber")) == 0
-        @test expirytime(hdr("expires" => "whenever")) == 0
+        t = 1_700_000_000
         @testset "not storable" begin
-            @test expirytime(hdr("cache-control" => "no-store")) == 0
-            @test expirytime(hdr("cache-control" => "no-cache")) == 0
-            @test expirytime(hdr("cache-control" => "private, max-age=600")) == 0
-            @test expirytime(hdr("vary" => "*", "cache-control" => "max-age=600")) == 0
+            @test isnothing(expirytime(hdr("cache-control" => "no-store", "etag" => "x"), t))
+            @test isnothing(expirytime(hdr("vary" => "*", "cache-control" => "max-age=600"), t))
+        end
+        @testset "stale at once" begin
+            @test expirytime(hdr(), t) == t
+            @test expirytime(hdr("cache-control" => "no-cache, max-age=600"), t) == t
+            @test expirytime(hdr("cache-control" => "max-age=notanumber"), t) == t
+            @test expirytime(hdr("expires" => "whenever"), t) == t
         end
         @testset "lifetime" begin
-            @test 595 <= expirytime(hdr("cache-control" => "max-age=600")) - now_unix <= 601
-            @test 295 <= expirytime(hdr("cache-control" => "public, s-maxage=300")) - now_unix <= 301
-            stamp = http_date(now(UTC) + Hour(1))
-            @test expirytime(hdr("expires" => stamp)) > now_unix
-            # max-age wins over Expires (RFC 9111 §4.2.1).
-            @test expirytime(hdr("cache-control" => "max-age=10", "expires" => stamp)) - now_unix <= 11
+            @test expirytime(hdr("cache-control" => "private, max-age=600"), t) == t + 600
+            @test expirytime(hdr("cache-control" => "max-age=600", "age" => "100"), t) == t + 500
+            @test expirytime(hdr("cache-control" => "public, s-maxage=300"), t) == t  # shared caches only
+            # Expires counts from the response's Date, not the local clock.
+            date = unix2datetime(t - 3600)
+            @test expirytime(hdr("date" => http_date(date),
+                                 "expires" => http_date(date + Minute(10))), t) == t + 600
+            # max-age wins over Expires (§4.2.1).
+            @test expirytime(hdr("cache-control" => "max-age=10",
+                                 "expires" => http_date(unix2datetime(t) + Hour(1))), t) == t + 10
         end
     end
     @testset "response dump" begin
@@ -148,6 +182,7 @@ end
         seekstart(io)
         got = tryreadresponse(io)
         @test got.url == res.url
+        @test got.proto == res.proto                             # the scheme, not the HTTP version
         @test got.status == res.status
         @test got.headers == res.headers
         @test read(io, String) == "{\"ok\":true}"     # IO left at body start
@@ -157,21 +192,66 @@ end
             @test isnothing(tryreadresponse(IOBuffer("url\nHTTP/1.1 notastatus OK\n\n")))
         end
     end
-    @testset "filesystem expiry" begin
-        path, _ = mktemp()
-        open(io -> dumpresponse(io, sample_response(), IOBuffer(b"body")), path, "w")
-        @test expirytime_read(path) - trunc(Int, time()) <= 601    # from max-age=600
-        if Sys.islinux()
-            @testset "xattr round-trip" begin
-                setexpiry(path, 1_700_000_000)
-                @test expirytime_xattr(path) == 1_700_000_000
-            end
-            # Regression: a missing attribute once returned -1 wrapped to a huge
-            # unsigned value (Csize_t) and read uninitialised memory.
-            @testset "absent xattr returns nothing, not garbage" begin
-                fresh, _ = mktemp()
-                @test isnothing(expirytime_xattr(fresh))
-            end
+    @testset "entries" begin
+        cfile = joinpath(mktempdir(), "entry.http")
+        req = Request{:get}(RequestConfig("https://api.example.com"), CacheEP())
+        stamp(path) = open(readcachestamp, path)
+        body(path) = (entry = opencacheentry(path, RestClient.url(req)); try read(last(entry), String) finally close(last(entry)) end)
+        @testset "round-trip" begin
+            cachesave(req, cfile, RestClient.url(req), sample_response(), IOBuffer(b"body"))
+            @test body(cfile) == "body"
+            (; expiry, retain) = stamp(cfile)
+            @test 595 <= expiry - trunc(Int, time()) <= 601
+            @test retain == expiry            # no validator ⇒ not kept once stale
+        end
+        @testset "another request's entry" begin
+            cachesave(req, cfile, RestClient.url(req), sample_response(), IOBuffer(b"body"))
+            @test isnothing(opencacheentry(cfile, "https://api.example.com/other"))
+            @test isfile(cfile)                                  # kept for its own request
+        end
+        @testset "replaced" begin
+            cachesave(req, cfile, RestClient.url(req), sample_response(), IOBuffer(b"new body"))
+            @test body(cfile) == "new body"
+        end
+        @testset "kept to revalidate" begin
+            res = sample_response(headers = ["cache-control" => "max-age=0", "etag" => "\"v1\""])
+            cachesave(req, cfile, RestClient.url(req), res, IOBuffer(b"x"))
+            (; expiry, retain) = stamp(cfile)
+            @test retain - expiry == CACHE_STALE_DURATION
+        end
+        @testset "unstorable removed" begin
+            cachesave(req, cfile, RestClient.url(req), sample_response(headers = ["cache-control" => "no-store"]), IOBuffer(b"x"))
+            @test !isfile(cfile)
+            cachesave(req, cfile, RestClient.url(req), sample_response(headers = Pair{String, String}[]), IOBuffer(b"x"))
+            @test !isfile(cfile)              # stale at once, and no validator
+        end
+        @testset "DateTime lifetime" begin
+            dreq = Request{:get}(RequestConfig("https://api.example.com"), DatedCacheEP())
+            cachesave(dreq, cfile, RestClient.url(dreq), sample_response(), IOBuffer(b"x"))
+            @test 3595 <= stamp(cfile).expiry - trunc(Int, time()) <= 3601
+        end
+        @testset "auth keys not stored" begin
+            kreq = Request{:get}(RequestConfig("https://api.example.com"; key = "s3cret"), KeyedCacheEP())
+            res = Response("https", RestClient.url(kreq), 200, "HTTP/1.1 200 OK",
+                           Pair{String, String}["cache-control" => "max-age=600"])
+            cachesave(kreq, cfile, RestClient.url(kreq), res, IOBuffer(b"x"))
+            @test !occursin("s3cret", read(cfile, String))
+            @test occursin("api_key=*****", read(cfile, String))
+        end
+        @testset "failed write warns" begin
+            rodir = mktempdir()
+            chmod(rodir, 0o500)
+            @test_logs (:warn, r"Unable to update the response cache") cachesave(
+                req, joinpath(rodir, "sub", "entry.http"), RestClient.url(req), sample_response(), IOBuffer(b"x"))
+            dir = mktempdir()
+            @test_throws ArgumentError cachesave(req, joinpath(dir, "entry.http"), RestClient.url(req), sample_response(), BrokenBody())
+            @test isempty(readdir(dir))                      # no temporary file left behind
+        end
+        @testset "unreadable removed" begin
+            write(cfile, "https://old-format/\nHTTP/1.1 200 OK\n\nbody")
+            @test isnothing(opencacheentry(cfile, RestClient.url(req)))
+            @test !isfile(cfile)
+            @test isnothing(opencacheentry(cfile, RestClient.url(req)))
         end
     end
 end

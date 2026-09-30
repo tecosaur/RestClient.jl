@@ -43,7 +43,7 @@ end
 function __init__()
     global MULTIPART_BOUNDARY = "----" * string(rand(UInt64); base = 16)
     global MULTIPART_MIME = "multipart/form-data; boundary=" * MULTIPART_BOUNDARY
-    atexit(cleancache)
+    ccall(:jl_generating_output, Cint, ()) == 1 || atexit(cleancache)
 end
 
 end

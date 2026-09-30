@@ -67,6 +67,7 @@ module IntegrationClient
     @endpoint throttled() -> "throttled" -> Item
     @endpoint cached() -> "cacheable" -> Item
     @endpoint nostore() -> "nostore" -> Item
+    @endpoint partial() -> "partial" -> Item
     @endpoint errored() -> "error" -> Item
     @endpoint missing_() -> "notfound" -> Item
     @endpoint forbidden() -> "forbidden" -> Item
@@ -77,6 +78,8 @@ module IntegrationClient
     @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
     @endpoint text() -> "text" -> String
     @endpoint number() -> "number" -> Int
+    @endpoint revalidate() -> "revalidate" -> Item
+    @endpoint rotating() -> "rotating" -> Item
     @endpoint struct AuthEndpoint
         showheaders() -> "headers" -> Headers
     end
@@ -493,10 +496,46 @@ end
             @test state.requests == 2
         end
     end
+    @testset "304 revalidation" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test IC.revalidate(config).name == "revalidated"   # stored, already stale
+                @test IC.revalidate(config).name == "revalidated"   # 304 ⇒ now fresh for 60s
+                @test IC.revalidate(config).name == "revalidated"   # served from disk
+                @test state.revalidations == 1
+                @test state.requests == 2
+            finally
+                clean_cachekey("$baseurl/revalidate", "GET", ["Accept" => "application/json"])
+            end
+        end
+    end
+    @testset "entry replaced" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test IC.rotating(config).id == 1
+                @test IC.rotating(config).id == 2
+                @test IC.rotating(config).id == 3
+            finally
+                clean_cachekey("$baseurl/rotating", "GET", ["Accept" => "application/json"])
+            end
+        end
+    end
     @testset "no-store" begin
         with_server() do baseurl, state
             IC.nostore(cfg(baseurl)); IC.nostore(cfg(baseurl))
             @test state.requests == 2
+        end
+    end
+    @testset "partial content" begin
+        with_server() do baseurl, state
+            try
+                IC.partial(cfg(baseurl)); IC.partial(cfg(baseurl))
+                @test state.requests == 2
+            finally
+                clean_cachekey("$baseurl/partial", "GET", ["Accept" => "application/json"])
+            end
         end
     end
 end
