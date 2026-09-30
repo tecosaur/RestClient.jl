@@ -220,7 +220,7 @@ macro xmldef(struc::Expr)
         if Meta.isexpr(line, :(::), 2)
             line, type = line.args
         end
-        if isnothing(default) && Meta.isexpr(type, :curly) && :Nothing in type.args
+        if isnothing(default) && RestClient.allowsnothing(type)
             default = :nothing
         end
         if Meta.isexpr(line, :(.), 2)

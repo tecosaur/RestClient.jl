@@ -58,7 +58,7 @@ function RestClient._jsondef_expand(::Val{:json}, source::LineNumberNode, mod::M
         if Meta.isexpr(line, :(::), 2)
             line, type = line.args
         end
-        if isnothing(default) && Meta.isexpr(type, :curly) && :Nothing in type.args
+        if isnothing(default) && RestClient.allowsnothing(type)
             default = :nothing
         end
         if Meta.isexpr(line, :(.), 2)

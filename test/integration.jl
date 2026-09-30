@@ -38,6 +38,10 @@ module IntegrationClient
         name::String
         id::Int
     end
+    @jsondef struct NothingDefaults
+        maybe::Union{Int, Nothing}          # defaults to nothing
+        flags::Dict{String, Nothing}        # doesn't: Nothing is only a parameter
+    end
     @formdef struct LoginForm
         username::String
         remember."remember-me"::Bool = false
@@ -180,6 +184,10 @@ const AC = AuthClient
                                                            Pair{String, String}[], nothing) * ".http"))
             end
         end
+    end
+    @testset "`nothing` defaults" begin
+        @test IC.NothingDefaults(flags = Dict{String, Nothing}()).maybe === nothing
+        @test_throws UndefKeywordError IC.NothingDefaults()
     end
     @testset "error status" begin
         with_server() do baseurl, _
