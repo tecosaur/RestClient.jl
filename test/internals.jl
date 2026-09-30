@@ -54,6 +54,10 @@ struct PayloadEP <: AbstractEndpoint
 end
 RestClient.urlpath(::PayloadEP) = "p"
 RestClient.payload(ep::PayloadEP) = ep.value
+struct QueryPathEP <: AbstractEndpoint end
+RestClient.urlpath(::QueryPathEP) = "search?q=1"
+RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
+RestClient.authpolicy(::QueryPathEP) = :optional
 struct QueryEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryEP) = "p"
 RestClient.authscheme(::QueryEP) = QueryAuth("api_key")
@@ -339,6 +343,10 @@ end
         err = try perform(Request{:query}(RequestConfig("http://x"), PlainEP())) catch e; e end
         @test err isa MalformedRequest
         @test occursin("QUERY", only(err.issues))
+    end
+    @testset "path with a query" begin
+        req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
+        @test RestClient.url(req) == "http://x/search?q=1&api_key=k"
     end
     @testset "base URL with a trailing slash" begin
         @test RestClient.url(Request{:get}(RequestConfig("http://x/api/"), PlainEP())) == "http://x/api/p"

@@ -159,8 +159,11 @@ function url_parameters(params::Vector{Pair{String, String}})
     end
 end
 
-url(req::Request) = string(req.config.baseurl, '/', urlpath(req.config, req.endpoint)::String,
-                           url_parameters(parameters(req)))
+function url(req::Request)
+    path, query = urlpath(req.config, req.endpoint)::String, url_parameters(parameters(req))
+    '?' in path && !isempty(query) && (query = "&" * chopprefix(query, "?"))
+    string(req.config.baseurl, '/', path, query)
+end
 
 # `headers(req)` plus the Content-Type/Accept implied by the payload and response formats
 function mimeheaders(req::Request, in::Type)
