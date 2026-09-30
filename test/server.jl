@@ -103,6 +103,8 @@ function build_router(state::ServerState)
                             "Cache-Control" => "max-age=60", "ETag" => ETAG],
                       item_json("cached", 1))
     end)
+    HTTP.register!(router, "GET", "/text", _ -> HTTP.Response(200, "plain words"))
+    HTTP.register!(router, "GET", "/number", _ -> HTTP.Response(200, "42"))
     router
 end
 

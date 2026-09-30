@@ -100,37 +100,17 @@ end
 url(req::Request) = string(req.config.baseurl, '/', urlpath(req.config, req.endpoint)::String,
                            url_parameters(parameters(req)))
 
-function addmimes!(headers::AbstractVector{Pair{String, String}}, ::In, ::Out) where {In, Out}
-    setheaders = map(lowercase ∘ first, headers)
-    inmime = mimetype(In)
-    outmime = mimetype(Out)
-    if "content-type" ∉ setheaders && !isnothing(inmime)
-        push!(headers, "Content-Type" => inmime)
-    end
-    if "accept" ∉ setheaders && !isnothing(outmime)
-        push!(headers, "Accept" => outmime)
-    end
-    headers
-end
-
-function addmimes!(headers::AbstractDict{<:AbstractString}, ::In, ::Out) where {In, Out}
-    setheaders = [lowercase(k) for k in keys(headers)]
-    inmime = mimetype(In)
-    outmime = mimetype(Out)
-    if "content-type" ∉ setheaders && !isnothing(inmime)
-        headers["Content-Type"] = inmime
-    end
-    if "accept" ∉ setheaders && !isnothing(outmime)
-        headers["Accept"] = outmime
-    end
-    headers
-end
-
+# `headers(req)` plus the Content-Type/Accept implied by the payload and response formats
 function mimeheaders(req::Request, in::Type)
+    hdrs = headers(req)
     out = responsetype(req.endpoint)
-    addmimes!(copy(headers(req)),
-              if in !== Nothing dataformat(req.endpoint, in) end,
-              if out !== Nothing dataformat(req.endpoint, out) end)
+    inmime = if in !== Nothing payloadmime(dataformat(req.endpoint, in), in) end
+    outmime = if out !== Nothing mimetype(typeof(dataformat(req.endpoint, out))) end
+    setnames = Set(lowercase(first(h)) for h in hdrs)
+    extras = Pair{String, String}[]
+    isnothing(inmime) || "content-type" ∈ setnames || push!(extras, "Content-Type" => inmime)
+    isnothing(outmime) || "accept" ∈ setnames || push!(extras, "Accept" => outmime)
+    if isempty(extras) hdrs else [collect(hdrs); extras] end
 end
 
 """

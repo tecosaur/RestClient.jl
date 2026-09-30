@@ -64,6 +64,9 @@ module IntegrationClient
     @endpoint nostore() -> "nostore" -> Item
     @endpoint errored() -> "error" -> Item
     @endpoint missing_() -> "notfound" -> Item
+    @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
+    @endpoint text() -> "text" -> String
+    @endpoint number() -> "number" -> Int
     @endpoint struct AuthEndpoint
         showheaders() -> "headers" -> Headers
     end
@@ -264,6 +267,16 @@ end
     end
 end
 
+@testset "raw text and bytes" begin
+    with_server() do baseurl, _
+        @test IC.text(cfg(baseurl)) == "plain words"
+        @test IC.number(cfg(baseurl)) === 42
+        resp = IC.upload_bytes(cfg(baseurl), data = collect(b"\x01\x02abc"))
+        @test resp.body == "\x01\x02abc"
+        @test resp.content_type == "application/octet-stream"
+    end
+end
+
 @testset "@formdef → urlencoded body" begin
     with_server() do baseurl, _
         resp = IC.login(cfg(baseurl), form = IC.LoginForm(username = "ada", remember = true))
@@ -285,12 +298,12 @@ end
         resp = IC.multiupload(cfg(baseurl), form = form)
         @test occursin("multipart/form-data; boundary=", resp.content_type)
         body = resp.body
-        @test occursin("name=\"file\"", body)
+        @test occursin("name=\"file\"; filename=\"file\"", body)
         @test occursin("application/octet-stream", body)   # binary part
         @test occursin("hello", body)
         @test occursin("name=\"meta\"", body)
         @test occursin("application/json", body)            # @jsondef field → JSON part
-        @test occursin("name=\"note\"", body)
+        @test occursin("name=\"note\"\r\nContent-Type: text/plain; charset=utf-8", body)
         @testset "nothing parts omitted" begin
             bare = IC.UploadForm(file = b"x", meta = IC.Item("m", 1))
             r = IC.multiupload(cfg(baseurl), form = bare)

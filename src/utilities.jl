@@ -17,7 +17,6 @@ function JSONFormat()
     throw(ArgumentError("No JSON backend loaded; load JSON or JSON3"))
 end
 
-mimetype(::Type{RawFormat}) = "text/plain"
 mimetype(::Type{<:JSONFormat}) = "application/json"
 
 """

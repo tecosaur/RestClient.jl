@@ -148,8 +148,39 @@ end
     end
 end
 
+struct PlainEP <: AbstractEndpoint end
+RestClient.urlpath(::PlainEP) = "p"
 struct PagedListEP <: ListEndpoint end
 RestClient.urlpath(::PagedListEP) = "p"
+@testset "raw format is text or bytes" begin
+    raw = RestClient.RawFormat()
+    interpret(T, str) = RestClient.interpretresponse(codeunits(str), raw, T)
+    @test interpret(Vector{UInt8}, "ab") == b"ab"
+    @test interpret(Any, "ab") == b"ab"
+    @test interpret(String, "ab") == "ab"
+    @test interpret(Bool, "true") === true
+    @test interpret(Float64, "1.5") === 1.5
+    @test_throws ArgumentError interpret(Dict{String, Int}, "{}")
+    written(x) = String(take!((io = IOBuffer(); RestClient.writepayload(io, raw, x); io)))
+    @test written(b"\x01\x02") == "\x01\x02"
+    @test written("text") == "text"
+    @test written(7) == "7"
+    @test_throws ArgumentError written(:symbol)
+    @test RestClient.payloadmime(raw, String) == "text/plain; charset=utf-8"
+    @test RestClient.payloadmime(raw, Vector{UInt8}) == "application/octet-stream"
+    # A raw response sets no Accept header (libcurl sends `*/*`).
+    @test isempty(RestClient.mimeheaders(Request{:get}(RequestConfig("http://x"), PlainEP()), Nothing))
+end
+
+RestClient.@multipartdef struct OddNames
+    a."we\"ird"::String
+end
+
+@testset "multipart names are escaped" begin
+    body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), OddNames(a = "v"))
+    @test occursin("name=\"we%22ird\"", body)
+end
+
 struct OneContent <: SingleResponse{Int}
     note::String
     value::Int

@@ -227,17 +227,38 @@ extensions (`JSONExt` for JSON.jl, `JSON3Ext` for JSON3.jl).
 """
 function interpretresponse end
 
-interpretresponse(data::AbstractVector{UInt8}, ::RawFormat, @nospecialize ::Type) =
+interpretresponse(data::AbstractVector{UInt8}, ::RawFormat, ::Type{>:Vector{UInt8}}) =
     Vector{UInt8}(data)
+
+interpretresponse(data::AbstractVector{UInt8}, ::RawFormat, ::Type{T}) where {T <: AbstractString} =
+    convert(T, String(copy(data)))
+
+interpretresponse(data::AbstractVector{UInt8}, ::RawFormat, ::Type{T}) where {T <: Number} =
+    parse(T, String(copy(data)))
+
+interpretresponse(::AbstractVector{UInt8}, ::RawFormat, ::Type{T}) where {T} =
+    throw(ArgumentError("Cannot interpret a raw (text/bytes) response as a $T. \
+                         Declare its format with a `RestClient.dataformat(::Type{$T})` \
+                         method (e.g. via @jsondef), or define `interpretresponse` for it."))
 
 """
     writepayload(dest::IO, fmt::AbstractFormat, data)
 
 Write `data` to `dest` according to `fmt`.
 """
-function writepayload(dest::IO, ::RawFormat, data)
-    print(dest, data)
-end
+writepayload(dest::IO, ::RawFormat, data::Union{AbstractString, AbstractVector{UInt8}, IO}) =
+    write(dest, data)
+
+writepayload(dest::IO, ::RawFormat, data::Number) = print(dest, data)
+
+writepayload(::IO, ::RawFormat, data::T) where {T} =
+    throw(ArgumentError("Cannot send a $T as a raw (text/bytes) payload. \
+                         Declare its format with a `RestClient.dataformat(::Type{$T})` \
+                         method (e.g. via @jsondef), or define `writepayload` for it."))
+
+payloadmime(fmt::AbstractFormat, ::Type) = mimetype(typeof(fmt))
+payloadmime(::RawFormat, ::Type{<:Union{AbstractString, Number}}) = "text/plain; charset=utf-8"
+payloadmime(::RawFormat, ::Type) = "application/octet-stream"
 
 """
     postprocess([response::Downloads.Response], request::Request, data) -> Any

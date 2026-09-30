@@ -43,37 +43,27 @@ function writepayload(io::IO, ::FormFormat, data)
     end
 end
 
-# Each property becomes one MIME part: a boundary, a Content-Disposition header,
-# then a body shaped by `write_multipart_body` dispatch.
+const MultipartBinary = Union{AbstractVector{UInt8}, IO}
+
+# Each property becomes one MIME part: a boundary, headers, then the value written
+# in its own `dataformat`. Binary values are sent as files, named after their field.
 function writepayload(io::IO, ::MultipartFormat, data)
     for name in propertynames(data)
         val = getproperty(data, name)
         isnothing(val) && continue
+        # Percent-encode what would break the quoted name (RFC 7578 §4.2)
+        fieldname = replace(form_key(typeof(data), name), '"' => "%22", '\r' => "%0D", '\n' => "%0A")
+        fmt = dataformat(typeof(val))
+        mime = payloadmime(fmt, typeof(val))
         print(io, "--", MULTIPART_BOUNDARY, "\r\n",
-                  "Content-Disposition: form-data; name=\"",
-                  form_key(typeof(data), name), "\"")
-        write_multipart_body(io, val)
+              "Content-Disposition: form-data; name=\"", fieldname, '"')
+        val isa MultipartBinary && print(io, "; filename=\"", fieldname, '"')
+        isnothing(mime) || print(io, "\r\nContent-Type: ", mime)
+        print(io, "\r\n\r\n")
+        writepayload(io, fmt, val)
+        print(io, "\r\n")
     end
     print(io, "--", MULTIPART_BOUNDARY, "--\r\n")
-end
-
-const MultipartBinary = Union{Vector{UInt8}, IO}
-
-function write_multipart_body(io::IO, value::MultipartBinary)
-    # `write(io, value)` is polymorphic over `Vector{UInt8}` and `IO`.
-    print(io, "\r\nContent-Type: application/octet-stream\r\n\r\n")
-    write(io, value)
-    print(io, "\r\n")
-end
-
-function write_multipart_body(io::IO, value::T) where {T}
-    hasmethod(dataformat, Tuple{Type{T}}) || return print(io, "\r\n\r\n", value, "\r\n")
-    fmt = dataformat(T)
-    mime = mimetype(typeof(fmt))
-    isnothing(mime) || print(io, "\r\nContent-Type: ", mime)
-    print(io, "\r\n\r\n")
-    writepayload(io, fmt, value)
-    print(io, "\r\n")
 end
 
 """
