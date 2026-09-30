@@ -63,6 +63,16 @@ end
     end
 end
 
+# Frames must survive being read while the writer is still mid-write: each trial
+# writes in random chunk sizes from another task.
+@testset "concurrent delivery" begin
+    for (framing, payload, n) in ((:NDJSON, "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n", 3),
+                                  (:SSE, "data: 1\r\n\r\ndata: 2\n\ndata: 3\r\n\r\n", 3))
+        counts = [length(collectframes(framing, payload; bytesize = rand(1:9))) for _ in 1:2000]
+        @test all(==(n), counts)
+    end
+end
+
 @testset "NDJSON" begin
     payload = "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n"
     expected = [b"{\"a\":1}", b"{\"a\":2}", b"{\"a\":3}"]

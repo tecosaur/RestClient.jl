@@ -71,11 +71,10 @@ elementpayload(::Type{T}) where {T} = T
 """
     framestate(fmt::StreamFormat)
 
-The reusable per-stream state [`readframe`](@ref) threads across calls. Defaults to
-a fresh `IOBuffer` (the reused scratch for delimiter framings); a framing that
-carries state across frames overrides it.
+The per-stream state [`readframe`](@ref) threads across calls: `nothing` by
+default, overridden by a framing that carries state across frames.
 """
-framestate(::StreamFormat) = IOBuffer()
+framestate(::StreamFormat) = nothing
 
 """
     readframe(bs::IO, state, fmt::StreamFormat) -> frame | nothing
@@ -84,8 +83,9 @@ Read one complete frame from `bs`, returning the framing's public frame with its
 **undecoded** payload bytes, or `nothing` at clean EOF. `state` is
 [`framestate`](@ref)'s value, reused across calls. Dispatched on `fmt`'s framing.
 
-The read blocks on `bs`, reassembling a frame split across network reads via Base's
-`copyuntil`/`read`; it touches no stream internals.
+The read blocks on `bs`, reassembling a frame split across network reads. As `bs` is
+written concurrently, read it with calls that lock against the writer (`readuntil`,
+`read`, `readavailable`), not `copyuntil` or `readline` (which uses it).
 """
 function readframe(::IO, _, ::StreamFormat) end
 
@@ -355,10 +355,11 @@ end
 
 elementpayload(::Type{NDJSONFrame{T}}) where {T} = T
 
-function readframe(bs::IO, scratch::IOBuffer, ::StreamFormat{:NDJSON})
+# `readuntil`, not `copyuntil`: Base's BufferStream only locks the former against
+# its writer, and the latter can lose or duplicate data read mid-transfer.
+function readframe(bs::IO, _, ::StreamFormat{:NDJSON})
     while !eof(bs)
-        copyuntil(scratch, bs, UInt8('\n'); keep = false)
-        line = take!(scratch)
+        line = readuntil(bs, UInt8('\n'))
         !isempty(line) && last(line) == UInt8('\r') && pop!(line)
         isempty(line) || return NDJSONFrame(line)
     end
