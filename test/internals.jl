@@ -147,3 +147,18 @@ end
         @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
     end
 end
+
+struct PagedListEP <: ListEndpoint end
+RestClient.urlpath(::PagedListEP) = "p"
+
+@testset "List display elides the middle" begin
+    list = RestClient.List{String, PagedListEP}(
+        Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}())
+    bullets(rows) = count(startswith("  • "), split(
+        sprint(show, MIME("text/plain"), list; context = :displaysize => (rows, 80)), '\n'))
+    shown = sprint(show, MIME("text/plain"), list; context = :displaysize => (14, 80))
+    @test bullets(14) == 7                                   # 14 rows - 4 margin - 3 marker
+    @test occursin("93 items omitted", shown)
+    @test occursin("\"1\"", shown) && occursin("\"100\"", shown)
+    @test bullets(2) == 2
+end

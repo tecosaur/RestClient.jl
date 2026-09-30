@@ -449,24 +449,21 @@ function Base.show(io::IO, m::MIME"text/plain", list::List{I, E}) where {I, E}
         print(io, S", page {emphasis:$(pageno)}")
     end
     print(io, ':')
-    drows = first(displaysize(io)) - 4
-    if length(list.items) <= drows
-        for item in list.items
-            print(io, "\n  • ")
-            show(IOContext(io, :compact => true, :typeinfo => I), m, item)
-        end
+    function showitem(item)
+        print(io, "\n  • ")
+        show(IOContext(io, :compact => true, :typeinfo => I), m, item)
+    end
+    nitems = length(list.items)
+    maxrows = first(displaysize(io)) - 4
+    if nitems <= maxrows
+        foreach(showitem, list.items)
     else
-        drows -= 5 + drows ÷ 5
-        for item in list.items[1:drows÷2]
-            print(io, "\n  • ")
-            show(IOContext(io, :compact => true, :typeinfo => I), m, item)
-        end
+        nshown = max(maxrows - 3, 2) # 3 rows for the omission marker
+        nhead, ntail = cld(nshown, 2), fld(nshown, 2)
+        foreach(showitem, view(list.items, 1:nhead))
         print(io, S"\n  {shadow:⋮}\n  \
-                   {shadow,italic:$(length(list.items)-drows) items omitted}\n  \
+                   {shadow,italic:$(nitems - nshown) items omitted}\n  \
                    {shadow:⋮}")
-        for dataset in list.items[end-drows÷2:end]
-            print(io, "\n  • ")
-            show(IOContext(io, :compact => true, :typeinfo => I), m, dataset)
-        end
+        foreach(showitem, view(list.items, nitems-ntail+1:nitems))
     end
 end
