@@ -31,7 +31,7 @@ end
 quietclose(body, transfer) = (close(body); try wait(transfer) catch end)
 
 function run(with_stream_server, slow_interval)
-@testset "open_stream — early status rendezvous" begin
+@testset "status rendezvous" begin
     with_stream_server() do base
         # normal stream: head resolved before frames drain
         res, body, transfer = open_stream("GET", "$base/ndjson", nothing;
@@ -46,13 +46,13 @@ function run(with_stream_server, slow_interval)
     end
 end
 
-@testset "open_stream — transport failure surfaces" begin
+@testset "transport failure" begin
     # nothing is listening on this port → RequestError, not a bogus Response
     @test_throws RequestError open_stream("GET", "http://127.0.0.1:1/x", nothing;
                                           headers = Pair{String,String}[], timeout = 2.0)
 end
 
-@testset "incremental delivery (frames arrive over time)" begin
+@testset "incremental delivery" begin
     with_stream_server() do base
         # Measure at the raw body so timing reflects the wire, not channel buffering:
         # /slow sleeps SLOW_INTERVAL between frames, so arrivals must be spread out.
@@ -71,7 +71,7 @@ end
     end
 end
 
-@testset "end-to-end NDJSON + SSE decode" begin
+@testset "decode" begin
     with_stream_server() do base
         @test collect(stream_route("$base/ndjson", :NDJSON, Tok).items) ==
             [Tok(n=1), Tok(n=2), Tok(n=3)]
@@ -85,7 +85,7 @@ end
     end
 end
 
-@testset "silent-truncation reconciliation" begin
+@testset "truncation" begin
     with_stream_server() do base
         # /abort writes 2 frames then drops the connection mid-stream
         r = stream_route("$base/abort", :NDJSON, Tok)
@@ -95,7 +95,7 @@ end
     end
 end
 
-@testset "close-driven cancellation unwinds tasks" begin
+@testset "cancellation" begin
     with_stream_server() do base
         r = stream_route("$base/slow", :NDJSON, Tok)
         first(r.items)                          # take one frame

@@ -13,10 +13,10 @@ include("server.jl")            # local HTTP harness shared by the live-request 
     @testset "internals" begin
         include("internals.jl")     # edge cases no live request can reach
     end
-    @testset "JSON.jl backend" begin
+    @testset "JSON.jl" begin
         include("json.jl")          # the JSON.jl @jsondef backend (integration uses JSON3)
     end
-    @testset "XML extension" begin
+    @testset "XML" begin
         include("xml.jl")           # @xmldef, the xpath subset, parsexml dispatch
     end
     @testset "streaming" begin

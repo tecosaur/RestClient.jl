@@ -53,12 +53,12 @@ function run()
     @test Base.IteratorSize(Stream{Tok, :SSE}) === Base.SizeUnknown()
 end
 
-@testset "drain to completion (NDJSON, bare payload)" begin
+@testset "drain" begin
     r = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n")
     @test collect(r.items) == [Tok(n=1), Tok(n=2), Tok(n=3)]
 end
 
-@testset "element selection: bare T vs whole frame" begin
+@testset "element type" begin
     sse = "data: {\"n\":1}\n\ndata: {\"n\":2}\n\n"
     # Stream{Tok} yields the decoded payload
     bare = collect(run_decode(PlainEP(), :SSE, Tok, sse).items)
@@ -69,7 +69,7 @@ end
     @test [f.data for f in whole] == [Tok(n=1), Tok(n=2)]
 end
 
-@testset "termination predicate stops without emitting terminator" begin
+@testset "end predicate" begin
     # [DONE] data sentinel
     done = run_decode(DoneEP(), :SSE, Tok, "data: {\"n\":1}\n\ndata: [DONE]\n\ndata: {\"n\":9}\n\n")
     @test collect(done.items) == [Tok(n=1)]
@@ -78,7 +78,7 @@ end
     @test collect(stop.items) == [Tok(n=1)]
 end
 
-@testset "truncation vs clean EOF" begin
+@testset "truncation" begin
     # Clean transfer → iterating completes normally
     clean = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\n")
     @test collect(clean.items) == [Tok(n=1)]
@@ -89,41 +89,43 @@ end
     @test got == [Tok(n=1)]
 end
 
-@testset "decode error surfaces to consumer" begin
+@testset "decode error" begin
     bad = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\nnot json\n")
     got = Tok[]
     @test_throws Exception for t in bad.items; push!(got, t); end
     @test got == [Tok(n=1)]
 end
 
-@testset "cancellation (framer blocked reading) — clean exit, no throw" begin
-    # Items buffered, stream left open so the framer parks in readframe; then cancel
-    # with the transfer reporting a RequestError (as a real cancel collapse would).
-    cancelled = Threads.Atomic{Bool}(false)
-    r = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\n{\"n\":2}\n";
-                   transfer = errxfer(), cancelled = cancelled, close_after = false)
-    sleep(0.05)                              # let the framer buffer + park
-    cancelled[] = true; close(r.items); close(r.bs)   # mirrors close(::Stream)
-    # Draining must NOT throw the truncation error — it was a deliberate cancel.
-    got = Tok[]
-    for t in r.items; push!(got, t); end
-    @test got == [Tok(n=1), Tok(n=2)]
-end
-
-@testset "cancellation (framer parked in put!) — clean exit, no throw" begin
-    # buffer=1 with no consumer: the framer decodes one item, parks in put! on the
-    # full channel, then we cancel with the transfer reporting a RequestError.
-    cancelled = Threads.Atomic{Bool}(false)
-    bs = Base.BufferStream()
-    write(bs, collect(codeunits("{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n")))
-    fmt = StreamFormat{:NDJSON}( dataformat(Tok))
-    items = decode_stream(bs, PlainEP(), fmt, Tok, errxfer(), cancelled; buffer = 1)
-    sleep(0.05)                              # framer fills the 1-slot channel, parks in put!
-    cancelled[] = true; close(items); close(bs)
-    # Draining must not throw: the cancel routes through the catch-guard, not close(items, err).
-    got = Tok[]
-    for x in items; push!(got, x); end
-    @test !isempty(got)                      # at least the buffered item delivered, no throw
+# Cancelling ends iteration cleanly, without throwing.
+@testset "cancellation" begin
+    @testset "while reading" begin
+        # Items buffered, stream left open so the framer parks in readframe; then cancel
+        # with the transfer reporting a RequestError (as a real cancel collapse would).
+        cancelled = Threads.Atomic{Bool}(false)
+        r = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\n{\"n\":2}\n";
+                       transfer = errxfer(), cancelled = cancelled, close_after = false)
+        sleep(0.05)                              # let the framer buffer + park
+        cancelled[] = true; close(r.items); close(r.bs)   # mirrors close(::Stream)
+        # Draining must NOT throw the truncation error — it was a deliberate cancel.
+        got = Tok[]
+        for t in r.items; push!(got, t); end
+        @test got == [Tok(n=1), Tok(n=2)]
+    end
+    @testset "while parked in put!" begin
+        # buffer=1 with no consumer: the framer decodes one item, parks in put! on the
+        # full channel, then we cancel with the transfer reporting a RequestError.
+        cancelled = Threads.Atomic{Bool}(false)
+        bs = Base.BufferStream()
+        write(bs, collect(codeunits("{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n")))
+        fmt = StreamFormat{:NDJSON}( dataformat(Tok))
+        items = decode_stream(bs, PlainEP(), fmt, Tok, errxfer(), cancelled; buffer = 1)
+        sleep(0.05)                              # framer fills the 1-slot channel, parks in put!
+        cancelled[] = true; close(items); close(bs)
+        # Draining must not throw: the cancel routes through the catch-guard, not close(items, err).
+        got = Tok[]
+        for x in items; push!(got, x); end
+        @test !isempty(got)                      # at least the buffered item delivered, no throw
+    end
 end
 end  # run
 

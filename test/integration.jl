@@ -119,277 +119,272 @@ module AuthClient
 end
 const AC = AuthClient
 
-@testset "GET → typed single response" begin
-    with_server() do baseurl, state
-        item = IC.getitem(cfg(baseurl), "42")
-        @test item isa IC.Item
-        @test item.name == "item-42"
-        @test item.id == 42
-        @test state.requests == 1
+@testset "responses" begin
+    @testset "single" begin
+        with_server() do baseurl, state
+            item = IC.getitem(cfg(baseurl), "42")
+            @test item isa IC.Item
+            @test item.name == "item-42"
+            @test item.id == 42
+            @test state.requests == 1
+        end
     end
-end
-
-@testset "GET list → Vector of typed items" begin
-    with_server() do baseurl, _
-        items = IC.search(cfg(baseurl), q = "bean", limit = 3)
-        @test items isa Vector{IC.Item}
-        @test length(items) == 3
-        @test items[1].name == "bean-1"
-        @test items[3].id == 3
-    end
-    @testset "empty list" begin
+    @testset "list" begin
         with_server() do baseurl, _
-            @test isempty(IC.search(cfg(baseurl), q = "x", limit = 0))
+            items = IC.search(cfg(baseurl), q = "bean", limit = 3)
+            @test items isa Vector{IC.Item}
+            @test length(items) == 3
+            @test items[1].name == "bean-1"
+            @test items[3].id == 3
+        end
+        @testset "empty" begin
+            with_server() do baseurl, _
+                @test isempty(IC.search(cfg(baseurl), q = "x", limit = 0))
+            end
         end
     end
-end
-
-# Reserved characters must round-trip: the server reflects the decoded value,
-# so a match proves the client percent-encoded them.
-@testset "query parameters are URI-encoded" begin
-    with_server() do baseurl, _
-        for q in ("a b", "x&y=z", "100%", "café", "a/b?c")
-            @test IC.reflect(cfg(baseurl), q = q).name == q
-        end
-    end
-end
-
-@testset "request headers" begin
-    @testset "Accept set from response format" begin
+    @testset "raw" begin
         with_server() do baseurl, _
-            @test IC.showheaders(cfg(baseurl)).accept == "application/json"
+            @test IC.text(cfg(baseurl)) == "plain words"
+            @test IC.number(cfg(baseurl)) === 42
+            resp = IC.upload_bytes(cfg(baseurl), data = collect(b"\x01\x02abc"))
+            @test resp.body == "\x01\x02abc"
+            @test resp.content_type == "application/octet-stream"
         end
     end
-    @testset "custom Authorization header from config key" begin
-        with_server() do baseurl, _
-            @test IC.showheaders(cfg(baseurl; key = "s3cr3t")).authorization == "Bearer s3cr3t"
-        end
-    end
-end
-
-@testset "authentication schemes" begin
-    # The scheme is an endpoint fact (authscheme); the secret is the config's `key`.
-    @testset "Bearer/Basic applied to key, reach Authorization" begin
-        with_server() do baseurl, _
-            @test IC.bearerauth(cfg(baseurl; key = "tok")).authorization == "Bearer tok"
-            # Basic: Authorization is "Basic " * base64("ada:lovelace")
-            @test IC.basicauth(cfg(baseurl; key = "ada:lovelace")).authorization == "Basic YWRhOmxvdmVsYWNl"
-        end
-    end
-    @testset "no key ⇒ no Authorization sent" begin
-        with_server() do baseurl, _
-            @test IC.bearerauth(cfg(baseurl)).authorization == ""   # scheme declared, but key is nothing
-        end
-    end
-    # Header/Query routing is wire-independent here (the routes don't echo arbitrary
-    # headers, and /paged ignores extra params), so assert through the request funnel.
-    @testset "scheme routing through the request funnel" begin
-        hreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), IC.HeaderauthEndpoint())
-        @test ("X-API-Key" => "k") in RestClient.headers(hreq)
-        qreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), IC.QueryauthEndpoint())
-        @test ("api_key" => "k") in RestClient.parameters(qreq)
-        # No scheme declared (default NoAuth) ⇒ nothing added, even with a key set.
-        plain = RestClient.Request{:get}(cfg("http://x"; key = "k"), IC.PagedEndpoint(1))
-        @test isempty(RestClient.headers(plain))
-    end
-    @testset "secret key is redacted in limited display, but repr round-trips" begin
-        c = cfg("http://x"; key = "topsecret")
-        # Plain repr is round-trippable, so it keeps the key verbatim.
-        @test occursin("topsecret", repr(c))
-        # Limited display (REPL output, error printing) redacts it instead.
-        limited = sprint(show, c; context = :limit => true)
-        @test !occursin("topsecret", limited)
-        @test occursin("*****", limited)
-    end
-end
-
-@testset "module-wide auth via @globalconfig" begin
-    @testset "endpoints inherit the module scheme and policy" begin
-        @test RestClient.authscheme(AC.InheritsEndpoint("1")) == BearerAuth()
-        @test RestClient.authpolicy(AC.InheritsEndpoint("1")) === :required
-        @test RestClient.globalauthdefault(Val(AuthClient)) == (BearerAuth(), :required)
-    end
-    @testset "markers override the policy" begin
-        @test RestClient.authscheme(AC.Public_Endpoint("1")) == NoAuth()    # :noauth drops scheme
-        @test RestClient.authpolicy(AC.Public_Endpoint("1")) === :off
-        @test RestClient.authscheme(AC.Optional_Endpoint("1")) == BearerAuth()  # :authoption keeps scheme
-        @test RestClient.authpolicy(AC.Optional_Endpoint("1")) === :optional
-    end
-    @testset "a module with no policy stays off" begin
-        # IntegrationClient declares no @globalconfig auth, so its plain endpoints default.
-        @test RestClient.authscheme(IC.PagedEndpoint(1)) == NoAuth()
-        @test RestClient.authpolicy(IC.PagedEndpoint(1)) === :off
-    end
-    @testset "every call shares one rate-limit gate" begin
-        @test RestClient.globalconfig(Val(AuthClient)).rategate ===
-            RestClient.globalconfig(Val(AuthClient)).rategate
-    end
-    @testset "policy governs sending and validation" begin
-        with_server() do baseurl, _
-            # :required, no key ⇒ MalformedRequest, no request made.
-            @test_throws RestClient.MalformedRequest AC.inherits(cfg(baseurl), "1")
-            # With a key it proceeds and the Bearer header is applied automatically.
-            @test AC.inherits(cfg(baseurl; key = "tok"), "42").id == 42
-            # HEAD requests are validated too.
-            @test_throws RestClient.MalformedRequest AC.probe(cfg(baseurl), "exists")
-            @test AC.probe(cfg(baseurl; key = "tok"), "exists") === true
-            # :noauth endpoint needs no key.
-            @test AC.public_(cfg(baseurl), "42").id == 42
-            # :optional sends the key when present, but does not require it.
-            @test AC.optional_(cfg(baseurl), "42").id == 42                 # no key: fine
-            oreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), AC.Optional_Endpoint("1"))
-            @test ("Authorization" => "Bearer k") in RestClient.headers(oreq)
-            ooff = RestClient.Request{:get}(cfg("http://x"), AC.Optional_Endpoint("1"))
-            @test isempty(RestClient.headers(ooff))                         # no key: nothing sent
-        end
-    end
-end
-
-@testset "POST/PUT payload round-trip" begin
-    with_server() do baseurl, _
-        @testset "POST sends JSON body with Content-Type" begin
-            resp = IC.upload(cfg(baseurl), item = IC.Item("widget", 7))
-            @test resp.method == "POST"
-            @test occursin("application/json", resp.content_type)
-            echoed = JSON3.read(resp.body, IC.Item)
-            @test echoed.name == "widget"
-            @test echoed.id == 7
-        end
-        @testset "PUT uses the PUT method" begin
-            resp = IC.replace(cfg(baseurl), item = IC.Item("gadget", 9))
-            @test resp.method == "PUT"
-            @test JSON3.read(resp.body, IC.Item).id == 9
-        end
-        @testset "no result type ⇒ returns nothing, body discarded" begin
+    @testset "no result type" begin
+        @testset "discarded" begin
             # The server replies 200 with a JSON body; the endpoint declares no
             # result type, so the body is dropped and the call returns nothing.
-            @test IC.notify(cfg(baseurl), item = IC.Item("event", 1)) === nothing
-            @test IC.touch_(cfg(baseurl)) === nothing
+            with_server() do baseurl, _
+                @test IC.notify(cfg(baseurl), item = IC.Item("event", 1)) === nothing
+                @test IC.touch_(cfg(baseurl)) === nothing
+            end
+        end
+        @testset "never cached" begin
+            with_server() do baseurl, state
+                IC.ping_cacheable(cfg(baseurl)); IC.ping_cacheable(cfg(baseurl))
+                @test state.requests == 2
+                @test !isfile(joinpath(RestClient.cachedir(),
+                                       RestClient.cachekey("$baseurl/cacheable", "GET",
+                                                           Pair{String, String}[], nothing) * ".http"))
+            end
         end
     end
-    @testset "no result type ⇒ never cached" begin
-        with_server() do baseurl, state
-            IC.ping_cacheable(cfg(baseurl)); IC.ping_cacheable(cfg(baseurl))
-            @test state.requests == 2
-            @test !isfile(joinpath(RestClient.cachedir(),
-                                   RestClient.cachekey("$baseurl/cacheable", "GET",
-                                                       Pair{String, String}[], nothing) * ".http"))
-        end
-    end
-end
-
-@testset "raw text and bytes" begin
-    with_server() do baseurl, _
-        @test IC.text(cfg(baseurl)) == "plain words"
-        @test IC.number(cfg(baseurl)) === 42
-        resp = IC.upload_bytes(cfg(baseurl), data = collect(b"\x01\x02abc"))
-        @test resp.body == "\x01\x02abc"
-        @test resp.content_type == "application/octet-stream"
-    end
-end
-
-@testset "@formdef → urlencoded body" begin
-    with_server() do baseurl, _
-        resp = IC.login(cfg(baseurl), form = IC.LoginForm(username = "ada", remember = true))
-        @test occursin("application/x-www-form-urlencoded", resp.content_type)
-        # The remapped field name appears as `remember-me` in the wire body.
-        @test resp.body == "username=ada&remember-me=true"
-    end
-    @testset "nothing-valued fields are omitted" begin
+    @testset "error status" begin
         with_server() do baseurl, _
-            resp = IC.login(cfg(baseurl), form = IC.LoginForm(username = "bob"))
-            @test resp.body == "username=bob&remember-me=false"
+            @test_throws RestClient.ResponseError IC.errored(cfg(baseurl))
+            @test_throws RestClient.ResponseError IC.missing_(cfg(baseurl))
+            # The error carries the server's status and body, not just the fact of failure.
+            err = try IC.errored(cfg(baseurl)) catch e; e end
+            @test err isa RestClient.ResponseError
+            @test err.response.status == 500
+            @test err.body == codeunits("boom")
+            err404 = try IC.missing_(cfg(baseurl)) catch e; e end
+            @test err404.response.status == 404
+            @test err404.body == codeunits("nope")
+            # showerror surfaces the status and the body text.
+            msg = sprint(showerror, err)
+            @test occursin("500", msg)
+            @test occursin("boom", msg)
+        end
+    end
+    @testset "pagination" begin
+        with_server() do baseurl, _
+            page1 = IC.listing(cfg(baseurl), page = 1)
+            @test page1 isa RestClient.List
+            @test RestClient.thispagenumber(page1) == 1
+            @test length(page1) == 1
+            @test page1[1].name == "p1"
+            @test first(page1) isa IC.Item       # List iterates its items
+            page2 = nextpage(page1)
+            @test RestClient.thispagenumber(page2) == 2
+            @test page2[1].name == "p2"
+            page3 = nextpage(page2)
+            @test page3[1].name == "p3"
+            @test isnothing(nextpage(page3))     # more=false at page 3
         end
     end
 end
 
-@testset "@multipartdef → multipart body" begin
-    with_server() do baseurl, _
-        form = IC.UploadForm(file = b"hello", meta = IC.Item("m", 3), note = "hi")
-        resp = IC.multiupload(cfg(baseurl), form = form)
-        @test occursin("multipart/form-data; boundary=", resp.content_type)
-        body = resp.body
-        @test occursin("name=\"file\"; filename=\"file\"", body)
-        @test occursin("application/octet-stream", body)   # binary part
-        @test occursin("hello", body)
-        @test occursin("name=\"meta\"", body)
-        @test occursin("application/json", body)            # @jsondef field → JSON part
-        @test occursin("name=\"note\"\r\nContent-Type: text/plain; charset=utf-8", body)
-        @testset "nothing parts omitted" begin
-            bare = IC.UploadForm(file = b"x", meta = IC.Item("m", 1))
-            r = IC.multiupload(cfg(baseurl), form = bare)
-            @test !occursin("name=\"note\"", r.body)
+@testset "requests" begin
+    # Reserved characters must round-trip: the server reflects the decoded value,
+    # so a match proves the client percent-encoded them.
+    @testset "query encoding" begin
+        with_server() do baseurl, _
+            for q in ("a b", "x&y=z", "100%", "café", "a/b?c")
+                @test IC.reflect(cfg(baseurl), q = q).name == q
+            end
+        end
+    end
+    @testset "headers" begin
+        @testset "Accept" begin
+            with_server() do baseurl, _
+                @test IC.showheaders(cfg(baseurl)).accept == "application/json"
+            end
+        end
+        @testset "custom Authorization" begin
+            with_server() do baseurl, _
+                @test IC.showheaders(cfg(baseurl; key = "s3cr3t")).authorization == "Bearer s3cr3t"
+            end
+        end
+    end
+    @testset "HEAD" begin
+        with_server() do baseurl, _
+            @test IC.exists(cfg(baseurl), "exists") === true
+            @test IC.exists(cfg(baseurl), "missing") === false
+        end
+    end
+    @testset "payloads" begin
+        @testset "JSON" begin
+            with_server() do baseurl, _
+                resp = IC.upload(cfg(baseurl), item = IC.Item("widget", 7))
+                @test resp.method == "POST"
+                @test occursin("application/json", resp.content_type)
+                echoed = JSON3.read(resp.body, IC.Item)
+                @test echoed.name == "widget"
+                @test echoed.id == 7
+            end
+        end
+        @testset "PUT" begin
+            with_server() do baseurl, _
+                resp = IC.replace(cfg(baseurl), item = IC.Item("gadget", 9))
+                @test resp.method == "PUT"
+                @test JSON3.read(resp.body, IC.Item).id == 9
+            end
+        end
+        @testset "form" begin
+            with_server() do baseurl, _
+                resp = IC.login(cfg(baseurl), form = IC.LoginForm(username = "ada", remember = true))
+                @test occursin("application/x-www-form-urlencoded", resp.content_type)
+                # The remapped field name appears as `remember-me` in the wire body.
+                @test resp.body == "username=ada&remember-me=true"
+                @testset "nothing omitted" begin
+                    resp = IC.login(cfg(baseurl), form = IC.LoginForm(username = "bob"))
+                    @test resp.body == "username=bob&remember-me=false"
+                end
+            end
+        end
+        @testset "multipart" begin
+            with_server() do baseurl, _
+                form = IC.UploadForm(file = b"hello", meta = IC.Item("m", 3), note = "hi")
+                resp = IC.multiupload(cfg(baseurl), form = form)
+                @test occursin("multipart/form-data; boundary=", resp.content_type)
+                body = resp.body
+                @test occursin("name=\"file\"; filename=\"file\"", body)
+                @test occursin("application/octet-stream", body)   # binary part
+                @test occursin("hello", body)
+                @test occursin("name=\"meta\"", body)
+                @test occursin("application/json", body)            # @jsondef field → JSON part
+                @test occursin("name=\"note\"\r\nContent-Type: text/plain; charset=utf-8", body)
+                @testset "nothing omitted" begin
+                    bare = IC.UploadForm(file = b"x", meta = IC.Item("m", 1))
+                    r = IC.multiupload(cfg(baseurl), form = bare)
+                    @test !occursin("name=\"note\"", r.body)
+                end
+            end
         end
     end
 end
 
-@testset "HEAD existence probe" begin
-    with_server() do baseurl, _
-        @test IC.exists(cfg(baseurl), "exists") === true
-        @test IC.exists(cfg(baseurl), "missing") === false
+@testset "auth" begin
+    # The scheme is an endpoint fact (authscheme); the secret is the config's `key`.
+    @testset "schemes" begin
+        @testset "Bearer and Basic" begin
+            with_server() do baseurl, _
+                @test IC.bearerauth(cfg(baseurl; key = "tok")).authorization == "Bearer tok"
+                # Basic: Authorization is "Basic " * base64("ada:lovelace")
+                @test IC.basicauth(cfg(baseurl; key = "ada:lovelace")).authorization == "Basic YWRhOmxvdmVsYWNl"
+            end
+        end
+        @testset "no key" begin
+            with_server() do baseurl, _
+                @test IC.bearerauth(cfg(baseurl)).authorization == ""   # scheme declared, but key is nothing
+            end
+        end
+        # Header/Query routing is wire-independent here (the routes don't echo arbitrary
+        # headers, and /paged ignores extra params), so assert through the request funnel.
+        @testset "header and query" begin
+            hreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), IC.HeaderauthEndpoint())
+            @test ("X-API-Key" => "k") in RestClient.headers(hreq)
+            qreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), IC.QueryauthEndpoint())
+            @test ("api_key" => "k") in RestClient.parameters(qreq)
+            # No scheme declared (default NoAuth) ⇒ nothing added, even with a key set.
+            plain = RestClient.Request{:get}(cfg("http://x"; key = "k"), IC.PagedEndpoint(1))
+            @test isempty(RestClient.headers(plain))
+        end
+        @testset "key display" begin
+            c = cfg("http://x"; key = "topsecret")
+            # Plain repr is round-trippable, so it keeps the key verbatim.
+            @test occursin("topsecret", repr(c))
+            # Limited display (REPL output, error printing) redacts it instead.
+            limited = sprint(show, c; context = :limit => true)
+            @test !occursin("topsecret", limited)
+            @test occursin("*****", limited)
+        end
+    end
+    @testset "module default" begin
+        @testset "inherited" begin
+            @test RestClient.authscheme(AC.InheritsEndpoint("1")) == BearerAuth()
+            @test RestClient.authpolicy(AC.InheritsEndpoint("1")) === :required
+            @test RestClient.globalauthdefault(Val(AuthClient)) == (BearerAuth(), :required)
+        end
+        @testset "markers" begin
+            @test RestClient.authscheme(AC.Public_Endpoint("1")) == NoAuth()    # :noauth drops scheme
+            @test RestClient.authpolicy(AC.Public_Endpoint("1")) === :off
+            @test RestClient.authscheme(AC.Optional_Endpoint("1")) == BearerAuth()  # :authoption keeps scheme
+            @test RestClient.authpolicy(AC.Optional_Endpoint("1")) === :optional
+        end
+        @testset "no policy" begin
+            # IntegrationClient declares no @globalconfig auth, so its plain endpoints default.
+            @test RestClient.authscheme(IC.PagedEndpoint(1)) == NoAuth()
+            @test RestClient.authpolicy(IC.PagedEndpoint(1)) === :off
+        end
+        @testset "enforcement" begin
+            with_server() do baseurl, _
+                # :required, no key ⇒ MalformedRequest, no request made.
+                @test_throws RestClient.MalformedRequest AC.inherits(cfg(baseurl), "1")
+                # With a key it proceeds and the Bearer header is applied automatically.
+                @test AC.inherits(cfg(baseurl; key = "tok"), "42").id == 42
+                # HEAD requests are validated too.
+                @test_throws RestClient.MalformedRequest AC.probe(cfg(baseurl), "exists")
+                @test AC.probe(cfg(baseurl; key = "tok"), "exists") === true
+                # :noauth endpoint needs no key.
+                @test AC.public_(cfg(baseurl), "42").id == 42
+                # :optional sends the key when present, but does not require it.
+                @test AC.optional_(cfg(baseurl), "42").id == 42                 # no key: fine
+                oreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), AC.Optional_Endpoint("1"))
+                @test ("Authorization" => "Bearer k") in RestClient.headers(oreq)
+                ooff = RestClient.Request{:get}(cfg("http://x"), AC.Optional_Endpoint("1"))
+                @test isempty(RestClient.headers(ooff))                         # no key: nothing sent
+            end
+        end
     end
 end
 
-@testset "non-2xx responses raise" begin
-    with_server() do baseurl, _
-        @test_throws RestClient.ResponseError IC.errored(cfg(baseurl))
-        @test_throws RestClient.ResponseError IC.missing_(cfg(baseurl))
-        # The error carries the server's status and body, not just the fact of failure.
-        err = try IC.errored(cfg(baseurl)) catch e; e end
-        @test err isa RestClient.ResponseError
-        @test err.response.status == 500
-        @test err.body == codeunits("boom")
-        err404 = try IC.missing_(cfg(baseurl)) catch e; e end
-        @test err404.response.status == 404
-        @test err404.body == codeunits("nope")
-        # showerror surfaces the status and the body text.
-        msg = sprint(showerror, err)
-        @test occursin("500", msg)
-        @test occursin("boom", msg)
+@testset "rate limits" begin
+    # The first call gets a 429 + Retry-After; the client must wait and retry.
+    @testset "429 retried" begin
+        with_server() do baseurl, state
+            item = IC.limited(cfg(baseurl))
+            @test item.id == 1
+            @test state.ratelimit_hits == 1
+            @test state.requests == 2            # 429 + successful retry
+        end
     end
-end
-
-@testset "pagination via nextpage" begin
-    with_server() do baseurl, _
-        page1 = IC.listing(cfg(baseurl), page = 1)
-        @test page1 isa RestClient.List
-        @test RestClient.thispagenumber(page1) == 1
-        @test length(page1) == 1
-        @test page1[1].name == "p1"
-        @test first(page1) isa IC.Item       # List iterates its items
-        page2 = nextpage(page1)
-        @test RestClient.thispagenumber(page2) == 2
-        @test page2[1].name == "p2"
-        page3 = nextpage(page2)
-        @test page3[1].name == "p3"
-        @test isnothing(nextpage(page3))     # more=false at page 3
-    end
-end
-
-# The first call gets a 429 + Retry-After; the client must wait and retry.
-@testset "rate-limit backoff retries" begin
-    with_server() do baseurl, state
-        item = IC.limited(cfg(baseurl))
-        @test item.id == 1
-        @test state.ratelimit_hits == 1
-        @test state.requests == 2            # 429 + successful retry
-    end
-end
-
-@testset "rate limiting is recognised, and bounded" begin
-    @testset "a plain 403 is an error, not a rate limit" begin
+    @testset "plain 403 not retried" begin
         with_server() do baseurl, state
             @test_throws RestClient.ResponseError IC.forbidden(cfg(baseurl))
             @test state.requests == 1
         end
     end
-    @testset "a 403 with exhausted rate-limit headers is retried" begin
+    @testset "limited 403 retried" begin
         with_server() do baseurl, state
             @test IC.forbidden_limited(cfg(baseurl)).id == 1
             @test state.requests == 2
         end
     end
-    @testset "retries stop after RATELIMIT_MAX_ATTEMPTS" begin
+    @testset "attempts capped" begin
         with_server() do baseurl, state
             err = try IC.always429(cfg(baseurl)) catch e; e end
             @test err isa RestClient.ResponseError
@@ -397,7 +392,7 @@ end
             @test state.requests == RestClient.RATELIMIT_MAX_ATTEMPTS
         end
     end
-    @testset "a wait beyond the timeout isn't made" begin
+    @testset "wait beyond timeout" begin
         with_server() do baseurl, state
             t = @elapsed err = try IC.long_limited(cfg(baseurl; timeout = 5)) catch e; e end
             @test err isa RestClient.ResponseError && err.response.status == 429
@@ -405,31 +400,34 @@ end
             @test state.requests == 1
         end
     end
-    @testset "a retry resends the whole payload" begin
+    @testset "payload resent" begin
         with_server() do baseurl, state
             resp = IC.upload_limited(cfg(baseurl), item = IC.Item("again", 2))
             @test JSON3.read(resp.body, IC.Item) == IC.Item("again", 2)
             @test state.requests == 2
         end
     end
-end
-
-# The first 429 closes the shared gate, so staggered callers wait on its
-# deadline instead of sending — fewer 429s than callers. Independent configs
-# would each retrigger the window (429s == callers), so `<` is the real check.
-# `Threads.@spawn` exercises true parallelism when threads exist, tasks otherwise.
-@testset "rate-limit backoff is shared across concurrent requests" begin
-    ncallers = 8
-    with_server() do baseurl, state
-        config = cfg(baseurl)
-        tasks = Task[]
-        for _ in 1:ncallers
-            push!(tasks, Threads.@spawn IC.throttled(config))
-            sleep(0.3)   # < THROTTLE_RETRY_AFTER: gate still closed when later tasks wake
+    # The first 429 closes the shared gate, so staggered callers wait on its
+    # deadline instead of sending — fewer 429s than callers. Independent configs
+    # would each retrigger the window (429s == callers), so `<` is the real check.
+    # `Threads.@spawn` exercises true parallelism when threads exist, tasks otherwise.
+    @testset "shared backoff" begin
+        ncallers = 8
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            tasks = Task[]
+            for _ in 1:ncallers
+                push!(tasks, Threads.@spawn IC.throttled(config))
+                sleep(0.3)   # < THROTTLE_RETRY_AFTER: gate still closed when later tasks wake
+            end
+            items = fetch.(tasks)
+            @test all(item -> item.id == 1, items)
+            @test 0 < (@atomic state.throttle_429s) < ncallers   # gate suppressed retries
         end
-        items = fetch.(tasks)
-        @test all(item -> item.id == 1, items)
-        @test 0 < (@atomic state.throttle_429s) < ncallers   # gate suppressed retries
+    end
+    @testset "@globalconfig gate" begin
+        @test RestClient.globalconfig(Val(AuthClient)).rategate ===
+            RestClient.globalconfig(Val(AuthClient)).rategate
     end
 end
 
@@ -441,8 +439,8 @@ function clean_cachekey(url, method, headers)
     isfile(cfile) && rm(cfile)
 end
 
-@testset "HTTP caching" begin
-    @testset "max-age serves the second request from cache" begin
+@testset "caching" begin
+    @testset "max-age" begin
         with_server() do baseurl, state
             config = cfg(baseurl)
             try
@@ -456,14 +454,14 @@ end
             end
         end
     end
-    @testset "cache=false bypasses the cache" begin
+    @testset "disabled" begin
         with_server() do baseurl, state
             config = cfg(baseurl; cache = false)
             IC.cached(config); IC.cached(config)
             @test state.requests == 2
         end
     end
-    @testset "a 304 refreshes the stored entry's freshness" begin
+    @testset "304 revalidation" begin
         with_server() do baseurl, state
             config = cfg(baseurl)
             try
@@ -477,7 +475,7 @@ end
             end
         end
     end
-    @testset "a changed response replaces the stored entry" begin
+    @testset "entry replaced" begin
         with_server() do baseurl, state
             config = cfg(baseurl)
             try
@@ -489,7 +487,7 @@ end
             end
         end
     end
-    @testset "Cache-Control: no-store is never cached" begin
+    @testset "no-store" begin
         with_server() do baseurl, state
             IC.nostore(cfg(baseurl)); IC.nostore(cfg(baseurl))
             @test state.requests == 2

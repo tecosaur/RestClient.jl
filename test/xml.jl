@@ -44,12 +44,12 @@ end
 
 const XC = XMLClient
 
-@testset "dataformat & mimetype" begin
+@testset "format" begin
     @test RestClient.dataformat(XC.Book) == RestClient.XMLFormat()
     @test RestClient.mimetype(RestClient.XMLFormat) == "application/xml"
 end
 
-@testset "scalar fields: text(), @attr, typed parse" begin
+@testset "scalars" begin
     book = xmlparse(XC.Book, """
         <book year="1937" ratio="0.5">
           <title>The Hobbit</title>
@@ -62,8 +62,8 @@ end
     @test book.isbn == "978-0"                # optional present
 end
 
-@testset "optional fields" begin
-    @testset "absent ⇒ nothing" begin
+@testset "optional" begin
+    @testset "absent" begin
         m = xmlparse(XC.Maybe, "<m/>")
         @test m.present === nothing
         @test m.absent === nothing
@@ -72,7 +72,7 @@ end
     end
     # Regression: a present optional terminal value once hit a parsexml
     # ambiguity (Union{T,Nothing} vs String).
-    @testset "present ⇒ parsed as T" begin
+    @testset "present" begin
         m = xmlparse(XC.Maybe, """<m a="hi" n="7"><size>42</size></m>""")
         @test m.present == "hi"
         @test m.count == 7
@@ -81,7 +81,7 @@ end
     end
 end
 
-@testset "untyped fields" begin
+@testset "untyped" begin
     # Regression: an untyped field holding a string once hit a parsexml
     # ambiguity ((Any, value) vs (T, ::String)).
     u = xmlparse(XC.Untyped, """<u t="a &amp; b"><child>x</child></u>""")
@@ -89,7 +89,7 @@ end
     @test u.node isa Vector                 # node value passes through untouched
 end
 
-@testset "vectors and indexed xpath" begin
+@testset "vectors" begin
     vol = xmlparse(XC.Volume, """
         <volume>
           <chapter><name>Alpha</name></chapter>
@@ -100,18 +100,18 @@ end
     @test vol.chapters[2].name == "Beta"      # nested @xmldef in a Vector
     @test vol.first_chapter == "Alpha"        # [1] index form
     @test vol.last_chapter == "Gamma"         # [last()] index form
-    @testset "single-element vector" begin
+    @testset "single element" begin
         one = xmlparse(XC.Volume, "<volume><chapter><name>Solo</name></chapter></volume>")
         @test length(one.chapters) == 1
     end
 end
 
-@testset "required field missing raises" begin
+@testset "missing required" begin
     # `title` has no default and no matching node ⇒ ArgumentError from parsexml.
     @test_throws ArgumentError xmlparse(XC.Book, """<book year="1" ratio="0"/>""")
 end
 
-@testset "document wrapper is unwrapped" begin
+@testset "document wrapper" begin
     # `read(io, LazyNode)` yields a nil-tag document node; interpretresponse must
     # descend to the real root element before parsing.
     book = xmlparse(XC.Book, """<?xml version="1.0"?>
@@ -120,7 +120,7 @@ end
     @test book.year == 2001
 end
 
-@testset "@xpath component errors" begin
+@testset "xpath errors" begin
     # The xpath subset rejects malformed specs at macro-expansion time.
     @test_throws Exception @macroexpand @xmldef struct Bad1
         x."/leading/slash"::String   # ungrounded selector

@@ -40,15 +40,15 @@ function run(base)
         @test responsetype(SsechatEndpoint()) === Stream{Tok}
         @test responsetype(GenerateEndpoint()) === Stream{Tok, :NDJSON}
     end
-    @testset "SSE stream, default EOF termination" begin
+    @testset "SSE" begin
         s = ssechat(cfg)
         @test s isa Stream{Tok}
         @test collect(s) == [Tok(n=1), Tok(n=2), Tok(n=3)]
     end
-    @testset "NDJSON stream (two-parameter form)" begin
+    @testset "NDJSON" begin
         @test collect(generate(cfg)) == [Tok(n=1), Tok(n=2), Tok(n=3)]
     end
-    @testset "whole-frame SSEvent stream" begin
+    @testset "whole frames" begin
         evs = collect(events(cfg))
         @test all(e -> e isa SSEvent{Tok}, evs)
         @test evs[1].event == "tick" && evs[1].id == "a"
@@ -58,18 +58,18 @@ function run(base)
             @test tok isa Tok
         end
     end
-    @testset "custom isstreamend on derived endpoint name" begin
+    @testset "custom end" begin
         @test collect(chatdone(cfg)) == [Tok(n=1)]          # stops at [DONE]
         @test collect(chatstop(cfg)) == [Tok(n=1)]          # stops at event: stop
     end
-    @testset "error status raises ResponseError with body" begin
+    @testset "error status" begin
         @test_throws RestClient.ResponseError failing(cfg)
         err = try failing(cfg) catch e; e end
         @test err isa RestClient.ResponseError
         @test err.response.status == 500
         @test err.body == codeunits("boom")
     end
-    @testset "iterate-then-close (cancellation) ends cleanly" begin
+    @testset "cancellation" begin
         s = ssechat(cfg)
         for tok in s
             close(s)                                        # bail after first frame
