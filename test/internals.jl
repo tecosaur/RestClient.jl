@@ -54,6 +54,9 @@ struct PayloadEP <: AbstractEndpoint
 end
 RestClient.urlpath(::PayloadEP) = "p"
 RestClient.payload(ep::PayloadEP) = ep.value
+struct MisplacedStreamEP <: AbstractEndpoint end
+RestClient.urlpath(::MisplacedStreamEP) = "p"
+RestClient.responsetype(::MisplacedStreamEP) = Stream{Int}
 struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
@@ -343,6 +346,10 @@ end
         err = try perform(Request{:query}(RequestConfig("http://x"), PlainEP())) catch e; e end
         @test err isa MalformedRequest
         @test occursin("QUERY", only(err.issues))
+    end
+    @testset "stream from a non-stream endpoint" begin
+        err = try perform(Request{:get}(RequestConfig("http://unused.test"), MisplacedStreamEP())) catch e; e end
+        @test err isa ArgumentError && occursin("StreamEndpoint", err.msg)
     end
     @testset "path with a query" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())

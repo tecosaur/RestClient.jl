@@ -385,6 +385,10 @@ function outgoing(req::Request{kind}) where {kind}
     kind ∈ SUPPORTED_HTTP_METHODS ||
         throw(ArgumentError("Cannot perform a :$kind request: the supported HTTP methods are \
                              $(join(SUPPORTED_HTTP_METHODS, ", "))"))
+    responsetype(req.endpoint) <: Stream && !(req.endpoint isa StreamEndpoint) &&
+        throw(ArgumentError("$(typeof(req.endpoint)) returns a Stream, so it must subtype \
+                             StreamEndpoint (for an API-wide supertype, declare it as \
+                             e.g. `abstract type MyAPIStream <: StreamEndpoint end`)"))
     content = payload(req)
     check_validation(req, content)
     body = if isnothing(content) || content isa IO
