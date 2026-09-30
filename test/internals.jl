@@ -7,6 +7,7 @@
 
 using Dates
 using Downloads: Response
+using Tables
 using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse, cachesave,
     opencacheentry, readcachestamp, CACHE_STALE_DURATION, HTTP_DATE_FORMAT
 
@@ -73,6 +74,10 @@ end
 struct ListContent <: ListResponse{String}
     total::Int
     items::Vector{String}
+end
+struct Row
+    a::Int
+    b::String
 end
 
 # Tests
@@ -411,6 +416,13 @@ end
         @test @inferred(RestClient.contents(OneContent("n", 3))) === 3
         @test @inferred(RestClient.contents(ListContent(1, ["x"]))) == ["x"]
         @test_throws ArgumentError RestClient.contents(TwoContents(1, 2))
+    end
+    @testset "List as a table" begin
+        rows = RestClient.List{Row, PagedListEP}(
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}())
+        @test Tables.istable(rows)
+        @test Tables.columntable(rows) == (a = [1, 2], b = ["x", "y"])
+        @test Tables.schema(rows).names == (:a, :b)
     end
     @testset "List display" begin
         list = RestClient.List{String, PagedListEP}(
