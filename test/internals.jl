@@ -75,15 +75,15 @@ end
 
 @testset "rate limits" begin
     @testset "retry delay" begin
-        @test retrydelay(hdr()) == 0
-        @test retrydelay(hdr("retry-after" => "soon")) == 0
-        @test retrydelay(hdr("x-ratelimit-reset" => "garbage")) == 0
+        @test isnothing(retrydelay(hdr()))
+        @test isnothing(retrydelay(hdr("retry-after" => "soon")))
+        @test isnothing(retrydelay(hdr("x-ratelimit-reset" => "garbage")))
         @testset "HTTP date" begin
             @test 115 <= retrydelay(hdr("retry-after" => http_date(now(UTC) + Second(120)))) <= 121
             @test retrydelay(hdr("retry-after" => http_date(now(UTC) - Hour(1)))) == 0
         end
         @testset "remaining gates reset" begin
-            @test retrydelay(hdr("x-ratelimit-remaining" => "5", "x-ratelimit-reset" => "60")) == 0
+            @test isnothing(retrydelay(hdr("x-ratelimit-remaining" => "5", "x-ratelimit-reset" => "60")))
             @test retrydelay(hdr("x-ratelimit-remaining" => "0", "x-ratelimit-reset" => "45")) == 45
         end
         @testset "delta or timestamp" begin
@@ -95,6 +95,18 @@ end
             @test retrydelay(hdr("retry-after" => "10", "x-ratelimit-remaining" => "0",
                                  "x-ratelimit-reset" => "999")) == 10
         end
+    end
+    @testset "payload resending" begin
+        seekable = IOBuffer("payload")
+        read(seekable, 2)                                        # sent from where it stands
+        next = RestClient.resendable(seekable)
+        @test read(next(), String) == "yload"
+        @test read(next(), String) == "yload"                    # rewound for a retry
+        @test isnothing(RestClient.resendable(nothing)())
+        pipe = Base.BufferStream()
+        once = RestClient.resendable(pipe)
+        @test once() === pipe
+        @test_throws ArgumentError once()
     end
 end
 

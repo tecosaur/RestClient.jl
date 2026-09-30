@@ -19,11 +19,13 @@ mutable struct ServerState
     requests::Int            # total requests served
     ratelimit_hits::Int      # times /ratelimited returned 429
     revalidations::Int       # conditional requests seen at /cacheable
+    forbidden_hits::Int      # times /forbidden/limited returned 403
+    echo_limited_hits::Int   # times /echo/limited returned 429
     # /throttled sees genuinely concurrent hits, so these are atomic
     @atomic throttle_429s::Int
     @atomic throttle_first::Float64  # time() of first hit, 0.0 until set
 end
-ServerState() = ServerState(0, 0, 0, 0, 0.0)
+ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0.0)
 
 # Tiny JSON encoders, just enough to avoid a JSON dep and escaped interpolation.
 jsonval(s::AbstractString) = '"' * replace(s, '\\' => "\\\\", '"' => "\\\"") * '"'
@@ -102,6 +104,25 @@ function build_router(state::ServerState)
         HTTP.Response(200, ["Content-Type" => "application/json",
                             "Cache-Control" => "max-age=60", "ETag" => ETAG],
                       item_json("cached", 1))
+    end)
+    # A plain 403 (not a rate limit), and one carrying exhausted rate-limit headers once.
+    HTTP.register!(router, "GET", "/forbidden", _ -> HTTP.Response(403, "no"))
+    HTTP.register!(router, "GET", "/forbidden/limited", function (req)
+        state.forbidden_hits < 1 || return json_response(item_json("ok", 1))
+        state.forbidden_hits += 1
+        HTTP.Response(403, ["X-RateLimit-Remaining" => "0", "X-RateLimit-Reset" => "1"], "{}")
+    end)
+    HTTP.register!(router, "GET", "/ratelimited/long",
+                   _ -> HTTP.Response(429, ["Retry-After" => "3600"], "{}"))
+    HTTP.register!(router, "GET", "/always429",
+                   _ -> HTTP.Response(429, ["Retry-After" => "0"], "{}"))
+    # 429 once, then echo: the retry must resend the whole payload.
+    HTTP.register!(router, "POST", "/echo/limited", function (req)
+        if state.echo_limited_hits < 1
+            state.echo_limited_hits += 1
+            return HTTP.Response(429, ["Retry-After" => "0"], "{}")
+        end
+        echo("POST")(req)
     end)
     HTTP.register!(router, "GET", "/text", _ -> HTTP.Response(200, "plain words"))
     HTTP.register!(router, "GET", "/number", _ -> HTTP.Response(200, "42"))

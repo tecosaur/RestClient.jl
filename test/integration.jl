@@ -69,6 +69,11 @@ module IntegrationClient
     @endpoint nostore() -> "nostore" -> Item
     @endpoint errored() -> "error" -> Item
     @endpoint missing_() -> "notfound" -> Item
+    @endpoint forbidden() -> "forbidden" -> Item
+    @endpoint forbidden_limited() -> "forbidden/limited" -> Item
+    @endpoint always429() -> "always429" -> Item
+    @endpoint long_limited() -> "ratelimited/long" -> Item
+    @endpoint upload_limited(; item::Item) -> item -> "echo/limited" -> Echoed
     @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
     @endpoint text() -> "text" -> String
     @endpoint number() -> "number" -> Int
@@ -382,6 +387,41 @@ end
             @test state.requests == 2            # 429 + successful retry
         end
     end
+    @testset "plain 403 not retried" begin
+        with_server() do baseurl, state
+            @test_throws RestClient.ResponseError IC.forbidden(cfg(baseurl))
+            @test state.requests == 1
+        end
+    end
+    @testset "limited 403 retried" begin
+        with_server() do baseurl, state
+            @test IC.forbidden_limited(cfg(baseurl)).id == 1
+            @test state.requests == 2
+        end
+    end
+    @testset "attempts capped" begin
+        with_server() do baseurl, state
+            err = try IC.always429(cfg(baseurl)) catch e; e end
+            @test err isa RestClient.ResponseError
+            @test err.response.status == 429
+            @test state.requests == RestClient.RATELIMIT_MAX_ATTEMPTS
+        end
+    end
+    @testset "wait beyond timeout" begin
+        with_server() do baseurl, state
+            t = @elapsed err = try IC.long_limited(cfg(baseurl; timeout = 5)) catch e; e end
+            @test err isa RestClient.ResponseError && err.response.status == 429
+            @test t < 5
+            @test state.requests == 1
+        end
+    end
+    @testset "payload resent" begin
+        with_server() do baseurl, state
+            resp = IC.upload_limited(cfg(baseurl), item = IC.Item("again", 2))
+            @test JSON3.read(resp.body, IC.Item) == IC.Item("again", 2)
+            @test state.requests == 2
+        end
+    end
     # The first 429 closes the shared gate, so staggered callers wait on its
     # deadline instead of sending — fewer 429s than callers. Independent configs
     # would each retrigger the window (429s == callers), so `<` is the real check.
@@ -398,6 +438,15 @@ end
             items = fetch.(tasks)
             @test all(item -> item.id == 1, items)
             @test 0 < (@atomic state.throttle_429s) < ncallers   # gate suppressed retries
+        end
+    end
+    @testset "simultaneous 429s share one wait" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            start = time()
+            items = fetch.([Threads.@spawn IC.throttled(config) for _ in 1:3])
+            @test all(item -> item.id == 1, items)
+            @test time() - start < 2 * THROTTLE_RETRY_AFTER
         end
     end
     @testset "@globalconfig gate" begin
