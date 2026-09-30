@@ -93,7 +93,8 @@ Return how `endpoint` authenticates: the [`AuthScheme`](@ref) describing where t
 request's secret (`config.key`) is placed on the wire. The library applies it to
 `key` automatically, so a standard scheme needs no [`headers`](@ref) method.
 
-The default is [`NoAuth`](@ref). Declare a scheme once per API, typically on a
+The default is the scheme given by `@globalconfig auth=` in the endpoint type's
+module, else [`NoAuth`](@ref). Alternatively, declare a scheme once per API on a
 shared endpoint supertype:
 
 ```julia
@@ -107,7 +108,7 @@ For a scheme the provided ones do not cover (request signing, OAuth flows), read
 !!! note
     Part of the `AbstractEndpoint` interface.
 """
-authscheme(::AbstractEndpoint) = NoAuth()
+authscheme(endpoint::AbstractEndpoint) = first(globalauthdefault(Val(parentmodule(typeof(endpoint)))))
 
 """
     authpolicy(endpoint::AbstractEndpoint) -> Symbol
@@ -120,11 +121,12 @@ How `endpoint` uses authentication, one of:
 - `:required` — apply it, and reject a request whose `config.key` is `nothing` during
   validation, before sending, rather than relying on the server to return 401.
 
-The [`@endpoint`](@ref) macro sets this from the module's `@globalconfig auth=`
-default, or per endpoint via an `:auth` (required), `:authoption` (optional), or
-`:noauth` (off) marker.
+The default is the policy given by `@globalconfig auth=` in the endpoint type's
+module (`:off` without one), looked up when a request is made. The
+[`@endpoint`](@ref) macro overrides it per endpoint with an `:auth` (required),
+`:authoption` (optional), or `:noauth` (off) marker.
 """
-authpolicy(::AbstractEndpoint) = :off
+authpolicy(endpoint::AbstractEndpoint) = last(globalauthdefault(Val(parentmodule(typeof(endpoint)))))
 
 """
     validate([config::RequestConfig], endpoint::AbstractEndpoint) ->

@@ -120,6 +120,7 @@ module AuthClient
     using RestClient
     using JSON3
     @jsondef struct Item; name::String; id::Int; end
+    @endpoint early(id::String) -> "items/{id}" -> Item            # declared before the default
     @globalconfig RequestConfig("http://unused.test") auth=(BearerAuth(), :required)
     @endpoint inherits(id::String) -> "items/{id}" -> Item          # module default: Bearer, required
     @endpoint :noauth public_(id::String) -> "items/{id}" -> Item    # opt out: off
@@ -407,10 +408,11 @@ end
             @test RestClient.authscheme(AC.InheritsEndpoint("1")) == BearerAuth()
             @test RestClient.authpolicy(AC.InheritsEndpoint("1")) === :required
             @test RestClient.globalauthdefault(Val(AuthClient)) == (BearerAuth(), :required)
+            @test RestClient.authscheme(AC.EarlyEndpoint("1")) == BearerAuth()
+            @test RestClient.authpolicy(AC.EarlyEndpoint("1")) === :required
         end
         @testset "markers" begin
-            @test RestClient.authscheme(AC.Public_Endpoint("1")) == NoAuth()    # :noauth drops scheme
-            @test RestClient.authpolicy(AC.Public_Endpoint("1")) === :off
+            @test RestClient.authpolicy(AC.Public_Endpoint("1")) === :off      # :noauth turns it off
             @test RestClient.authscheme(AC.Optional_Endpoint("1")) == BearerAuth()  # :authoption keeps scheme
             @test RestClient.authpolicy(AC.Optional_Endpoint("1")) === :optional
         end
