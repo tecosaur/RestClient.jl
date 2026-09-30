@@ -18,6 +18,10 @@ sample_response(; status = 200,
                            "cache-control" => "max-age=600"]) =
     Response("https", "https://api.example.com/thing", status,
              "HTTP/1.1 $status OK", Pair{String, String}[headers...])
+struct QueryPathEP <: AbstractEndpoint end
+RestClient.urlpath(::QueryPathEP) = "search?q=1"
+RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
+RestClient.authpolicy(::QueryPathEP) = :optional
 
 # Tests
 
@@ -116,6 +120,43 @@ end
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> "a" * x
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> "a" * x
     end
+    @testset "URL templates" begin
+        interp(str; kw...) = RestClient.interp_curlies(str; varname = :self, localvars = Symbol[],
+                                                       knownfields = [:x], mod = @__MODULE__, kw...)
+        @test interp("a\\{b}") == "a{b}"                         # escaped brace is literal
+        @test interp("a\\\\b") == "a\\b"                         # escaped backslash
+        @test interp("a//b///{x}//c"; ispath = true) ==
+            Expr(:call, GlobalRef(Base, :string), "a/b/",
+                 :($(RestClient.encode_uri_component)($string(self.x))), "/c")
+        @test interp("a//b") == "a//b"                           # only paths are collapsed
+        @eval module URLClient
+            using RestClient
+            @endpoint struct OpEndpoint
+                op(new::Bool, a::Int) ->
+                    "page/{self.new ? \"a\" : \"b\"}?x={self.a == 1 && self.new}&{a}" -> String
+                new::Bool
+                a::Int
+            end
+            @endpoint escaped() -> "s?q=a%20b&c%3Dd=e%26f" -> String
+            const VERSION_TAG = "v2"
+            const KEYNAME = "key"
+            const N = 3
+            @endpoint globals(q::String) -> "s?v={VERSION_TAG}&{KEYNAME}={q}&{N + 0}=n" -> String
+            @endpoint literals() -> "s?n={3}&f={true}&c={'c'}&{1}=one" -> String
+            @endpoint flag(q::Union{String, Nothing}) -> "s?verbose&{q}" -> String
+        end
+        urlof(endpoint) = RestClient.url(RestClient.Request{:get}(RequestConfig("http://x"), endpoint))
+        @test urlof(URLClient.OpEndpoint(true, 1)) == "http://x/page/a?x=true&a=1"
+        @test urlof(URLClient.OpEndpoint(false, 2)) == "http://x/page/b?x=false&a=2"
+        @test urlof(URLClient.EscapedEndpoint()) == "http://x/s?q=a%20b&c%3Dd=e%26f"
+        @test urlof(URLClient.GlobalsEndpoint("z")) == "http://x/s?v=v2&key=z&3=n"
+        @test urlof(URLClient.LiteralsEndpoint()) == "http://x/s?n=3&f=true&c=c&1=one"
+        @test urlof(URLClient.FlagEndpoint("a b")) == "http://x/s?verbose&q=a%20b"
+        @test urlof(URLClient.FlagEndpoint(nothing)) == "http://x/s?verbose"
+        @test RestClient.decode_uri_component("a%C3%A9%2x%") == "aé%2x%"
+        @test RestClient.split_template("a?b=c\\", '?') == ["a", "b=c\\"]   # trailing `\` is literal
+        @test RestClient.split_template("a\\", '&') == ["a\\"]
+    end
     # A trailing result type may be omitted: the body is discarded and the endpoint
     # returns `nothing`. The result type is distinguished from a payload by shape, so
     # `in -> url` (payload, no result) parses as well as a bare `url`.
@@ -140,5 +181,24 @@ end
         @testset "surplus forms" begin
             @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
         end
+    end
+    @testset "anaphoric self" begin
+        @eval module SelfClient
+            using RestClient
+            @endpoint struct ItemEndpoint
+                self -> "items/{self.id}" -> String
+                id::Int
+            end
+        end
+        ep = SelfClient.ItemEndpoint(7)
+        @test RestClient.urlpath(RequestConfig("http://x"), ep) == "items/7"
+        @test RestClient.payload(RequestConfig("http://x"), ep) === ep
+    end
+end
+
+@testset "requests" begin
+    @testset "path with a query" begin
+        req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
+        @test RestClient.url(req) == "http://x/search?q=1&api_key=k"
     end
 end

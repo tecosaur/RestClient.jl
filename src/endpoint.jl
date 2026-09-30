@@ -156,7 +156,8 @@ global variables) by surrounding them with curly braces.
 "page/{somefield}?param={another}&{globalvar}=7"
 ```
 
-Parameters with a value of `nothing` are omitted from the query string.
+Parameters with a value of `nothing` are omitted from the query string, and a
+component without a value (`?verbose`) is sent as written.
 
 For convenience, a parameter by the same name as the field can be referred to by
 the field name alone (e.g. `?{var}` instead of `?var={var}`).
@@ -251,7 +252,7 @@ macro endpoint(args...)
         :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $body)
     defform(func::Symbol, params::Vector{Symbol}, body) =
         :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname){$(params...)}) where {$(params...)} = $body)
-    varcontext = (; varname = ANAPHORIC_VAR, localvars = [CONFIG_VAR], knownfields = efields, mod=__module__)
+    varcontext = (; varname = ANAPHORIC_VAR, localvars = [ANAPHORIC_VAR, CONFIG_VAR], knownfields = efields, mod=__module__)
     if !isnothing(einfo.in)
         inval = varform(einfo.in; varcontext...)
         push!(body, :($(@__MODULE__).payload($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $inval))
@@ -627,26 +628,25 @@ linearize_arrowforms(@nospecialize(x::Any)) = Any[x]
     parse_endpoint_url(url::String; kwargs...)
 
 Split an endpoint URL into its path and query components, and parse each using
-`interp_curlies` (passing `kwargs`).
+`interp_curlies` (passing `kwargs`). A literal query component without a value
+(`?flag`) is kept in the path, as a flag.
 """
 function parse_endpoint_url(url::String; kwargs...)
-    path, query = if '?' in url
-        split(url, '?', limit=2)
-    else
-        url, nothing
+    path, query = let parts = split_template(url, '?'; limit = 2)
+        first(parts), if length(parts) == 2 last(parts) end
     end
     path = chopprefix(path, "/")
-    isnothing(query) && return interp_curlies(String(path); percentescape=true, kwargs...), nothing
-    components = split(query, '&')
-    parameters = Expr[]
+    isnothing(query) && return interp_curlies(String(path); ispath=true, kwargs...), nothing
+    components = split_template(query, '&')
+    parameters, flags = Expr[], String[]
     function mkparam(key, val)
         valvar = gensym("val")
-        :(let $valvar = $val; if !isnothing($valvar); $key => $string($valvar) end end)
+        :(let $valvar = $val; if !isnothing($valvar); $string($key) => $string($valvar) end end)
     end
     for comp in components
-        if '=' in comp
-            key, value = split(comp, '=', limit=2)
-            keyex, valex = interp_curlies(String(key); kwargs...), interp_curlies(String(value); kwargs...)
+        keyvalue = split_template(comp, '='; limit = 2)
+        if length(keyvalue) == 2
+            keyex, valex = interp_curlies(first(keyvalue); kwargs...), interp_curlies(last(keyvalue); kwargs...)
             push!(parameters, mkparam(keyex, valex))
         elseif startswith(comp, '{') && endswith(comp, '}')
             compparsed = Meta.parse(comp)
@@ -656,47 +656,79 @@ function parse_endpoint_url(url::String; kwargs...)
             kwargs2 = ((; filename, k...) -> k)(; kwargs...)
             compex = varform(compvar; kwargs2...)
             push!(parameters, mkparam(String(compvar), compex))
+        elseif !isempty(comp) && (flag = interp_curlies(comp; kwargs...)) isa String
+            push!(flags, encode_uri_component(flag))
         else
             throw(ArgumentError("Invalid query component $comp"))
         end
     end
-    interp_curlies(String(path); percentescape=true, kwargs...), parameters
+    pathex = interp_curlies(String(path); ispath=true, kwargs...)
+    if !isempty(flags)
+        pathex = Expr(:call, GlobalRef(Base, :string), pathex, "?" * join(flags, '&'))
+    end
+    pathex, parameters
 end
 
-"""
-    interp_curlies(str::String; filename::String = "unknown", kwargs...)
-
-Interpret `{curly}` expressions in `str` with `varform` (passing through `kwargs`).
-"""
-function interp_curlies(str::String; filename::String = "unknown", percentescape::Bool=false, kwargs...)
-    components = Union{String, Expr}[]
-    lastidx = idx = firstindex(str)
-    escaped = false
-    while idx < ncodeunits(str)
-        if escaped
-            escaped = false
-            idx += 1
-        elseif str[idx] == '\\'
-            escaped = true
-            idx += 1
-        elseif str[idx] == '{'
-            lastidx < idx &&
-                push!(components, str[lastidx:prevind(str, idx)])
-            expr, idx = Meta.parseatom(str, idx; filename)
-            Meta.isexpr(expr, :braces, 1) ||
-                throw(ArgumentError("Expected single {curly} form in URL, instead saw $expr"))
-            exval = first(expr.args)
-            exvar = varform(exval; kwargs...)
-            push!(components, if percentescape; :($encode_uri_component($exvar)) else exvar end)
-            lastidx = idx
+# Split `str` at each `delim` that is neither escaped by `\` nor inside a `{…}` form
+function split_template(str::String, delim::Char; limit::Int = 0)
+    parts, start, idx = String[], firstindex(str), firstindex(str)
+    while idx <= lastindex(str)
+        char = str[idx]
+        if char == '\\' && idx < lastindex(str)
+            idx = nextind(str, nextind(str, idx))
+        elseif char == '{'
+            _, idx = Meta.parseatom(str, idx)
+        elseif char == delim && (limit == 0 || length(parts) < limit - 1)
+            push!(parts, str[start:prevind(str, idx)])
+            start = idx = nextind(str, idx)
         else
             idx = nextind(str, idx)
         end
     end
-    if lastidx <= lastindex(str)
-        push!(components, str[lastidx:end])
+    push!(parts, str[start:end])
+end
+
+"""
+    interp_curlies(str::String; filename::String = "unknown", ispath::Bool = false, kwargs...)
+
+Interpret `{curly}` expressions in `str` with `varform` (passing through `kwargs`).
+A backslash makes the next character literal (e.g. `\\{`).
+
+With `ispath`, interpolated values are percent-encoded and runs of `/` in the
+literal text are collapsed. Otherwise (query text, which is encoded when sent),
+percent-escapes in the literal text are decoded.
+"""
+function interp_curlies(str::String; filename::String = "unknown", ispath::Bool = false, kwargs...)
+    components = Any[]
+    literal = IOBuffer()
+    function flushliteral()
+        text = String(take!(literal))
+        text = if ispath replace(text, r"/{2,}" => "/") else decode_uri_component(text) end
+        isempty(text) || push!(components, text)
     end
-    if length(components) == 1
+    idx = firstindex(str)
+    while idx <= lastindex(str)
+        char = str[idx]
+        if char == '\\' && idx < lastindex(str)
+            idx = nextind(str, idx)
+            print(literal, str[idx])
+            idx = nextind(str, idx)
+        elseif char == '{'
+            flushliteral()
+            expr, idx = Meta.parseatom(str, idx; filename)
+            Meta.isexpr(expr, :braces, 1) ||
+                throw(ArgumentError("Expected single {curly} form in URL, instead saw $expr"))
+            exvar = varform(first(expr.args); kwargs...)
+            push!(components, if ispath; :($encode_uri_component($string($exvar))) else exvar end)
+        else
+            print(literal, char)
+            idx = nextind(str, idx)
+        end
+    end
+    flushliteral()
+    if isempty(components)
+        ""
+    elseif length(components) == 1
         first(components)
     else
         Expr(:call, GlobalRef(Base, :string), components...)

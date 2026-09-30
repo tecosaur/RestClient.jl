@@ -61,6 +61,21 @@ end
 
 encode_uri_component(s::AbstractString) = sprint(encode_uri_component, s)
 
+# The inverse of `encode_uri_component`; a `%` without two hex digits after it is kept
+function decode_uri_component(s::AbstractString)
+    bytes, decoded, i = codeunits(s), UInt8[], 1
+    while i <= length(bytes)
+        if bytes[i] == UInt8('%') && i + 2 <= length(bytes) && all(isxdigit ∘ Char, bytes[i+1:i+2])
+            push!(decoded, parse(UInt8, String(bytes[i+1:i+2]); base = 16))
+            i += 3
+        else
+            push!(decoded, bytes[i])
+            i += 1
+        end
+    end
+    String(decoded)
+end
+
 """
     url_parameters(params::Vector{Pair{String, String}})
 
@@ -97,8 +112,11 @@ function url_parameters(params::Vector{Pair{String, String}})
     end
 end
 
-url(req::Request) = string(req.config.baseurl, '/', urlpath(req.config, req.endpoint)::String,
-                           url_parameters(parameters(req)))
+function url(req::Request)
+    path, query = urlpath(req.config, req.endpoint)::String, url_parameters(parameters(req))
+    '?' in path && !isempty(query) && (query = "&" * chopprefix(query, "?"))
+    string(req.config.baseurl, '/', path, query)
+end
 
 function addmimes!(headers::AbstractVector{Pair{String, String}}, ::In, ::Out) where {In, Out}
     setheaders = map(lowercase ∘ first, headers)
