@@ -36,6 +36,12 @@ module XMLClient
         # optional scalar via a child-node path: exercises node-unwrap, not the String path
         size."size"::Union{Int, Nothing} = nothing
     end
+    @xmldef struct OneItem
+        name."item/text()"::String
+    end
+    @xmldef struct Nested
+        first_item."group/item[1]/text()"::Union{String, Nothing} = nothing
+    end
     @xmldef struct NothingDefaults
         maybe."@m"::Union{Int, Nothing}     # defaults to nothing
         flags."flag"::Vector{Nothing}       # doesn't: Nothing is only a parameter
@@ -43,6 +49,7 @@ module XMLClient
     @xmldef struct Untyped
         text."@t"             # untyped field holding an attribute string
         node."child"          # untyped field holding child node(s)
+        absent."@missing"     # untyped field with no match
     end
 end
 
@@ -96,6 +103,7 @@ end
     u = xmlparse(XC.Untyped, """<u t="a &amp; b"><child>x</child></u>""")
     @test u.text == "a & b"                 # string value, unescaped
     @test u.node isa Vector                 # node value passes through untouched
+    @test u.absent === nothing
 end
 
 @testset "vectors" begin
@@ -127,6 +135,17 @@ end
         <book year="2001" ratio="1.0"><title>Odyssey</title></book>""")
     @test book.title == "Odyssey"
     @test book.year == 2001
+end
+
+@testset "several where one expected" begin
+    err = try xmlparse(XC.OneItem, "<r><item>a</item><item>b</item></r>") catch e; e end
+    @test err isa Base.get_extension(RestClient, :XMLExt).XMLMultipleChildren
+    @test occursin("Expected one <item> in <r>", sprint(showerror, err))
+end
+
+@testset "index under a missing parent" begin
+    @test xmlparse(XC.Nested, "<r/>").first_item === nothing
+    @test xmlparse(XC.Nested, "<r><group><item>x</item></group></r>").first_item == "x"
 end
 
 @testset "xpath errors" begin

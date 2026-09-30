@@ -36,20 +36,15 @@ RestClient.mimetype(::Type{RestClient.XMLFormat}) = "application/xml"
 
 abstract type XMLParseException <: Exception end
 
-struct XMLMissingAttribute{N <: AbstractNode} <: XMLParseException
-    node::N
-    attr::String
-end
-
-struct XMLMissingChild{N <: AbstractNode} <: XMLParseException
-    node::N
-    tag::String
-end
-
 struct XMLMultipleChildren{N <: AbstractNode} <: XMLParseException
     node::N
     tag::String
 end
+
+Base.showerror(io::IO, ex::XMLMultipleChildren) =
+    print(io, "Expected one <", ex.tag, "> in <", tag(ex.node), ">, but found several. \
+               Select one with an index (`", ex.tag, "[1]`), or take them all with a \
+               Vector-typed field.")
 
 function extract_attr(node::AbstractNode, attr::String)
     attrs = attributes(node)
@@ -143,7 +138,9 @@ macro xpath(spec::String)
             else
                 intidx = tryparse(Int, idx)
                 isnothing(intidx) && throw(ArgumentError("Unrecognised index form: [$idx]"))
-                body = :(get(extract_children($body, $(String(path))), $intidx, nothing))
+                body = :(let childs = extract_children($body, $(String(path)))
+                             if !isnothing(childs) get(childs, $intidx, nothing) end
+                         end)
             end
         else
             # Terminal segment returns the matching child vector (so unwrapped
@@ -161,6 +158,7 @@ end
 
 parsexml(::Type{Any}, value) = value
 parsexml(::Type{Any}, content::String) = XML.unescape(content)
+parsexml(::Type{Any}, ::Nothing) = nothing
 parsexml(::Type{String}, content::String) = XML.unescape(content)
 parsexml(::Type{Symbol}, content::String) = Symbol(parsexml(String, content))
 parsexml(::Type{T}, content::String) where {T} = parse(T, parsexml(String, content))
