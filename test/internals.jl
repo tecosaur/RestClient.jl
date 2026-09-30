@@ -49,6 +49,11 @@ RestClient.headers(::SharedHeadersEP) = SHARED_HEADERS
 RestClient.parameters(::SharedHeadersEP) = SHARED_PARAMS
 RestClient.authscheme(::SharedHeadersEP) = BearerAuth()
 RestClient.authpolicy(::SharedHeadersEP) = :optional
+struct PayloadEP <: AbstractEndpoint
+    value::Any
+end
+RestClient.urlpath(::PayloadEP) = "p"
+RestClient.payload(ep::PayloadEP) = ep.value
 struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
@@ -135,20 +140,33 @@ end
         end
     end
     @testset "payload resending" begin
+        prepare(value) = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), PayloadEP(value)))
+        send(out) = read(RestClient.payloadio(out), String)
+        encoded = prepare("text")
+        @test encoded.payload == codeunits("text")               # encoded once, up front
+        @test send(encoded) == send(encoded) == "text"
         seekable = IOBuffer("payload")
         read(seekable, 2)                                        # sent from where it stands
-        next = RestClient.resendable(seekable)
-        @test read(next(), String) == "yload"
-        @test read(next(), String) == "yload"                    # rewound for a retry
-        @test isnothing(RestClient.resendable(nothing)())
-        pipe = Base.BufferStream()
-        once = RestClient.resendable(pipe)
-        @test once() === pipe
-        @test_throws ArgumentError once()
+        out = prepare(seekable)
+        @test out.payloadstart == 2
+        @test send(out) == "yload"
+        @test send(out) == "yload"                               # rewound for a retry
+        @test isnothing(prepare(Base.BufferStream()).payloadstart)   # can't be resent
     end
 end
 
 @testset "caching" begin
+    @testset "key covers the whole payload" begin
+        key(payload) = RestClient.cachekey("https://api.example.com/q", "QUERY", hdr(), payload)
+        payload = rand(UInt8, 32768)
+        edited = map(1:7:length(payload)) do i
+            changed = copy(payload)
+            changed[i] += 0x01
+            key(changed)
+        end
+        @test key(payload) ∉ edited
+        @test allunique(edited)
+    end
     # RFC 9111, for a private cache
     @testset "freshness" begin
         t = 1_700_000_000
@@ -536,6 +554,9 @@ end
     end
     @testset "base URL with a trailing slash" begin
         @test RestClient.url(Request{:get}(RequestConfig("http://x/api/"), PlainEP())) == "http://x/api/p"
+    end
+    @testset "unsupported method" begin
+        @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))
     end
     @testset "auth leaves endpoint lists" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())

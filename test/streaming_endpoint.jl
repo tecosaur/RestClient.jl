@@ -28,8 +28,17 @@ RestClient.isstreamend(::ChatdoneEndpoint, fr::SSEvent) = fr.data == codeunits("
 @endpoint chatstop() -> "sse/stop" -> Stream{Tok}
 RestClient.isstreamend(::ChatstopEndpoint, fr::SSEvent) = fr.event == "stop"
 
+# Rate-limited once: the POST is retried, payload and all, before streaming.
+@endpoint limitedchat(; prompt::String) -> prompt -> "sse/limited" -> Stream{Tok}
+
 # An error status before any frame: should raise with the body, not stream.
 @endpoint failing() -> "error500" -> Stream{Tok}
+
+# A postprocess that fails after the stream has opened; the stream must still be closed.
+@endpoint rejected() -> "slow" -> Stream{Tok, :NDJSON}
+const REJECTED = Ref{Any}(nothing)
+RestClient.postprocess(::RestClient.Request{<:Any, RejectedEndpoint}, s::Stream) =
+    (REJECTED[] = s; error("rejected"))
 
 function run(base)
     cfg = RequestConfig(base)
@@ -62,12 +71,19 @@ function run(base)
         @test collect(chatdone(cfg)) == [Tok(n=1)]          # stops at [DONE]
         @test collect(chatstop(cfg)) == [Tok(n=1)]          # stops at event: stop
     end
+    @testset "rate-limited" begin
+        @test collect(limitedchat(cfg, prompt = "hi")) == [Tok(n=1), Tok(n=2), Tok(n=3)]
+    end
     @testset "error status" begin
         @test_throws RestClient.ResponseError failing(cfg)
         err = try failing(cfg) catch e; e end
         @test err isa RestClient.ResponseError
         @test err.response.status == 500
         @test err.body == codeunits("boom")
+    end
+    @testset "failed postprocess closes" begin
+        @test_throws ErrorException rejected(cfg)
+        @test !isopen(REJECTED[].items)
     end
     @testset "cancellation" begin
         s = ssechat(cfg)
