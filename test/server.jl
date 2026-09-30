@@ -65,6 +65,7 @@ function build_router(state::ServerState)
                    req -> json_object("accept" => HTTP.header(req, "Accept", ""),
                                       "authorization" => HTTP.header(req, "Authorization", "")))
     # Echoes the body + method + Content-Type, so payload formats are observable.
+    echo_any(req) = echo(req.method)(req)
     echo(method) = req -> json_object("method" => method,
                                       "content_type" => HTTP.header(req, "Content-Type", ""),
                                       "body" => String(req.body))
@@ -126,6 +127,9 @@ function build_router(state::ServerState)
         end
         echo("POST")(req)
     end)
+    # "See Other": the answer is at /seen, which reports how it was requested.
+    HTTP.register!(router, "*", "/see-other", _ -> HTTP.Response(303, ["Location" => "/seen"], ""))
+    HTTP.register!(router, "*", "/seen", echo_any)
     HTTP.register!(router, "GET", "/text", _ -> HTTP.Response(200, "plain words"))
     HTTP.register!(router, "GET", "/number", _ -> HTTP.Response(200, "42"))
     # Stored already stale; a 304 revalidation extends its freshness.

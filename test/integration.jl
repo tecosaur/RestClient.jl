@@ -53,6 +53,7 @@ module IntegrationClient
     @endpoint upload(; item::Item) -> item -> "echo" -> Echoed
     @endpoint replace(; item::Item) -> item -> :put("echo") -> Echoed
     @endpoint lookup(; item::Item) -> item -> :get("echo") -> Echoed      # GET with a body
+    @endpoint remove(; item::Item) -> item -> :delete("see-other") -> Echoed  # answered with a 303
     @endpoint login(; form::LoginForm) -> form -> "echo" -> Echoed
     @endpoint multiupload(; form::UploadForm) -> form -> "echo" -> Echoed
     @endpoint exists(path::String) -> :head("{path}") -> Bool
@@ -243,6 +244,20 @@ end
             RestClient.Downloads.EASY_HOOK[] = previous
         end
         @test called[]
+    end
+    # libcurl < 8.13 (e.g. with Julia 1.11) can't be told to obey the status code,
+    # and resends the original method without its body.
+    @testset "303 See Other" begin
+        curl = VersionNumber(match(r"libcurl/([\d.]+)", unsafe_string(RestClient.Downloads.Curl.curl_version()))[1])
+        with_server() do baseurl, _
+            resp = IC.remove(cfg(baseurl), item = IC.Item("gone", 1))
+            if curl >= v"8.13"
+                @test resp.method == "GET"          # never a DELETE of the other resource
+                @test resp.body == ""
+            else
+                @test_broken resp.method == "GET"
+            end
+        end
     end
     @testset "HEAD" begin
         with_server() do baseurl, _

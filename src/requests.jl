@@ -59,6 +59,11 @@ abandoned, unless the request's `timeout` asks for longer (Downloads' own defaul
 """
 const DEFAULT_IDLE_SECONDS = 20
 
+# `CURLOPT_FOLLOWLOCATION` mode (libcurl ≥ 8.13; older versions treat it as plain
+# following): a redirect rewrites the method as its status says, so a 303 turns a
+# request with a body into a GET, rather than resending the same method without it.
+const CURLFOLLOW_OBEYCODE = 2
+
 # Abandons a transfer once no data has moved for `limit` seconds, as reported by
 # curl's progress callback (at least once a second).
 mutable struct Watchdog
@@ -492,6 +497,7 @@ function transferhook(easy::Downloads.Curl.Easy, info::NamedTuple)
                               Downloads.Curl.curl_off_t, Downloads.Curl.curl_off_t, Downloads.Curl.curl_off_t)))
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_XFERINFODATA, pointer_from_objref(options.watchdog))
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_NOPROGRESS, false)
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_FOLLOWLOCATION, CURLFOLLOW_OBEYCODE)
     isnothing(options.handlesink) || put!(options.handlesink, easy)
     nothing
 end
