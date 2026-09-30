@@ -25,6 +25,20 @@ struct PlainEP <: AbstractEndpoint end
 RestClient.urlpath(::PlainEP) = "p"
 struct PagedListEP <: ListEndpoint end
 RestClient.urlpath(::PagedListEP) = "p"
+struct ValidatedEP <: AbstractEndpoint
+    issues::Any
+end
+RestClient.urlpath(::ValidatedEP) = "p"
+RestClient.validate(ep::ValidatedEP) = ep.issues
+RestClient.authpolicy(::ValidatedEP) = :required
+struct SharedHeadersEP <: AbstractEndpoint end
+const SHARED_HEADERS = ["X-A" => "1"]
+const SHARED_PARAMS = ["a" => "1"]
+RestClient.urlpath(::SharedHeadersEP) = "p"
+RestClient.headers(::SharedHeadersEP) = SHARED_HEADERS
+RestClient.parameters(::SharedHeadersEP) = SHARED_PARAMS
+RestClient.authscheme(::SharedHeadersEP) = BearerAuth()
+RestClient.authpolicy(::SharedHeadersEP) = :optional
 struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
@@ -380,9 +394,40 @@ end
 end
 
 @testset "requests" begin
+    @testset "validation" begin
+        keyed = RequestConfig("http://x"; key = "k")
+        check(issues; config = keyed) =
+            RestClient.check_validation(Request{:get}(config, ValidatedEP(issues)))
+        @test isnothing(check(nothing))
+        @test isnothing(check(String[]))
+        @test isnothing(check(true))
+        @test_throws MalformedRequest check(false)
+        @test_throws MalformedRequest check("bad")
+        @test_throws ArgumentError check(42)
+        @test MalformedRequest(Request{:get}(keyed, PlainEP()), [SubString("ab", 1, 1)]).issues == ["a"]
+        @test sprint(showerror, MalformedRequest(Request{:post}(keyed, PlainEP()), ["bad"])) ==
+            "Malformed :post request to PlainEP: bad"
+        @testset "missing key" begin
+            issues = ["bad"]
+            err = try check(issues; config = RequestConfig("http://x")) catch e; e end
+            @test length(err.issues) == 2 && occursin("requires authentication", err.issues[2])
+            @test issues == ["bad"]                              # the caller's vector is untouched
+            @test_throws MalformedRequest check(true; config = RequestConfig("http://x"))
+        end
+    end
     @testset "path with a query" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
         @test RestClient.url(req) == "http://x/search?q=1&api_key=k"
+    end
+    @testset "auth leaves endpoint lists" begin
+        req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())
+        for _ in 1:2
+            @test RestClient.headers(req) == ["X-A" => "1", "Authorization" => "Bearer k"]
+            @test RestClient.parameters(req) == ["a" => "1"]
+            @test RestClient.mimeheaders(req, Nothing) == ["X-A" => "1", "Authorization" => "Bearer k"]
+        end
+        @test SHARED_HEADERS == ["X-A" => "1"]
+        @test SHARED_PARAMS == ["a" => "1"]
     end
     @testset "long error bodies" begin
         req = Request{:get}(RequestConfig("http://x"), PlainEP())
