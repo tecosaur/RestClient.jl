@@ -68,7 +68,7 @@ function build_router(state::ServerState)
     echo(method) = req -> json_object("method" => method,
                                       "content_type" => HTTP.header(req, "Content-Type", ""),
                                       "body" => String(req.body))
-    for method in ("POST", "PUT", "PATCH", "DELETE")
+    for method in ("GET", "POST", "PUT", "PATCH", "DELETE")
         HTTP.register!(router, method, "/echo", echo(method))
     end
     HTTP.register!(router, "GET", "/error", _ -> HTTP.Response(500, "boom"))
@@ -79,6 +79,7 @@ function build_router(state::ServerState)
                                       item_json("fresh", 1)))
     HTTP.register!(router, "HEAD", "/exists", _ -> HTTP.Response(200, ""))
     HTTP.register!(router, "HEAD", "/missing", _ -> HTTP.Response(404, ""))
+    HTTP.register!(router, "HEAD", "/broken", _ -> HTTP.Response(500, ""))
     # 429 + Retry-After on the first hit, then 200 — drives the client's backoff.
     HTTP.register!(router, "GET", "/ratelimited", function (req)
         state.ratelimit_hits < 1 || return json_response(item_json("ok", 1))
@@ -174,6 +175,9 @@ end
 # the client observes frames as they arrive (and connection drops mid-stream).
 const SLOW_INTERVAL = 0.15
 
+# Times /sse/limited has answered 429; reset by each `with_stream_server`.
+const STREAM_LIMITED_HITS = Threads.Atomic{Int}(0)
+
 function write_frames(http::HTTP.Stream, frames; contenttype, interval = 0.0, abortafter = 0)
     HTTP.setstatus(http, 200)
     HTTP.setheader(http, "Content-Type" => contenttype)
@@ -187,6 +191,7 @@ function write_frames(http::HTTP.Stream, frames; contenttype, interval = 0.0, ab
 end
 
 function stream_router(http::HTTP.Stream)
+    read(http)   # consume any request body, which HTTP.jl requires before responding
     path = HTTP.URI(http.message.target).path
     sseframes = ["event: tick\ndata: {\"n\":1}\nid: a\n\n",
                  "data: {\"n\":2}\n\n",
@@ -200,6 +205,14 @@ function stream_router(http::HTTP.Stream)
     elseif path == "/sse/stop"
         write_frames(http, ["data: {\"n\":1}\n\n", "event: stop\ndata: x\n\n"];
                      contenttype = "text/event-stream")
+    elseif path == "/sse/limited"        # 429 once, then a normal stream
+        if Threads.atomic_add!(STREAM_LIMITED_HITS, 1) == 0
+            HTTP.setstatus(http, 429)
+            HTTP.setheader(http, "Retry-After" => "0")
+            HTTP.startwrite(http)
+        else
+            write_frames(http, sseframes; contenttype = "text/event-stream")
+        end
     elseif path == "/ndjson"
         write_frames(http, ndframes; contenttype = "application/x-ndjson")
     elseif path == "/slow"
@@ -224,9 +237,11 @@ end
     with_stream_server(f) -> f's return value
 
 Like [`with_server`], but serves the streaming routes (`/sse`, `/ndjson`, `/slow`,
-`/abort`, `/empty`, `/error500`, `/sse/done`, `/sse/stop`) in HTTP stream mode.
+`/abort`, `/empty`, `/error500`, `/sse/done`, `/sse/stop`, `/sse/limited`) in HTTP
+stream mode.
 """
 function with_stream_server(f)
+    STREAM_LIMITED_HITS[] = 0
     sock = Sockets.listen(Sockets.localhost, 0)
     port = Int(Sockets.getsockname(sock)[2])
     server = HTTP.serve!(stream_router, Sockets.localhost, port;

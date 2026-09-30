@@ -82,28 +82,9 @@ end
 
 cachedir() = BaseDirs.User.cache(BaseDirs.Project("RestClient"))
 
-function cachekey(url::String, method::String, headers::Union{<:AbstractVector, <:AbstractDict}, payload::Union{<:IO, Nothing})
-    h = hash(method, hash(url))
-    for (k, v) in headers
-        h = hash(v, hash(k, h))
-    end
-    if !isnothing(payload)
-        mark(payload)
-        # This sort of hashing is quite sub-optimal, but
-        # it's way faster than most network speeds and
-        # I don't think it's worth having some adversarial
-        # protection here. The only stdlibs available are
-        # CRC32c (trivially reversible) and slow SHA implementations.
-        # If this proves to be a bottleneck, we could grab
-        # `KangarooTwelve` or similar.
-        while !eof(payload)
-            peek(payload) # Refill buffer
-            for b in readavailable(payload)
-                h = hash(b, h)
-            end
-        end
-        reset(payload)
-    end
+function cachekey(url::String, method::String, headers::Vector{Pair{String, String}},
+                  payload::Union{Vector{UInt8}, Nothing})
+    h = hash(payload, hash(headers, hash(method, hash(url))))
     string(h, base=10+26)
 end
 
@@ -264,49 +245,42 @@ end
 # Performing a cached request
 
 """
-    http_cached(cfile::String, method::String, url::String, payload::Union{IO, Nothing};
-                headers, timeout::Float64, secrets::Vector{String}) -> Tuple{Downloads.Response, IO, Bool}
+    http_cached(cfile::String, req::Request, out::Outgoing) -> Tuple{Incoming, Bool}
 
-Perform an HTTP request through the cache entry `cfile`: serve it if fresh,
+Perform the request `out` through the cache entry `cfile`: serve it if fresh,
 revalidate it if stale (RFC 9111 §4.3), or else make the request afresh. The
 `Bool` is true when the response is the stored entry unchanged.
 """
-function http_cached(cfile::String, method::String, url::String, payload::Union{IO, Nothing};
-                     headers::Union{<:AbstractVector, <:AbstractDict}, timeout::Float64,
-                     secrets::Vector{String})
+function http_cached(cfile::String, req::Request, out::Outgoing)
     entry = opencacheentry(cfile)
-    if !isnothing(entry)
-        expiry, retain, res, io = entry
-        now = time()
-        if expiry >= now
-            @debug debug_request("CACHE", url, headers; secrets) _file=nothing
-            return res, io, true
-        elseif retain >= now
-            @debug S"{inverse,magenta,bold: CACHE } revalidating stale entry" _file=nothing
-            etag, lastmod = getheader(res.headers, "etag"), getheader(res.headers, "last-modified")
-            conditions = Pair{String, String}[]
-            isempty(etag) || push!(conditions, "if-none-match" => etag)
-            isempty(lastmod) || push!(conditions, "if-modified-since" => lastmod)
-            vres, vbuf = http_request(method, url, payload; timeout, secrets,
-                                      headers = [collect(headers); conditions])
-            if vres.status == 304 # Not Modified: refresh the stored headers (§4.3.4)
-                @debug S"{inverse,magenta,bold: CACHE } stale entry is still valid" _file=nothing
-                updates = filter(((k, _),) -> k ∉ CACHE_BODY_HEADERS, vres.headers)
-                kept = filter(((k, _),) -> !any(u -> first(u) == k, updates), res.headers)
-                body = IOBuffer(read(io))
-                close(io)
-                return Downloads.Response(res.proto, res.url, res.status, res.message,
-                                          vcat(kept, updates)), body, false
-            end
-            close(io)
-            return vres, vbuf, false
-        end
+    isnothing(entry) && return http_request(req, out), false
+    expiry, retain, res, io = entry
+    now = time()
+    if expiry >= now
+        @debug debug_request("CACHE", out.url, out.headers; secrets = authsecrets(req)) _file=nothing
+        return Incoming(res, io), true
+    elseif retain < now
         close(io)
+        return http_request(req, out), false
     end
-    res, buf = http_request(method, url, payload; headers, timeout, secrets)
-    res, buf, false
+    @debug S"{inverse,magenta,bold: CACHE } revalidating stale entry" _file=nothing
+    etag, lastmod = getheader(res.headers, "etag"), getheader(res.headers, "last-modified")
+    conditions = Pair{String, String}[]
+    isempty(etag) || push!(conditions, "if-none-match" => etag)
+    isempty(lastmod) || push!(conditions, "if-modified-since" => lastmod)
+    revalidation = http_request(req, out, [out.headers; conditions])
+    if revalidation.response.status != 304
+        close(io)
+        return revalidation, false
+    end
+    # Not Modified: refresh the stored headers (§4.3.4)
+    @debug S"{inverse,magenta,bold: CACHE } stale entry is still valid" _file=nothing
+    updates = filter(((k, _),) -> k ∉ CACHE_BODY_HEADERS, revalidation.response.headers)
+    kept = filter(((k, _),) -> !any(u -> first(u) == k, updates), res.headers)
+    body = IOBuffer(read(io))
+    close(io)
+    Incoming(Downloads.Response(res.proto, res.url, res.status, res.message, vcat(kept, updates)), body), false
 end
-
 
 
 # Cleanup

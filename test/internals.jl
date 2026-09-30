@@ -48,6 +48,11 @@ RestClient.headers(::SharedHeadersEP) = SHARED_HEADERS
 RestClient.parameters(::SharedHeadersEP) = SHARED_PARAMS
 RestClient.authscheme(::SharedHeadersEP) = BearerAuth()
 RestClient.authpolicy(::SharedHeadersEP) = :optional
+struct PayloadEP <: AbstractEndpoint
+    value::Any
+end
+RestClient.urlpath(::PayloadEP) = "p"
+RestClient.payload(ep::PayloadEP) = ep.value
 struct QueryEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryEP) = "p"
 RestClient.authscheme(::QueryEP) = QueryAuth("api_key")
@@ -96,16 +101,18 @@ end
         end
     end
     @testset "payload resending" begin
+        prepare(value) = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), PayloadEP(value)))
+        send(out) = read(RestClient.payloadio(out), String)
+        encoded = prepare("text")
+        @test encoded.payload == codeunits("text")               # encoded once, up front
+        @test send(encoded) == send(encoded) == "text"
         seekable = IOBuffer("payload")
         read(seekable, 2)                                        # sent from where it stands
-        next = RestClient.resendable(seekable)
-        @test read(next(), String) == "yload"
-        @test read(next(), String) == "yload"                    # rewound for a retry
-        @test isnothing(RestClient.resendable(nothing)())
-        pipe = Base.BufferStream()
-        once = RestClient.resendable(pipe)
-        @test once() === pipe
-        @test_throws ArgumentError once()
+        out = prepare(seekable)
+        @test out.payloadstart == 2
+        @test send(out) == "yload"
+        @test send(out) == "yload"                               # rewound for a retry
+        @test isnothing(prepare(Base.BufferStream()).payloadstart)   # can't be resent
     end
 end
 
@@ -280,6 +287,9 @@ end
             @test issues == ["bad"]                              # the caller's vector is untouched
             @test_throws MalformedRequest check(true; config = RequestConfig("http://x"))
         end
+    end
+    @testset "unsupported method" begin
+        @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))
     end
     @testset "auth leaves endpoint lists" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())

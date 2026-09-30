@@ -10,12 +10,29 @@ const HTTP_DATE_FORMAT = dateformat"e, d u Y H:M:S G\MT"
 
 Validate and perform the request `req`, and return the result.
 
-The specific behaviour is determined by the `kind` of the request, which
-corresponds to an HTTP method name (`:get`, `:post`, etc.).
+The `kind` of the request is its HTTP method, one of: $(join(SUPPORTED_HTTP_METHODS, ", ")).
+The result depends on the endpoint: the response parsed as its
+[`responsetype`](@ref) (a [`Stream`](@ref) for a [`StreamEndpoint`](@ref)),
+passed through [`postprocess`](@ref). A `:head` request's result is whether
+the resource exists: `true` on success, `false` on 404 or 410.
+
+# Errors
+
+- [`MalformedRequest`](@ref) if the request fails validation.
+- [`ResponseError`](@ref) if the server responds with an unsuccessful status
+  (still rate-limited after retries included).
+- `ArgumentError` if `kind` is not a supported HTTP method.
 
 See also: [`Request`](@ref).
 """
-function perform end
+function perform(req::Request)
+    out = outgoing(req)
+    isretryable = !(out.payload isa IO) || !isnothing(out.payloadstart)
+    incoming = catch_ratelimit(req.config.rategate; isretryable, maxwait = req.config.timeout) do
+        transmit(req, out)
+    end
+    deliver(req, incoming)
+end
 
 
 # Generic request functionality
@@ -113,38 +130,42 @@ function mimeheaders(req::Request, in::Type)
     out = responsetype(req.endpoint)
     inmime = if in !== Nothing payloadmime(dataformat(req.endpoint, in), in) end
     outmime = if out !== Nothing mimetype(typeof(dataformat(req.endpoint, out))) end
-    setnames = Set(lowercase(first(h)) for h in hdrs)
+    isset(name) = any(h -> lowercase(first(h)) == name, hdrs)
     extras = Pair{String, String}[]
-    isnothing(inmime) || "content-type" ∈ setnames || push!(extras, "Content-Type" => inmime)
-    isnothing(outmime) || "accept" ∈ setnames || push!(extras, "Accept" => outmime)
-    if isempty(extras) hdrs else [collect(hdrs); extras] end
+    isnothing(inmime) || isset("content-type") || push!(extras, "Content-Type" => inmime)
+    isnothing(outmime) || isset("accept") || push!(extras, "Accept" => outmime)
+    isempty(extras) && hdrs isa Vector{Pair{String, String}} && return hdrs
+    append!(Pair{String, String}[h for h in hdrs], extras)
 end
 
 """
-    catch_ratelimit(f::Function, gate::RateGate, args...; maxwait::Real = Inf, kwargs...)
+    catch_ratelimit(send::Function, gate::RateGate; isretryable::Bool = true, maxwait::Real = Inf) -> Incoming
 
-Call `f(args...; kwargs...)`, retrying while the response is rate-limited: a
-429, or a 403 with rate-limit headers (see [`retrydelay`](@ref)).
+Call `send()`, retrying while the response is rate-limited: a 429, or a 403
+with rate-limit headers (see [`retrydelay`](@ref)).
 
-`f` must return a `Downloads.Response`, optionally followed by its body (closed
-when a retry discards it). Retries wait the delay the headers ask for, or back
-off exponentially, up to `RATELIMIT_MAX_ATTEMPTS` attempts; a wait longer than
-`maxwait` seconds isn't made, returning the rate-limited response at once. Calls
-sharing `gate` share one backoff (see [`RateGate`](@ref)).
+Retries wait the delay the headers ask for, or back off exponentially, up to
+`RATELIMIT_MAX_ATTEMPTS` attempts; a discarded attempt is closed. When not
+`isretryable`, out of attempts, or asked to wait longer than `maxwait` seconds, the
+rate-limited response is returned as-is.
+Calls sharing `gate` share one backoff (see [`RateGate`](@ref)).
 """
-function catch_ratelimit(f::F, gate::RateGate, args...; maxwait::Real = Inf, kwargs...) where {F <: Function}
+function catch_ratelimit(send::F, gate::RateGate; isretryable::Bool = true,
+                         maxwait::Real = Inf) where {F <: Function}
     attempt = 1
     while true
         while (@atomic gate.nextallowed) - time() > 0
             lock(gate.lock) # block until the in-progress backoff releases
             unlock(gate.lock)
         end
-        res, rest... = f(args...; kwargs...)
-        delay = retrydelay(res.headers)
-        islimited = res.status == 429 || (res.status == 403 && !isnothing(delay))
+        incoming = send()::Incoming
+        (; status, headers) = incoming.response
+        delay = retrydelay(headers)
+        islimited = status == 429 || (status == 403 && !isnothing(delay))
         wait = something(delay, 2^(attempt - 1))
-        islimited && attempt < RATELIMIT_MAX_ATTEMPTS && wait <= maxwait || return res, rest...
-        isempty(rest) || close(first(rest))
+        islimited && isretryable && attempt < RATELIMIT_MAX_ATTEMPTS && wait <= maxwait ||
+            return incoming
+        close(incoming)
         backoff!(gate, wait)
         attempt += 1
     end
@@ -313,67 +334,35 @@ function debug_response(url::String, res::Downloads.Response, buf::IOBuffer;
     S"{inverse,bold,$face: $(res.status) } $msg {light,underline:$url}$strheaders$strhiddenheaders"
 end
 
-function handle_response(req::Request, res::Downloads.Response, body::IO)
-    dtype = responsetype(req.endpoint)
-    data = if dtype !== Nothing
-        interpretresponse(read(body), dataformat(req.endpoint, dtype), dtype)
-    end
-    postprocess(res, req, data)
-end
-
-
 
-# HTTP method implementations
+# Preparing requests
 
-function http_request(method::String, url::String, payload::Union{IO, Nothing} = nothing;
-                      headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                      timeout::Float64 = Inf, secrets::Vector{String} = String[])
-    buf = IOBuffer()
-    @debug debug_request(method, url, headers, payload; secrets) _file=nothing
-    res = Downloads.request(url; method, output=buf, input=payload, headers, timeout)
-    seekstart(buf)
-    @debug debug_response(url, res, buf; secrets) _file=nothing
-    res, buf
-end
-
-function format_payload(endpoint::AbstractEndpoint, payload)
-    isnothing(payload) && return
-    payload isa IO && return payload
-    fmt = dataformat(endpoint, typeof(payload))
-    buf = IOBuffer()
-    writepayload(buf, fmt, payload)
-    seekstart(buf)
-end
-
-# A thunk yielding `pldio` for each (re)send of a request, rewound to its start
-# (a rate-limit retry resends the whole payload)
-function resendable(pldio::Union{IO, Nothing})
-    isnothing(pldio) && return Returns(nothing)
-    start = if applicable(position, pldio) position(pldio) end
-    issent = false
-    function ()
-        if issent
-            isnothing(start) &&
-                throw(ArgumentError("Cannot resend a request payload read from a non-seekable \
-                                     $(typeof(pldio)) (to retry after rate limiting); provide \
-                                     the payload as bytes or a seekable IO instead"))
-            seek(pldio, start)
-        end
-        issent = true
-        pldio
+# Resolve `req` to what goes on the wire, once: validate it, encode its payload,
+# and build its URL and headers.
+function outgoing(req::Request{kind}) where {kind}
+    kind ∈ SUPPORTED_HTTP_METHODS ||
+        throw(ArgumentError("Cannot perform a :$kind request: the supported HTTP methods are \
+                             $(join(SUPPORTED_HTTP_METHODS, ", "))"))
+    check_validation(req)
+    content = payload(req)
+    body = if isnothing(content) || content isa IO
+        content
+    else
+        buf = IOBuffer()
+        writepayload(buf, dataformat(req.endpoint, typeof(content)), content)
+        take!(buf)
     end
+    start = if content isa IO && applicable(position, content) position(content) end
+    Outgoing(uppercase(String(kind)), url(req), mimeheaders(req, typeof(content)),
+             body, start, req.config.timeout)
 end
 
-function cached_request(req::Request, method::String, pldtype::Type, pldio::Union{IO, Nothing})
-    rurl, headers = url(req), mimeheaders(req, pldtype)
-    timeout, secrets = req.config.timeout, authsecrets(req)
-    iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
-        method ∈ ("GET", "HEAD") # RFC 9111 §3: only GET/HEAD are cacheable
-    iscacheable || return http_request(method, rurl, pldio; headers, timeout, secrets)
-    cfile = joinpath(cachedir(), cachekey(rurl, method, headers, pldio) * ".http")
-    res, body, isstored = http_cached(cfile, method, rurl, pldio; headers, timeout, secrets)
-    isstored || res.status ∉ 200:299 || cachesave(req, cfile, res, body)
-    res, body
+# The payload IO for one send of `out`: encoded bytes are sent afresh, and a
+# caller's seekable IO is rewound to where it started.
+function payloadio(out::Outgoing)
+    out.payload isa Vector{UInt8} && return IOBuffer(out.payload)
+    isnothing(out.payloadstart) || seek(out.payload, out.payloadstart)
+    out.payload
 end
 
 function check_validation(req::Request)
@@ -396,40 +385,55 @@ function check_validation(req::Request)
     nothing
 end
 
-function payload_request(req::Request, method::String, pld)
-    check_validation(req)
-    nextpayload = resendable(format_payload(req.endpoint, pld))
-    res, body = catch_ratelimit(req.config.rategate; maxwait = req.config.timeout) do
-        cached_request(req, method, typeof(pld), nextpayload())
-    end
-    try
-        res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
-        handle_response(req, res, body)
-    finally
-        close(body)
-    end
+
+
+# Transmission
+
+# Buffered: the whole response is read, through the HTTP cache when it may be stored.
+function transmit(req::Request, out::Outgoing)
+    iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
+        out.method ∈ ("GET", "HEAD") && !(out.payload isa IO) # RFC 9111 §3: only GET/HEAD
+    iscacheable || return http_request(req, out)
+    cfile = joinpath(cachedir(), cachekey(out.url, out.method, out.headers, out.payload) * ".http")
+    incoming, isstored = http_cached(cfile, req, out)
+    isstored || incoming.response.status ∉ 200:299 ||
+        cachesave(req, cfile, incoming.response, incoming.body)
+    incoming
+end
+
+function http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, String}} = out.headers)
+    buf, input = IOBuffer(), payloadio(out)
+    @debug debug_request(out.method, out.url, headers, input; secrets = authsecrets(req)) _file=nothing
+    res = Downloads.request(out.url; out.method, output = buf, input, headers, out.timeout)
+    seekstart(buf)
+    @debug debug_response(out.url, res, buf; secrets = authsecrets(req)) _file=nothing
+    Incoming(res, buf)
 end
 
 
 
-# Specific HTTP methods
+# Delivery
 
-perform(req::Request{:get}) = payload_request(req, "GET", nothing)
-perform(req::Request{:options}) = payload_request(req, "OPTIONS", nothing)
-
-perform(req::Request{:post}) = payload_request(req, "POST", payload(req))
-perform(req::Request{:put}) = payload_request(req, "PUT", payload(req))
-perform(req::Request{:patch}) = payload_request(req, "PATCH", payload(req))
-perform(req::Request{:delete}) = payload_request(req, "DELETE", payload(req))
-
-function perform(req::Request{:head})
-    check_validation(req)
-    rurl, hdrs, secrets = url(req), headers(req), authsecrets(req)
-    res, = catch_ratelimit(req.config.rategate; maxwait = req.config.timeout) do
-        @debug debug_request("HEAD", rurl, hdrs; secrets) _file=nothing
-        headres = Downloads.request(rurl; method = "HEAD", headers = hdrs, timeout = req.config.timeout)
-        @debug debug_response(rurl, headres, IOBuffer(); secrets) _file=nothing
-        (headres,)
+function deliver(req::Request, incoming::Incoming)
+    (; response, body) = incoming
+    try
+        response.status ∈ 200:299 || throw(ResponseError(req, response, read(body)))
+        dtype = responsetype(req.endpoint)
+        data = if dtype !== Nothing
+            interpretresponse(read(body), dataformat(req.endpoint, dtype), dtype)
+        end
+        postprocess(response, req, data)
+    finally
+        close(incoming)
     end
-    postprocess(res, req, res.status ∈ 200:299)
+end
+
+# A HEAD request asks whether the resource exists: a missing resource is a
+# `false`, not an error, but any other failure still is.
+function deliver(req::Request{:head}, incoming::Incoming)
+    close(incoming)
+    (; response) = incoming
+    exists = response.status ∈ 200:299
+    exists || response.status ∈ (404, 410) || throw(ResponseError(req, response, UInt8[]))
+    postprocess(response, req, exists)
 end

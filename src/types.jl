@@ -254,6 +254,8 @@ function Base.show(io::IO, rc::RequestConfig)
     print(io, "cache = ", rc.cache, ')')
 end
 
+const SUPPORTED_HTTP_METHODS = (:get, :post, :put, :patch, :delete, :head, :options)
+
 """
     Request{kind, E<:AbstractEndpoint}
 
@@ -301,6 +303,38 @@ end
 
 Request{kind}(config::RequestConfig, endpoint::E) where {kind, E <: AbstractEndpoint} =
     Request{kind, E}(config, endpoint)
+
+"""
+    Outgoing
+
+A request resolved to what goes on the wire, computed once however often it is
+sent. A caller-supplied `IO` payload is sent as-is (from `payloadstart`, when
+seekable); any other payload is encoded to bytes up front.
+"""
+struct Outgoing
+    method::String
+    url::String
+    headers::Vector{Pair{String, String}}
+    payload::Union{Nothing, Vector{UInt8}, IO}
+    payloadstart::Union{Int, Nothing}
+    timeout::Float64
+end
+
+"""
+    Incoming{B <: IO, T <: Union{Task, Nothing}}
+
+A response head with its body, which for a stream is still arriving over
+`transfer`. Closing it closes the body (and so ends a stream's transfer).
+"""
+struct Incoming{B <: IO, T <: Union{Task, Nothing}}
+    response::Downloads.Response
+    body::B
+    transfer::T
+end
+
+Incoming(response::Downloads.Response, body::IO) = Incoming(response, body, nothing)
+
+Base.close(incoming::Incoming) = close(incoming.body)
 
 """
     MalformedRequest <: Exception

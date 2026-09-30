@@ -208,17 +208,15 @@ end
 # Transport
 
 # Open a streaming transfer: run the request on a task, block until the response
-# head is known, and return (response, body, transfer). The body is a BufferStream
-# filled incrementally; `payload` is already-encoded IO/Nothing. Cancellation is
-# `close(bs)`, which collapses the transfer.
-function open_stream(method::String, url::String, payload::Union{IO, Nothing};
-                     headers, timeout)
+# head is known, and return it with the incrementally filled body and the transfer.
+# Cancellation is `close(body)`, which collapses the transfer.
+function open_stream(out::Outgoing)
     bs = Base.BufferStream()
     handle = Channel{Downloads.Curl.Easy}(1)
     dl = Downloads.Downloader()
     dl.easy_hook = (e, _info) -> (put!(handle, e); nothing)
     transfer = Threads.@spawn try
-        Downloads.request(url; method, headers, timeout, input = payload,
+        Downloads.request(out.url; out.method, out.headers, out.timeout, input = payloadio(out),
                           output = bs, downloader = dl, throw = false)
     finally
         close(bs)
@@ -231,37 +229,30 @@ function open_stream(method::String, url::String, payload::Union{IO, Nothing};
     if istaskdone(transfer)
         result = fetch(transfer)
         result isa Downloads.RequestError && throw(result)
-        return result, bs, transfer
+        return Incoming(result, bs, transfer)
     end
     res = Downloads.Response(Downloads.Curl.get_response_info(take!(handle))...)
-    res, bs, transfer
+    Incoming(res, bs, transfer)
 end
 
-# The streaming sibling of bare_request/payload_request: the only layer holding both
-# the resolved response and the body, so it constructs the Stream. Rate-limiting
-# acts on the head status only — once frames flow there is nothing to replay.
-function stream_request(req::Request, method::String)
-    check_validation(req)
-    pld = payload(req)
-    nextpayload = resendable(format_payload(req.endpoint, pld))
-    rurl, hdrs = url(req), mimeheaders(req, typeof(pld))
-    res, body, transfer = catch_ratelimit(req.config.rategate; maxwait = req.config.timeout) do
-        open_stream(method, rurl, nextpayload(); headers = hdrs, timeout = req.config.timeout)
-    end
-    res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
+transmit(::Request{<:Any, <:StreamEndpoint}, out::Outgoing) = open_stream(out)
+
+# Rate-limiting acts on the head status only: once frames flow there is nothing to replay.
+function deliver(req::Request{<:Any, <:StreamEndpoint}, incoming::Incoming)
+    (; response, body, transfer) = incoming
+    response.status ∈ 200:299 || throw(ResponseError(req, response, read(body)))
     dtype = responsetype(req.endpoint)
-    fmt = dataformat(req.endpoint, dtype)
     Elt, F = eltype(dtype), framingtype(dtype)
     cancelled = Threads.Atomic{Bool}(false)
-    items = decode_stream(body, req.endpoint, fmt, Elt, transfer, cancelled)
-    postprocess(res, req, Stream{Elt, F}(items, res, body, cancelled))
+    items = decode_stream(body, req.endpoint, dataformat(req.endpoint, dtype), Elt, transfer, cancelled)
+    postprocess(response, req, Stream{Elt, F}(items, response, body, cancelled))
 end
 
-perform(req::Request{:get, <:StreamEndpoint}) = stream_request(req, "GET")
-perform(req::Request{:post, <:StreamEndpoint}) = stream_request(req, "POST")
-perform(req::Request{:put, <:StreamEndpoint}) = stream_request(req, "PUT")
-perform(req::Request{:patch, <:StreamEndpoint}) = stream_request(req, "PATCH")
-perform(req::Request{:delete, <:StreamEndpoint}) = stream_request(req, "DELETE")
+# A HEAD request to a streaming endpoint is an ordinary existence check.
+transmit(req::Request{:head, <:StreamEndpoint}, out::Outgoing) =
+    invoke(transmit, Tuple{Request, Outgoing}, req, out)
+deliver(req::Request{:head, <:StreamEndpoint}, incoming::Incoming) =
+    invoke(deliver, Tuple{Request{:head}, Incoming}, req, incoming)
 
 
 # Server-Sent Events (`:SSE`)

@@ -52,6 +52,7 @@ module IntegrationClient
     @endpoint reflect(; q::String) -> "reflect?{q}" -> Reflected
     @endpoint upload(; item::Item) -> item -> "echo" -> Echoed
     @endpoint replace(; item::Item) -> item -> :put("echo") -> Echoed
+    @endpoint lookup(; item::Item) -> item -> :get("echo") -> Echoed      # GET with a body
     @endpoint login(; form::LoginForm) -> form -> "echo" -> Echoed
     @endpoint multiupload(; form::UploadForm) -> form -> "echo" -> Echoed
     @endpoint exists(path::String) -> :head("{path}") -> Bool
@@ -69,6 +70,7 @@ module IntegrationClient
     @endpoint always429() -> "always429" -> Item
     @endpoint long_limited() -> "ratelimited/long" -> Item
     @endpoint upload_limited(; item::Item) -> item -> "echo/limited" -> Echoed
+    @endpoint upload_stream(; data::IO) -> data -> "echo/limited" -> Echoed
     @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
     @endpoint text() -> "text" -> String
     @endpoint number() -> "number" -> Int
@@ -233,6 +235,7 @@ end
         with_server() do baseurl, _
             @test IC.exists(cfg(baseurl), "exists") === true
             @test IC.exists(cfg(baseurl), "missing") === false
+            @test_throws RestClient.ResponseError IC.exists(cfg(baseurl), "broken")
         end
     end
     @testset "payloads" begin
@@ -244,6 +247,13 @@ end
                 echoed = JSON3.read(resp.body, IC.Item)
                 @test echoed.name == "widget"
                 @test echoed.id == 7
+            end
+        end
+        @testset "GET" begin
+            with_server() do baseurl, _
+                resp = IC.lookup(cfg(baseurl), item = IC.Item("query", 3))
+                @test resp.method == "GET"
+                @test JSON3.read(resp.body, IC.Item) == IC.Item("query", 3)
             end
         end
         @testset "PUT" begin
@@ -405,6 +415,16 @@ end
             resp = IC.upload_limited(cfg(baseurl), item = IC.Item("again", 2))
             @test JSON3.read(resp.body, IC.Item) == IC.Item("again", 2)
             @test state.requests == 2
+        end
+    end
+    @testset "unrewindable payload not retried" begin
+        with_server() do baseurl, state
+            pipe = Base.BufferStream()
+            write(pipe, "streamed"); close(pipe)
+            err = try IC.upload_stream(cfg(baseurl), data = pipe) catch e; e end
+            @test err isa RestClient.ResponseError
+            @test err.response.status == 429
+            @test state.requests == 1
         end
     end
     # The first 429 closes the shared gate, so staggered callers wait on its

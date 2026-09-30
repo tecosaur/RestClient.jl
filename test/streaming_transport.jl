@@ -16,14 +16,18 @@ end
 
 struct SEP <: AbstractEndpoint end
 
+# Open a GET stream on `url` directly, below the request pipeline.
+open_get(url; timeout = Inf) =
+    open_stream(RestClient.Outgoing("GET", url, Pair{String, String}[], nothing, nothing, timeout))
+
 # Drive open_stream → decode_stream against a live route, returning the channel.
 function stream_route(url, framing::Symbol, ::Type{Elt}; ep = SEP()) where {Elt}
-    res, body, transfer = open_stream("GET", url, nothing; headers = Pair{String,String}[], timeout = Inf)
-    @assert res.status == 200 "status $(res.status)"
+    (; response, body, transfer) = open_get(url)
+    @assert response.status == 200 "status $(response.status)"
     fmt = StreamFormat{framing}(dataformat(Tok))
     cancelled = Threads.Atomic{Bool}(false)
     items = decode_stream(body, ep, fmt, Elt, transfer, cancelled)
-    (; items, body, cancelled, res)
+    (; items, body, cancelled, response)
 end
 
 # Closing the body mid-transfer collapses the transfer task (the cancel path); a
@@ -34,30 +38,26 @@ function run(with_stream_server, slow_interval)
 @testset "status rendezvous" begin
     with_stream_server() do base
         # normal stream: head resolved before frames drain
-        res, body, transfer = open_stream("GET", "$base/ndjson", nothing;
-                                          headers = Pair{String,String}[], timeout = Inf)
-        @test res.status == 200
+        (; response, body, transfer) = open_get("$base/ndjson")
+        @test response.status == 200
         quietclose(body, transfer)
         # empty-200: rendezvous must still reach take! without hanging
-        res2, body2, transfer2 = open_stream("GET", "$base/empty", nothing;
-                                             headers = Pair{String,String}[], timeout = Inf)
-        @test res2.status == 200
-        quietclose(body2, transfer2)
+        empty = open_get("$base/empty")
+        @test empty.response.status == 200
+        quietclose(empty.body, empty.transfer)
     end
 end
 
 @testset "transport failure" begin
     # nothing is listening on this port → RequestError, not a bogus Response
-    @test_throws RequestError open_stream("GET", "http://127.0.0.1:1/x", nothing;
-                                          headers = Pair{String,String}[], timeout = 2.0)
+    @test_throws RequestError open_get("http://127.0.0.1:1/x"; timeout = 2.0)
 end
 
 @testset "incremental delivery" begin
     with_stream_server() do base
         # Measure at the raw body so timing reflects the wire, not channel buffering:
         # /slow sleeps SLOW_INTERVAL between frames, so arrivals must be spread out.
-        res, body, transfer = open_stream("GET", "$base/slow", nothing;
-                                          headers = Pair{String,String}[], timeout = Inf)
+        (; body, transfer) = open_get("$base/slow")
         t0 = time()
         offsets = Float64[]
         while !eof(body)

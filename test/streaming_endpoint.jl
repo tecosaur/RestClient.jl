@@ -28,6 +28,9 @@ RestClient.isstreamend(::ChatdoneEndpoint, fr::SSEvent) = fr.data == codeunits("
 @endpoint chatstop() -> "sse/stop" -> Stream{Tok}
 RestClient.isstreamend(::ChatstopEndpoint, fr::SSEvent) = fr.event == "stop"
 
+# Rate-limited once: the POST is retried, payload and all, before streaming.
+@endpoint limitedchat(; prompt::String) -> prompt -> "sse/limited" -> Stream{Tok}
+
 # An error status before any frame: should raise with the body, not stream.
 @endpoint failing() -> "error500" -> Stream{Tok}
 
@@ -61,6 +64,9 @@ function run(base)
     @testset "custom end" begin
         @test collect(chatdone(cfg)) == [Tok(n=1)]          # stops at [DONE]
         @test collect(chatstop(cfg)) == [Tok(n=1)]          # stops at event: stop
+    end
+    @testset "rate-limited" begin
+        @test collect(limitedchat(cfg, prompt = "hi")) == [Tok(n=1), Tok(n=2), Tok(n=3)]
     end
     @testset "error status" begin
         @test_throws RestClient.ResponseError failing(cfg)

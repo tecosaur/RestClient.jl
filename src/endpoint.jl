@@ -6,7 +6,6 @@
 const ANAPHORIC_VAR = :self
 const CONFIG_VAR = :config
 
-const SUPPORTED_HTTP_METHODS = (:get, :post, :put, :patch, :delete, :head, :options)
 
 """
     @endpoint struct ... end
