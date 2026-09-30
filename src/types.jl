@@ -71,7 +71,8 @@ abstract type AbstractFormat end
 """
     RawFormat <: AbstractFormat
 
-Singleton type for raw response formats.
+Singleton type for raw text or bytes: strings and byte vectors are sent and
+received as-is, numbers as their decimal text. Other types need a format of their own.
 """
 struct RawFormat <: AbstractFormat end
 
