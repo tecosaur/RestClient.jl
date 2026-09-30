@@ -111,6 +111,13 @@ end
     # compile-time errors, which have no request analogue.
     @testset "errors" begin
         @test_throws Exception @macroexpand @endpoint 42               # not a struct/arrow form
+        # Function forms take plain names and arguments
+        @test_throws "plain name" @macroexpand @endpoint Base.f(x) -> "u" -> String
+        @test_throws "Malformed function argument" @macroexpand @endpoint f(xs...) -> "u" -> String
+        @test_throws "Malformed function argument" @macroexpand(@endpoint struct SplatEndpoint
+            f(xs...) -> "u" -> String
+            xs::Vector{Int}
+        end)
         @test_throws Exception @macroexpand @formdef 42                # not a struct
         @test_throws Exception @macroexpand @multipartdef (x = 1)      # not a struct
         # `func -> struct -> in -> url -> out` is at most five forms.
@@ -181,6 +188,101 @@ end
         @testset "surplus forms" begin
             @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
         end
+    end
+    @testset "generated functions" begin
+        # A module that only imports RestClient, whose requests stop at validation.
+        @eval module SigClient
+            import RestClient
+            RestClient.@globalconfig RestClient.RequestConfig("http://unused.test")
+            RestClient.@endpoint struct FooEndpoint
+                foo(n::Int) -> "f?{n}" -> String
+                n::Int = 1
+                tag::Union{String, Nothing}
+                flags::Vector{Nothing}
+            end
+            RestClient.validate(::FooEndpoint) = "not sent"
+            # Only keywords default to `nothing`: these stay required positional arguments
+            RestClient.@endpoint lead(a::Union{Int, Nothing}, b::String) -> "x/{b}" -> Vector{UInt8}
+            RestClient.@endpoint single(a::Union{Int, Nothing}) -> "y" -> Vector{UInt8}
+            # A field default carries over to a positional argument only if nothing required follows
+            RestClient.@endpoint paged(page, id) -> struct PagedEndpoint
+                page::Int = 1
+                id::Int
+            end -> "p/{id}?{page}" -> Vector{UInt8}
+            RestClient.@endpoint tail(id, page) -> struct TailEndpoint
+                page::Int = 1
+                id::Int
+            end -> "t/{id}?{page}" -> Vector{UInt8}
+        end
+        config = RequestConfig("http://unused.test")
+        @test hasmethod(SigClient.foo, Tuple{Int})                  # the argument keeps its type
+        @test !hasmethod(SigClient.foo, Tuple{String})
+        # `tag` defaults to `nothing`; `flags` (not Union{…, Nothing}) is required
+        @test_throws MalformedRequest SigClient.foo(config, 2; flags = Nothing[])
+        @test_throws MalformedRequest SigClient.foo(2; flags = Nothing[])   # via globalconfig
+        @test_throws UndefKeywordError SigClient.foo(config, 2)
+        @test hasmethod(SigClient.lead, Tuple{Nothing, String})
+        @test !hasmethod(SigClient.single, Tuple{})
+        @test hasmethod(SigClient.paged, Tuple{Int, Int}) && !hasmethod(SigClient.paged, Tuple{Int})
+        @test hasmethod(SigClient.tail, Tuple{Int})
+    end
+    @testset ":noauth overrides a supertype" begin
+        @eval module NoAuthClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            RestClient.authpolicy(::API) = :required
+            @endpoint :noauth struct PublicEndpoint <: API
+                "public" -> String
+            end
+        end
+        @test RestClient.authpolicy(NoAuthClient.PublicEndpoint()) === :off
+    end
+    @testset "parametric struct" begin
+        @eval module ParamClient
+            using RestClient
+            @endpoint struct BoxEndpoint{T}
+                "box/{x}" -> String
+                x::T
+            end
+        end
+        ep = ParamClient.BoxEndpoint{Int}(3)
+        @test ep isa AbstractEndpoint
+        @test RestClient.urlpath(RequestConfig("http://x"), ep) == "box/3"
+    end
+    @testset "field docstrings" begin
+        @eval module DocClient
+            using RestClient
+            @endpoint struct DocEndpoint
+                "doc/{id}" -> String
+                "The item's id"
+                id::Int
+                "Its revision"
+                rev::Int = 1
+            end
+        end
+        @test fieldnames(DocClient.DocEndpoint) == (:id, :rev)
+        @test RestClient.urlpath(RequestConfig("http://x"), DocClient.DocEndpoint(id = 4)) == "doc/4"
+    end
+    @testset "chained struct with a field docstring" begin
+        @eval module ChainDocClient
+            using RestClient
+            @endpoint thing(id) -> struct ThingEndpoint
+                "The id"
+                id::Int
+            end -> "t/{id}" -> String
+        end
+        @test RestClient.urlpath(RequestConfig("http://x"), ChainDocClient.ThingEndpoint(2)) == "t/2"
+    end
+    @testset "chained struct with a supertype" begin
+        @eval module ChainClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            @endpoint chain(x) -> struct ChainEndpoint <: API
+                x::Int
+            end -> "u/{x}" -> String
+        end
+        @test supertype(ChainClient.ChainEndpoint) === ChainClient.API   # kept, not inferred
+        @test RestClient.urlpath(RequestConfig("http://x"), ChainClient.ChainEndpoint(1)) == "u/1"
     end
     @testset "anaphoric self" begin
         @eval module SelfClient

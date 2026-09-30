@@ -76,7 +76,8 @@ a `struct` with a derived name (`\$(titlecase(funcname))Endpoint`), and populate
 its fields.
 
 With a `struct` form, all arguments that match a field name will inherit the
-field's type and default value . All the fields of the struct not present in the
+field's type and default value, though a positional argument followed by a
+required one stays required. All the fields of the struct not present in the
 signature will be added as keyword arguments, with `Union{..., Nothing}` typed
 fields defaulting to `nothing`. This makes function forms an easy way to
 prescribe positional, mandatory arguments with the flexibility to fully specify
@@ -101,7 +102,9 @@ on the supertype of the output form (a `Stream` output selects `StreamEndpoint`;
 see the streaming manual).
 
 If `@endpoint` is directly applied to a `struct`, the first line of the struct
-is removed and parsed as a series of arrow forms.
+is removed and parsed as a series of arrow forms. That line is always taken as the
+endpoint's, so a string there is its URL; a docstring for the first field goes
+after it.
 
 ```
 @endpoint ApiEndpoint
@@ -289,7 +292,7 @@ macro endpoint(args...)
     scheme, policy = einfo.auth
     scheme isa NoAuth ||
         push!(body, :($(authself(:authscheme)) = $scheme))
-    policy === :off ||
+    policy === :off && einfo.authmarker !== :noauth ||
         push!(body, :($(authself(:authpolicy)) = $(QuoteNode(policy))))
     # Function (optional)
     if !isnothing(einfo.func)
@@ -315,6 +318,9 @@ function resolve_auth(marker::Union{Symbol, Nothing}, mod::Module)
     end
 end
 
+allowsnothing(type) =
+    Meta.isexpr(type, :curly) && first(type.args) === :Union && :Nothing in type.args[2:end]
+
 function generate_funcalls(einfo; mod::Module)
     includedargs = Symbol[]
     fspecs = Dict(f.name => (; type=f.type, default=f.default) for f in einfo.fields)
@@ -324,7 +330,17 @@ function generate_funcalls(einfo; mod::Module)
     else
         einfo.func.args[2:end], Expr[]
     end
-    for set in (args, kwargs), i in eachindex(set)
+    function argexpr(name::Symbol, type, default, iskeyword::Bool)
+        iskeyword && isnothing(default) && allowsnothing(type) && (default = :nothing)
+        arg = if isnothing(type) name else Expr(:(::), name, type) end
+        if isnothing(default) arg else Expr(:kw, arg, default) end
+    end
+    function isrequired(arg)
+        Meta.isexpr(arg, :kw) && return false
+        name = if Meta.isexpr(arg, :(::), 2) first(arg.args) else arg end
+        isnothing(get(fspecs, name, (; default = nothing)).default)
+    end
+    for (set, iskeyword) in ((args, false), (kwargs, true)), i in eachindex(set)
         arg = set[i]
         name, type, default = nothing, nothing, nothing
         if Meta.isexpr(arg, :kw, 2)
@@ -335,37 +351,17 @@ function generate_funcalls(einfo; mod::Module)
         elseif arg isa Symbol
             name = arg
         end
+        name isa Symbol || throw(ArgumentError("Malformed function argument $(set[i]) in @endpoint function"))
         push!(includedargs, name)
         fspec = get(fspecs, name, nothing)
         isnothing(fspec) && throw(ArgumentError("Argument $name not found in @endpoint struct"))
-        if (isnothing(default) && !isnothing(fspec.default)) || (isnothing(type) && !isnothing(fspec.type))
-            newarg = name
-            newtype = something(fspec.type, type, Some(nothing))
-            newdefault = something(fspec.default, default, Some(nothing))
-            if isnothing(type)
-                newarg = Expr(:(::), newarg, newtype)
-            end
-            if isnothing(newdefault) && Meta.isexpr(newtype, :curly) && :Nothing ∈ newtype.args
-                newdefault = :nothing
-            end
-            if !isnothing(newdefault)
-                newarg = Expr(:kw, newarg, newdefault)
-            end
-            set[i] = newarg
-        end
+        # An optional positional argument can't come before a required one
+        inherited = if iskeyword || !any(isrequired, set[i+1:end]) fspec.default end
+        set[i] = argexpr(name, something(type, fspec.type, Some(nothing)),
+                         something(default, inherited, Some(nothing)), iskeyword)
     end
     for field in einfo.fields
-        if field.name ∉ includedargs
-            farg = field.name
-            if !isnothing(field.type)
-                farg = Expr(:(::), farg, field.type)
-            end
-            default = something(fspecs[field.name].default, field.default, Some(nothing))
-            if !isnothing(default)
-                farg = Expr(:kw, farg, default)
-            end
-            push!(kwargs, farg)
-        end
+        field.name ∈ includedargs || push!(kwargs, argexpr(field.name, field.type, field.default, true))
     end
     fcall = if isempty(kwargs)
         Expr(:call, fname, args...)
@@ -377,7 +373,9 @@ function generate_funcalls(einfo; mod::Module)
     end
     estrucform = Expr(:call, einfo.structname, map(f -> f.name, einfo.fields)...)
     reqmethod = QuoteNode(einfo.method)
-    f1 = :($fcall = perform(Request{$reqmethod}(globalconfig(Val{$mod}()), $estrucform)))
+    perform_, Request_ = GlobalRef(@__MODULE__, :perform), GlobalRef(@__MODULE__, :Request)
+    globalconfig_, Val_ = GlobalRef(@__MODULE__, :globalconfig), GlobalRef(Base, :Val)
+    f1 = :($fcall = $perform_($Request_{$reqmethod}($globalconfig_($Val_{$mod}()), $estrucform)))
     confarg = gensym("request-config")
     pushfirst!(args, Expr(:(::), confarg, GlobalRef(@__MODULE__, :RequestConfig)))
     fcall = if isempty(kwargs)
@@ -388,7 +386,7 @@ function generate_funcalls(einfo; mod::Module)
     if !isnothing(einfo.structparams)
         fcall = Expr(:where, fcall, einfo.structparams...)
     end
-    f2 = :($fcall = perform(Request{$reqmethod}($confarg, $estrucform)))
+    f2 = :($fcall = $perform_($Request_{$reqmethod}($confarg, $estrucform)))
     f1, f2
 end
 
@@ -438,6 +436,8 @@ function extract_forms(args::Tuple; mod::Module)
         !(first(first(components).args) isa QuoteNode)
         efunc = popfirst!(components)
     end
+    isnothing(efunc) || first(efunc.args) isa Symbol ||
+        throw(ArgumentError("The @endpoint function must have a plain name, not `$(first(efunc.args))`"))
     # 3: Extract fields from function arguments
     if !isnothing(efunc) && isnothing(estruct)
         efields = @NamedTuple{name::Symbol, type::Any, default::Any}[]
@@ -466,9 +466,7 @@ function extract_forms(args::Tuple; mod::Module)
     isnothing(efields) && throw(ArgumentError("Unable to extract fields from @endpoint function"))
     # 4: Check for `struct`
     if isnothing(estruct) && !isempty(components) && Meta.isexpr(first(components), :struct)
-        sinfo = decompose_struct(popfirst!(components))
-        isnothing(sinfo.special) ||
-            throw(ArgumentError("Struct definition in @endpoint within a `->` chain must not contain a special line"))
+        sinfo = decompose_struct(popfirst!(components); allowspecial = false)
         estruct = sinfo.desugar
         estructname = sinfo.name
         estructparams = sinfo.params
@@ -476,8 +474,9 @@ function extract_forms(args::Tuple; mod::Module)
         (!isnothing(esuper) && !isnothing(sinfo.super)) &&
             throw(ArgumentError("Multiple subtype declarations in @endpoint"))
         if isnothing(sinfo.super) && !isnothing(esuper)
-            estruct.args[2] = Expr(:<:, sinfo.name, esuper)
+            estruct.args[2] = Expr(:<:, estruct.args[2], esuper)
         end
+        esuper = something(sinfo.super, esuper, Some(nothing))
     end
     # Remaining components are `[in] -> url -> [out]`: a trailing component is the
     # result type unless it is URL-shaped, which tells `in -> url` from `url -> out`
@@ -521,7 +520,7 @@ function extract_forms(args::Tuple; mod::Module)
         end
         outtype isa Type ||
             throw(ArgumentError("@endpoint result type `$eout` is not a type (it is a $(typeof(outtype)))"))
-        esuper = if outtype <: SingleResponse
+        esuper = GlobalRef(@__MODULE__, if outtype <: SingleResponse
             :SingleEndpoint
         elseif outtype <: ListResponse || outtype <: Vector
             :ListEndpoint
@@ -529,9 +528,9 @@ function extract_forms(args::Tuple; mod::Module)
             :StreamEndpoint
         else
             :AbstractEndpoint
-        end
+        end)
         if !isnothing(estruct) && !isnothing(estructname)
-            estruct.args[2] = Expr(:<:, estructname, esuper)
+            estruct.args[2] = Expr(:<:, estruct.args[2], esuper)
         end
     end
     if isnothing(estruct) && !isnothing(efunc)
@@ -551,10 +550,10 @@ function extract_forms(args::Tuple; mod::Module)
         estruct = Expr(:struct, false, Expr(:<:, estructname, esuper), Expr(:block, fieldlines...))
     end
     (; func=efunc, structdef=estruct, structname=estructname, structparams=estructparams,
-     fields=efields, in=ein, method=emethod, url=eurl, out=eout, auth=eauth)
+     fields=efields, in=ein, method=emethod, url=eurl, out=eout, auth=eauth, authmarker=marker)
 end
 
-function decompose_struct(strux::Expr)
+function decompose_struct(strux::Expr; allowspecial::Bool = true)
     Meta.isexpr(strux, :struct, 3) ||
         throw(ArgumentError("@endpoint expects a struct definition"))
     Meta.isexpr(strux.args[3], :block) ||
@@ -562,7 +561,7 @@ function decompose_struct(strux::Expr)
     structmutable, structdecl, structdef::Expr = strux.args
     structlabel, structsuper = if Meta.isexpr(structdecl, :(<:), 2)
         structdecl.args
-    elseif structdecl isa Symbol
+    elseif structdecl isa Symbol || Meta.isexpr(structdecl, :curly)
         structdecl, nothing
     else
         throw(ArgumentError("Struct name/supertype declaration is malformed"))
@@ -574,14 +573,18 @@ function decompose_struct(strux::Expr)
     else
         structlabel::Symbol, nothing
     end
-    specialline = nothing
+    specialline, specialidx = nothing, 0
     fields = @NamedTuple{name::Symbol, type::Any, default::Any}[]
-    for line in structdef.args
+    for (i, line) in enumerate(structdef.args)
         if line isa LineNumberNode
             continue
-        elseif isempty(fields) && isnothing(specialline) &&
+        elseif allowspecial && isempty(fields) && isnothing(specialline) &&
             (Meta.isexpr(line, :(->), 2) || line isa String)
-            specialline = line
+            specialline, specialidx = line, i
+            continue
+        elseif !allowspecial && Meta.isexpr(line, :(->), 2)
+            throw(ArgumentError("Struct definition in @endpoint within a `->` chain must not contain a special line"))
+        elseif line isa String # a field docstring, kept in the struct
             continue
         end
         type, default = :Any, nothing
@@ -599,7 +602,7 @@ function decompose_struct(strux::Expr)
     desugar = if isnothing(specialline)
         strux
     else
-        Expr(:struct, structmutable, structdecl, Expr(:block, structdef.args[3:end]...))
+        Expr(:struct, structmutable, structdecl, Expr(:block, deleteat!(copy(structdef.args), specialidx)...))
     end
     (; name=structname, super=structsuper, params=structparams, fields=fields, desugar, special=specialline)
 end
