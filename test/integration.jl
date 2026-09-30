@@ -209,6 +209,10 @@ end
         @test RestClient.authscheme(IC.PagedEndpoint(1)) == NoAuth()
         @test RestClient.authpolicy(IC.PagedEndpoint(1)) === :off
     end
+    @testset "every call shares one rate-limit gate" begin
+        @test RestClient.globalconfig(Val(AuthClient)).rategate ===
+            RestClient.globalconfig(Val(AuthClient)).rategate
+    end
     @testset "policy governs sending and validation" begin
         with_server() do baseurl, _
             # :required, no key ⇒ MalformedRequest, no request made.
