@@ -570,8 +570,30 @@ end
     @testset "base URL with a trailing slash" begin
         @test RestClient.url(Request{:get}(RequestConfig("http://x/api/"), PlainEP())) == "http://x/api/p"
     end
+    @testset "timeout must be positive" begin
+        @test_throws "timeout" RequestConfig("http://x"; timeout = 0)
+        @test_throws "timeout" RequestConfig("http://x"; timeout = -1)
+        @test RequestConfig("http://x"; timeout = 0.5).timeout == 0.5
+    end
     @testset "unsupported method" begin
         @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))
+    end
+    @testset "idle limit" begin
+        limit(timeout; kw...) = RestClient.Watchdog(timeout; kw...).limit
+        default = RestClient.DEFAULT_IDLE_SECONDS
+        @test limit(Inf) == limit(Inf; atleast = default) == default
+        @test limit(5.0; atleast = default) == default
+        @test limit(60.0; atleast = default) == 60
+        @test limit(0.2) == 0.2
+    end
+    @testset "watchdog" begin
+        dog = RestClient.Watchdog(1.0)
+        @test dog(0, 0)
+        dog.lastactive -= 2
+        @test dog(5, 0)                                          # data moved in time
+        @test dog(5, 3)                                          # uploading counts too
+        dog.lastactive -= 2
+        @test !dog(5, 3) && dog.fired                            # silent past the limit
     end
     @testset "auth leaves endpoint lists" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())

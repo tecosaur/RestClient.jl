@@ -213,8 +213,12 @@ provided as keyword arguments:
 
 - `key::Union{Nothing, String}`: The secret used to authenticate requests.
   How it is presented on the wire is declared by endpoints.
-- `timeout::Float64`: The timeout for the request, in seconds. This is passed to
-  `Downloads.download` and defaults to `Inf`.
+- `timeout::Float64`: The longest a request may take, in seconds, or for a
+  [`Stream`](@ref), the longest it may go without receiving data. Defaults to
+  `Inf`. Even so, a request that sends and receives nothing for 20 seconds (or
+  `timeout`, if longer) is abandoned, as is a stream silent for 20 seconds when no
+  `timeout` is set. Either limit raises a `Downloads.RequestError` with curl's
+  timeout code (28).
 - `cache::Bool`: Whether to cache the response, using lifetime information from
   standard HTTP response headers. Defaults to `true`.
 
@@ -238,9 +242,12 @@ struct RequestConfig
     cache::Bool
 end
 
-RequestConfig(baseurl::String; key::Union{Nothing, String} = nothing,
-              timeout::Real = Inf, cache::Bool = true) =
+function RequestConfig(baseurl::String; key::Union{Nothing, String} = nothing,
+                       timeout::Real = Inf, cache::Bool = true)
+    timeout > 0 || throw(ArgumentError("A RequestConfig's timeout must be positive (seconds), \
+                                        got $timeout; leave it unset for no limit"))
     RequestConfig(String(rstrip(baseurl, '/')), RateGate(), key, Float64(timeout), cache)
+end
 
 function Base.show(io::IO, rc::RequestConfig)
     show(io, RequestConfig)
@@ -326,7 +333,6 @@ struct Outgoing
     headers::Vector{Pair{String, String}}
     payload::Union{Nothing, Vector{UInt8}, IO}
     payloadstart::Union{Int, Nothing}
-    timeout::Float64
 end
 
 """
