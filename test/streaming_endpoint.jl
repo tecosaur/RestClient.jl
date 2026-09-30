@@ -25,6 +25,10 @@ end
 @endpoint chatdone() -> "sse/done" -> Stream{Tok}
 RestClient.isstreamend(::ChatdoneEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
 
+# The same sentinel, but the server then keeps the connection open.
+@endpoint lingering() -> "sse/done/open" -> Stream{Tok}
+RestClient.isstreamend(::LingeringEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
+
 # Custom termination via a terminal event type.
 @endpoint chatstop() -> "sse/stop" -> Stream{Tok}
 RestClient.isstreamend(::ChatstopEndpoint, fr::SSEvent) = fr.event == "stop"
@@ -73,6 +77,9 @@ function run(base)
     end
     @testset "custom end" begin
         @test collect(chatdone(cfg)) == [Tok(n=1)]          # stops at [DONE]
+        # ...even if the server doesn't close the connection
+        t = @elapsed @test collect(lingering(cfg)) == [Tok(n=1)]
+        @test t < 5                                          # the server holds it open for 10 s
         @test collect(chatstop(cfg)) == [Tok(n=1)]          # stops at event: stop
     end
     @testset "rate-limited" begin

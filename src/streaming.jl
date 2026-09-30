@@ -187,7 +187,10 @@ function decode_stream(bs::Base.BufferStream, endpoint::AbstractEndpoint,
     state = framestate(fmt)
     Threads.@spawn try
         while (frame = readframe(bs, state, fmt)) !== nothing
-            isstreamend(endpoint, frame) && break
+            if isstreamend(endpoint, frame)
+                cancelled[] = true # end the transfer as a deliberate stop
+                break
+            end
             decoded = remake(frame, interpretresponse(framedata(frame), fmt.element, P))
             put!(items, if decoded isa Elt; decoded else framedata(decoded) end)
         end

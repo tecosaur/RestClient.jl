@@ -216,6 +216,10 @@ function stream_router(http::HTTP.Stream)
     elseif path == "/sse/done"
         write_frames(http, ["data: {\"n\":1}\n\n", "data: [DONE]\n\n", "data: {\"n\":9}\n\n"];
                      contenttype = "text/event-stream")
+    elseif path == "/sse/done/open"      # [DONE], then the connection stays open
+        write_frames(http, ["data: {\"n\":1}\n\n", "data: [DONE]\n\n"]; contenttype = "text/event-stream")
+        sleep(STALL_SECONDS)
+        write(http, ": still here\n\n")
     elseif path == "/sse/stop"
         write_frames(http, ["data: {\"n\":1}\n\n", "event: stop\ndata: x\n\n"];
                      contenttype = "text/event-stream")
@@ -258,7 +262,7 @@ end
     with_stream_server(f) -> f's return value
 
 Like [`with_server`], but serves the streaming routes (`/sse`, `/ndjson`, `/slow`,
-`/abort`, `/empty`, `/error500`, `/sse/done`, `/sse/stop`, `/sse/limited`, `/stall`,
+`/abort`, `/empty`, `/error500`, `/sse/done`, `/sse/done/open`, `/sse/stop`, `/sse/limited`, `/stall`,
 `/steady`) in HTTP stream mode.
 """
 function with_stream_server(f)
