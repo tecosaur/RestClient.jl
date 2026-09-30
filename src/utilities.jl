@@ -89,7 +89,7 @@ See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 @globalconfig RequestConfig("https://api.example.com") auth=(BearerAuth(), :required)
 ```
 """
-macro globalconfig(config::Expr, opts::Expr...)
+macro globalconfig(config, opts::Expr...)
     scheme, policy = :($(@__MODULE__).NoAuth()), QuoteNode(:off)
     for opt in opts
         Meta.isexpr(opt, :(=), 2) && first(opt.args) === :auth ||
@@ -103,8 +103,15 @@ macro globalconfig(config::Expr, opts::Expr...)
             scheme = val
         end
     end
+    # `config` is evaluated per call (so e.g. an `ENV` key isn't baked into the
+    # precompile image), but every call shares one rate-limit gate.
+    gate = esc(gensym("rategate"))
     quote
-        $(@__MODULE__).globalconfig(::Val{$__module__}) = $(esc(config))
+        const $gate = $RateGate()
+        $(@__MODULE__).globalconfig(::Val{$__module__}) =
+            let c = $(esc(config))::$RequestConfig
+                $RequestConfig(c.baseurl, $gate, c.key, c.timeout, c.cache)
+            end
         $(@__MODULE__).globalauthdefault(::Val{$__module__}) = ($(esc(scheme)), $policy)
     end
 end

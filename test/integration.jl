@@ -400,6 +400,18 @@ end
             @test 0 < (@atomic state.throttle_429s) < ncallers   # gate suppressed retries
         end
     end
+    @testset "@globalconfig gate" begin
+        @test RestClient.globalconfig(Val(AuthClient)).rategate ===
+            RestClient.globalconfig(Val(AuthClient)).rategate
+    end
+    @testset "@globalconfig of a name" begin
+        @eval module NamedConfigClient
+            using RestClient
+            const CONFIG = RequestConfig("http://named.test")
+            @globalconfig CONFIG
+        end
+        @test RestClient.globalconfig(Val(NamedConfigClient)).baseurl == "http://named.test"
+    end
 end
 
 # Caching writes to the real `RestClient.cachedir()` (not injectable), so each
