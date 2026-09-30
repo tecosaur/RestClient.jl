@@ -108,6 +108,7 @@ module AuthClient
     @endpoint inherits(id::String) -> "items/{id}" -> Item          # module default: Bearer, required
     @endpoint :noauth public_(id::String) -> "items/{id}" -> Item    # opt out: off
     @endpoint :authoption optional_(id::String) -> "items/{id}" -> Item  # optional: send key if set
+    @endpoint probe(path::String) -> :head("{path}") -> Bool         # HEAD, required
 end
 const AC = AuthClient
 
@@ -222,6 +223,9 @@ end
             @test_throws RestClient.MalformedRequest AC.inherits(cfg(baseurl), "1")
             # With a key it proceeds and the Bearer header is applied automatically.
             @test AC.inherits(cfg(baseurl; key = "tok"), "42").id == 42
+            # HEAD requests are validated too.
+            @test_throws RestClient.MalformedRequest AC.probe(cfg(baseurl), "exists")
+            @test AC.probe(cfg(baseurl; key = "tok"), "exists") === true
             # :noauth endpoint needs no key.
             @test AC.public_(cfg(baseurl), "42").id == 42
             # :optional sends the key when present, but does not require it.

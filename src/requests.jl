@@ -348,32 +348,23 @@ function cached_request(req::Request, method::String, payload)
 end
 
 function check_validation(req::Request)
-    issues = validate(req)
-    if authpolicy(req.endpoint) === :required && isnothing(req.config.key)
-        autherr = "this endpoint requires authentication, but the request config has no key set (RequestConfig(url; key = ...))"
-        if isnothing(issues)
-            issues = autherr
-        elseif issues isa AbstractString
-            issues = [issues, autherr]
-        elseif issues isa AbstractVector{<:AbstractString}
-            push!(issues, autherr)
-        end
-    end
-    isnothing(issues) && return
-    # Legacy support for boolean validation
-    if issues === true
-        return
-    elseif issues === false
-        throw(MalformedRequest(req, ["Request is not well-formed"]))
-    end
-    # Standard behaviour
-    throw(if issues isa AbstractString
-        MalformedRequest(req, [issues])
-    elseif issues isa AbstractVector{<:AbstractString}
-        MalformedRequest(req, issues)
+    result = validate(req)
+    issues = if isnothing(result) || result === true
+        String[]
+    elseif result === false
+        ["Request is not well-formed"]
+    elseif result isa AbstractString
+        [String(result)]
+    elseif result isa AbstractVector{<:AbstractString}
+        collect(String, result)
     else
-        ArgumentError("validate returned $(typeof(issues)); expected Bool, AbstractString, or AbstractVector{<:AbstractString}")
-    end)
+        throw(ArgumentError("validate returned $(typeof(result)); expected Nothing, Bool, AbstractString, or AbstractVector{<:AbstractString}"))
+    end
+    if authpolicy(req.endpoint) === :required && isnothing(req.config.key)
+        push!(issues, "this endpoint requires authentication, but the request config has no key set (RequestConfig(url; key = ...))")
+    end
+    isempty(issues) || throw(MalformedRequest(req, issues))
+    nothing
 end
 
 function bare_request(req::Request, method::String)
@@ -404,6 +395,7 @@ perform(req::Request{:patch}) = payload_request(req, "PATCH")
 perform(req::Request{:delete}) = payload_request(req, "DELETE")
 
 function perform(req::Request{:head})
+    check_validation(req)
     function head_request(url::String; headers, timeout)
         @debug debug_request("HEAD", url, headers) _file=nothing
         reqres = Downloads.request(url; method = "HEAD", headers, timeout)

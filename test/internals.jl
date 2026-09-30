@@ -152,6 +152,50 @@ struct PlainEP <: AbstractEndpoint end
 RestClient.urlpath(::PlainEP) = "p"
 struct PagedListEP <: ListEndpoint end
 RestClient.urlpath(::PagedListEP) = "p"
+struct ValidatedEP <: AbstractEndpoint
+    issues::Any
+end
+RestClient.urlpath(::ValidatedEP) = "p"
+RestClient.validate(ep::ValidatedEP) = ep.issues
+RestClient.authpolicy(::ValidatedEP) = :required
+struct SharedHeadersEP <: AbstractEndpoint end
+const SHARED_HEADERS = ["X-A" => "1"]
+const SHARED_PARAMS = ["a" => "1"]
+RestClient.urlpath(::SharedHeadersEP) = "p"
+RestClient.headers(::SharedHeadersEP) = SHARED_HEADERS
+RestClient.parameters(::SharedHeadersEP) = SHARED_PARAMS
+RestClient.authscheme(::SharedHeadersEP) = BearerAuth()
+RestClient.authpolicy(::SharedHeadersEP) = :optional
+@testset "validation results" begin
+    keyed = RequestConfig("http://x"; key = "k")
+    check(issues; config = keyed) =
+        RestClient.check_validation(Request{:get}(config, ValidatedEP(issues)))
+    @test isnothing(check(nothing))
+    @test isnothing(check(String[]))
+    @test isnothing(check(true))
+    @test_throws MalformedRequest check(false)
+    @test_throws MalformedRequest check("bad")
+    @test_throws ArgumentError check(42)
+    @testset "a missing required key is reported alongside other issues" begin
+        issues = ["bad"]
+        err = try check(issues; config = RequestConfig("http://x")) catch e; e end
+        @test length(err.issues) == 2 && occursin("requires authentication", err.issues[2])
+        @test issues == ["bad"]                              # the caller's vector is untouched
+        @test_throws MalformedRequest check(true; config = RequestConfig("http://x"))
+    end
+end
+
+@testset "auth leaves endpoint headers/parameters untouched" begin
+    req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())
+    for _ in 1:2
+        @test RestClient.headers(req) == ["X-A" => "1", "Authorization" => "Bearer k"]
+        @test RestClient.parameters(req) == ["a" => "1"]
+        @test RestClient.mimeheaders(req, Nothing) == ["X-A" => "1", "Authorization" => "Bearer k"]
+    end
+    @test SHARED_HEADERS == ["X-A" => "1"]
+    @test SHARED_PARAMS == ["a" => "1"]
+end
+
 @testset "raw format is text or bytes" begin
     raw = RestClient.RawFormat()
     interpret(T, str) = RestClient.interpretresponse(codeunits(str), raw, T)

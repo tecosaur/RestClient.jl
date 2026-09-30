@@ -56,11 +56,9 @@ headers(::RequestConfig, endpoint::AbstractEndpoint) = headers(endpoint)
 
 function headers((; config, endpoint)::Request)
     own = headers(config, endpoint)
-    if authpolicy(endpoint) !== :off
-        authinfo = authheaders(authscheme(endpoint), config.key)
-        isnothing(authinfo) || push!(own, authinfo)
-    end
-    own
+    authpolicy(endpoint) === :off && return own
+    authinfo = authheaders(authscheme(endpoint), config.key)
+    if isnothing(authinfo) own else [collect(own); authinfo] end
 end
 
 """
@@ -83,11 +81,9 @@ parameters(::RequestConfig, endpoint::AbstractEndpoint) = parameters(endpoint)
 
 function parameters((; config, endpoint)::Request)
     own = parameters(config, endpoint)
-    if authpolicy(endpoint) !== :off
-        authinfo = authparams(authscheme(endpoint), config.key)
-        isnothing(authinfo) || push!(own, authinfo)
-    end
-    own
+    authpolicy(endpoint) === :off && return own
+    authinfo = authparams(authscheme(endpoint), config.key)
+    if isnothing(authinfo) own else [own; authinfo] end
 end
 
 """
