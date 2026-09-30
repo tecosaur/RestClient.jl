@@ -7,6 +7,7 @@
 
 using Dates
 using Downloads: Response
+using Tables
 using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse,
     setexpiry, expirytime_xattr, expirytime_read, HTTP_DATE_FORMAT
 
@@ -26,6 +27,10 @@ struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
 RestClient.authpolicy(::QueryPathEP) = :optional
+struct Row
+    a::Int
+    b::String
+end
 
 # Tests
 
@@ -356,6 +361,17 @@ end
 end
 
 @testset "responses" begin
+    @testset "List as a table" begin
+        rows = RestClient.List{Row, PagedListEP}(
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}())
+        @test Tables.istable(rows)
+        @test Tables.columntable(rows) == (a = [1, 2], b = ["x", "y"])
+        @test Tables.schema(rows).names == (:a, :b)
+        strings = RestClient.List{String, PagedListEP}(
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), ["x"], Dict{Symbol, Any}())
+        @test !Tables.istable(strings)                           # String has no columns
+        @test isnothing(Tables.schema(strings))                  # unknown, not empty
+    end
     @testset "List display" begin
         list = RestClient.List{String, PagedListEP}(
             Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}())

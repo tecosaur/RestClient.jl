@@ -6,10 +6,13 @@ module TableExt
 using Tables
 using RestClient
 
-Tables.isrowtable(::Type{List{T}}) where {T} = isstructtype(T)
+# Rows are records: structs with fields (so not e.g. `String`)
+isrecordtype(T::Type) = isstructtype(T) && fieldcount(T) > 0
+
+Tables.isrowtable(::Type{<:List{T}}) where {T} = isrecordtype(T)
 
 function Tables.schema(list::List{T}) where {T}
-    isstructtype(T) || return Tables.Schema((), ())
+    isrecordtype(T) || return nothing
     Tables.Schema(fieldnames(T), fieldtypes(T))
 end
 
