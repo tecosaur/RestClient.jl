@@ -208,32 +208,67 @@ end
 
 # Transport
 
+"""
+    HeadGate(body::Base.BufferStream) <: IO
+
+The output of a streaming transfer: writes pass through to `body`, except that
+the first is held until `released`, after announcing itself on `signal`
+(`:body`; the transfer adds `:done` when it ends).
+"""
+mutable struct HeadGate <: IO
+    const body::Base.BufferStream
+    const signal::Channel{Symbol}
+    const released::Base.Event
+    isheld::Bool
+end
+
+HeadGate(body::Base.BufferStream) = HeadGate(body, Channel{Symbol}(2), Base.Event(), true)
+
+# Only the transfer's writer task writes, so `isheld` needs no lock.
+function Base.unsafe_write(gate::HeadGate, p::Ptr{UInt8}, n::UInt)
+    if gate.isheld
+        put!(gate.signal, :body)
+        wait(gate.released)
+        gate.isheld = false
+    end
+    unsafe_write(gate.body, p, n)
+end
+
 # Open a streaming transfer: run the request on a task, block until the response
 # head is known, and return it with the incrementally filled body and the transfer.
 # Cancellation is `close(body)`, which collapses the transfer.
 function open_stream(req::Request, out::Outgoing)
     bs = Base.BufferStream()
+    gate = HeadGate(bs)
     handle = Channel{Downloads.Curl.Easy}(1)
     # A stream is bounded by silence, not total time
     options = TransferOptions(Watchdog(out.timeout), handle)
     transfer = Threads.@spawn try
         result = curlrequest(out.url, options; out.method, out.headers, input = payloadio(out),
-                             output = bs, throw = false)
+                             output = gate, throw = false)
         if options.watchdog.fired IdleTimeout(req, options.watchdog.limit) else result end
     finally
         close(bs)
+        put!(gate.signal, :done)
     end
-    eof(bs)                                    # blocks until first byte or empty close
-    # If the transfer already finished (an empty/instant body, or a transport
-    # failure with no HTTP head), its return value is the authoritative result: a
-    # RequestError to surface, or the fully-resolved Response. Only while the body
-    # is still flowing do we read the status off the live handle.
-    if istaskdone(transfer)
+    # A transfer that ends without a body (an empty body, or a transport failure)
+    # returns the authoritative result: the fully resolved Response, or an error to
+    # surface.
+    if take!(gate.signal) === :done
         result = fetch(transfer)
         result isa Exception && throw(result)
         return Incoming(result, bs, transfer)
     end
-    res = Downloads.Response(Downloads.Curl.get_response_info(take!(handle))...)
+    # Otherwise the first body write is held, so the transfer can't finish and free
+    # the curl handle while its head is read, under the lock Downloads holds for all
+    # its curl calls. (This relies on Downloads internals: its Multi's lock, and
+    # `Curl.get_response_info`.)
+    res = try
+        easy = take!(handle)
+        @lock DOWNLOADER[].multi.lock Downloads.Response(Downloads.Curl.get_response_info(easy)...)
+    finally
+        notify(gate.released)
+    end
     Incoming(res, bs, transfer)
 end
 
