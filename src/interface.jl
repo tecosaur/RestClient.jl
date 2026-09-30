@@ -183,6 +183,8 @@ Return the type of the response for the given endpoint.
 Together with `dataformat`, this is used to parse the response.
 
 If `Vector{UInt8}` (the default implementation), the response data is provided raw.
+If `Nothing`, the response body is discarded (and never cached), and the result is
+`nothing`.
 
 !!! note
     Part of the `AbstractEndpoint` interface.

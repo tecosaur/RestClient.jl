@@ -107,5 +107,33 @@ end
     # `func -> struct -> in -> url -> out` is at most five forms.
     @test_throws Exception @macroexpand(
         @endpoint f() -> struct S end -> S -> "u" -> Bool -> extra)
+    # An expression URL needs an explicit result type.
+    @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> "a" * x
+    @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> "a" * x
 end
 
+# A trailing result type may be omitted: the body is discarded and the endpoint
+# returns `nothing`. The result type is distinguished from a payload by shape, so
+# `in -> url` (payload, no result) parses as well as a bare `url`.
+@testset "optional result type" begin
+    @eval module NoResultClient
+        using RestClient
+        @endpoint ping() -> "ping"                         # bare URL, GET
+        @endpoint announce(msg::String) -> msg -> :post("events")   # payload, no result
+    end
+    @test RestClient.responsetype(NoResultClient.PingEndpoint()) === Nothing
+    @test RestClient.responsetype(NoResultClient.AnnounceEndpoint("hi")) === Nothing
+    # The payload endpoint still keeps its body and POST method.
+    areq = RestClient.Request{:post}(RequestConfig("http://x"), NoResultClient.AnnounceEndpoint("hi"))
+    @test RestClient.payload(areq) == "hi"
+    @testset "struct form" begin
+        @eval NoResultClient @endpoint struct StatusEndpoint
+            "status"
+        end
+        @test RestClient.responsetype(NoResultClient.StatusEndpoint()) === Nothing
+        @test RestClient.urlpath(RequestConfig("http://x"), NoResultClient.StatusEndpoint()) == "status"
+    end
+    @testset "forms before the URL are not dropped" begin
+        @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
+    end
+end

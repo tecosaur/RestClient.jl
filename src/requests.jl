@@ -127,9 +127,10 @@ function addmimes!(headers::AbstractDict{<:AbstractString}, ::In, ::Out) where {
 end
 
 function mimeheaders(req::Request, in::Type)
+    out = responsetype(req.endpoint)
     addmimes!(copy(headers(req)),
               if in !== Nothing dataformat(req.endpoint, in) end,
-              dataformat(req.endpoint, responsetype(req.endpoint)))
+              if out !== Nothing dataformat(req.endpoint, out) end)
 end
 
 """
@@ -296,10 +297,12 @@ end
 
 function handle_response(req::Request, res::Downloads.Response, body::IO)
     dtype = responsetype(req.endpoint)
-    fmt = dataformat(req.endpoint, dtype)
-    bytes = read(body)
-    close(body)
-    data = interpretresponse(bytes, fmt, dtype)
+    data = if dtype !== Nothing
+        fmt = dataformat(req.endpoint, dtype)
+        bytes = read(body)
+        close(body)
+        interpretresponse(bytes, fmt, dtype)
+    end
     postprocess(res, req, data)
 end
 
@@ -351,8 +354,9 @@ function cached_request(req::Request, method::String, payload)
         typeof(payload), format_payload(req.endpoint, payload)
     end
     rurl, headers = url(req), mimeheaders(req, pldtype)
-    req.config.cache && method ∈ ("GET", "HEAD") || # RFC 9111 §3: only GET/HEAD are cacheable
-        return http_request(method, rurl, pldio; headers, timeout=req.config.timeout)
+    iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
+        method ∈ ("GET", "HEAD") # RFC 9111 §3: only GET/HEAD are cacheable
+    iscacheable || return http_request(method, rurl, pldio; headers, timeout=req.config.timeout)
     res, body, wascached = http_cached(
         method, rurl, pldio; headers, timeout=req.config.timeout)
     if !wascached && res.status ∈ 200:299

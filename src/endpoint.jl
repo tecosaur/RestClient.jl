@@ -10,7 +10,7 @@ const SUPPORTED_HTTP_METHODS = (:get, :post, :put, :patch, :delete, :head, :opti
 
 """
     @endpoint struct ... end
-    @endpoint [func(...)] -> [struct ... end] -> [payload] -> url -> resulttype
+    @endpoint [func(...)] -> [struct ... end] -> [payload] -> url -> [resulttype]
 
 Generate an endpoint implementation from a concise shorthand form.
 
@@ -198,6 +198,17 @@ to, which is performed by [`interpretresponse`](@ref) according to
 [`dataformat`](@ref).
 
 Often the result type will name a struct defined with [`@jsondef`].
+
+The result type may be omitted when the response body is of no interest, which
+is equivalent to giving `Nothing`: the body is discarded, the response is never
+cached, and the endpoint returns `nothing`.
+
+```julia
+@endpoint announce(msg::String) -> msg -> :post("events")
+```
+
+When the URL is an expression rather than a string (or `:method(url)` form), the
+result type cannot be told apart from it, so must be given explicitly.
 
 The parsed result can be reinterpreted into another form with
 [`postprocess`](@ref). By default, [`ListResponse`](@ref)-type responses from a
@@ -467,15 +478,29 @@ function extract_forms(args::Tuple; mod::Module)
             estruct.args[2] = Expr(:<:, sinfo.name, esuper)
         end
     end
-    # Check that remaining components are: `[in] -> url -> out`
-    if length(components) == 1 && first(components) isa String
-        throw(ArgumentError("Only a URL is provided in @endpoint, a response type is also required"))
-    elseif length(components) < 2
-        throw(ArgumentError("Expected @endpoint to include a URL and response type"))
+    # Remaining components are `[in] -> url -> [out]`. The result type may be
+    # omitted, in which case the response body is discarded and the endpoint
+    # returns `nothing` (`responsetype` of `Nothing`). A trailing component is a
+    # result type unless it is itself URL-shaped (a string literal or a
+    # `:method(url)` form), which disambiguates `in -> url` from `url -> out`.
+    if isempty(components)
+        throw(ArgumentError("Expected @endpoint to include at least a URL"))
     elseif length(components) > 3
         throw(ArgumentError("Too many components in @endpoint, at most could contain `func -> struct -> in -> url -> out`"))
     end
-    ein, urlform, eout = if length(components) == 2
+    urlshaped(form) = form isa String || (Meta.isexpr(form, :call, 2) && form.args[1] isa QuoteNode)
+    has_out = !urlshaped(last(components))
+    has_out && length(components) == 1 &&
+        throw(ArgumentError("@endpoint needs a URL before the result type `$(only(components))`. \
+                             If that is instead an expression URL, give the result type \
+                             explicitly, e.g. `-> Nothing` to discard the response body."))
+    !has_out && length(components) == 3 &&
+        throw(ArgumentError("Too many components before the @endpoint URL `$(last(components))`: \
+                             expected at most a payload, as in `[in] -> url -> [out]`"))
+    ein, urlform, eout = if !has_out
+        # `[url]` or `[in -> url]`; no result type.
+        (length(components) == 2 ? first(components) : nothing), last(components), :Nothing
+    elseif length(components) == 2
         nothing, components...
     else
         components
@@ -488,7 +513,16 @@ function extract_forms(args::Tuple; mod::Module)
     emethod ∈ SUPPORTED_HTTP_METHODS || throw(ArgumentError("Unsupported HTTP method $emethod"))
     # Attempt to infer missing parameters
     if isnothing(esuper)
-        outtype = Core.eval(mod, eout)
+        outtype = try
+            Core.eval(mod, eout)
+        catch err
+            throw(ArgumentError("@endpoint could not evaluate the result type `$eout`: \
+                                 $(sprint(showerror, err)). If `$eout` is instead an \
+                                 expression URL (after a payload), give the result type \
+                                 explicitly, e.g. `-> Nothing` to discard the response body."))
+        end
+        outtype isa Type ||
+            throw(ArgumentError("@endpoint result type `$eout` is not a type (it is a $(typeof(outtype)))"))
         esuper = if outtype <: SingleResponse
             :SingleEndpoint
         elseif outtype <: ListResponse || outtype <: Vector
