@@ -257,7 +257,7 @@ function Base.show(io::IO, rc::RequestConfig)
     print(io, "cache = ", rc.cache, ')')
 end
 
-const SUPPORTED_HTTP_METHODS = (:get, :post, :put, :patch, :delete, :head, :options)
+const SUPPORTED_HTTP_METHODS = (:get, :post, :put, :patch, :delete, :head, :options, :query)
 
 """
     Request{kind, E<:AbstractEndpoint}

@@ -22,11 +22,12 @@ mutable struct ServerState
     forbidden_hits::Int      # times /forbidden/limited returned 403
     echo_limited_hits::Int   # times /echo/limited returned 429
     rotations::Int           # distinct versions served by /rotating
+    queries::Int             # QUERY requests served by /query
     # /throttled sees genuinely concurrent hits, so these are atomic
     @atomic throttle_429s::Int
     @atomic throttle_first::Float64  # time() of first hit, 0.0 until set
 end
-ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0.0)
+ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0, 0.0)
 
 # Tiny JSON encoders, just enough to avoid a JSON dep and escaped interpolation.
 jsonval(s::AbstractString) = '"' * replace(s, '\\' => "\\\\", '"' => "\\\"") * '"'
@@ -130,6 +131,13 @@ function build_router(state::ServerState)
     # "See Other": the answer is at /seen, which reports how it was requested.
     HTTP.register!(router, "*", "/see-other", _ -> HTTP.Response(303, ["Location" => "/seen"], ""))
     HTTP.register!(router, "*", "/seen", echo_any)
+    # A cacheable QUERY: the request content (echoed back) defines the result.
+    HTTP.register!(router, "QUERY", "/query", function (req)
+        state.queries += 1
+        response = echo("QUERY")(req)
+        HTTP.setheader(response, "Cache-Control" => "max-age=60")
+        response
+    end)
     HTTP.register!(router, "GET", "/text", _ -> HTTP.Response(200, "plain words"))
     HTTP.register!(router, "GET", "/number", _ -> HTTP.Response(200, "42"))
     # Stored already stale; a 304 revalidation extends its freshness.

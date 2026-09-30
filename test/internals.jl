@@ -273,7 +273,7 @@ end
     @testset "validation" begin
         keyed = RequestConfig("http://x"; key = "k")
         check(issues; config = keyed) =
-            RestClient.check_validation(Request{:get}(config, ValidatedEP(issues)))
+            RestClient.check_validation(Request{:get}(config, ValidatedEP(issues)), nothing)
         @test isnothing(check(nothing))
         @test isnothing(check(String[]))
         @test isnothing(check(true))
@@ -287,6 +287,11 @@ end
             @test issues == ["bad"]                              # the caller's vector is untouched
             @test_throws MalformedRequest check(true; config = RequestConfig("http://x"))
         end
+    end
+    @testset "QUERY needs a payload" begin
+        err = try perform(Request{:query}(RequestConfig("http://x"), PlainEP())) catch e; e end
+        @test err isa MalformedRequest
+        @test occursin("QUERY", only(err.issues))
     end
     @testset "unsupported method" begin
         @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))

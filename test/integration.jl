@@ -54,6 +54,7 @@ module IntegrationClient
     @endpoint replace(; item::Item) -> item -> :put("echo") -> Echoed
     @endpoint lookup(; item::Item) -> item -> :get("echo") -> Echoed      # GET with a body
     @endpoint remove(; item::Item) -> item -> :delete("see-other") -> Echoed  # answered with a 303
+    @endpoint query(; item::Item) -> item -> :query("query") -> Echoed
     @endpoint login(; form::LoginForm) -> form -> "echo" -> Echoed
     @endpoint multiupload(; form::UploadForm) -> form -> "echo" -> Echoed
     @endpoint exists(path::String) -> :head("{path}") -> Bool
@@ -247,6 +248,31 @@ end
     end
     # libcurl < 8.13 (e.g. with Julia 1.11) can't be told to obey the status code,
     # and resends the original method without its body.
+    @testset "QUERY" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            outgoing(item) = RestClient.outgoing(RestClient.Request{:query}(config, IC.QueryEndpoint(item)))
+            try
+                resp = IC.query(config, item = IC.Item("widgets", 1))
+                @test resp.method == "QUERY"
+                @test occursin("application/json", resp.content_type)
+                @test JSON3.read(resp.body, IC.Item) == IC.Item("widgets", 1)
+                @testset "cached per query" begin
+                    @test IC.query(config, item = IC.Item("widgets", 1)) == resp
+                    @test state.queries == 1                 # the same query, from cache
+                    IC.query(config, item = IC.Item("gadgets", 2))
+                    @test state.queries == 2                 # a different query is not
+                end
+            finally
+                for item in (IC.Item("widgets", 1), IC.Item("gadgets", 2))
+                    out = outgoing(item)
+                    rm(joinpath(RestClient.cachedir(),
+                                RestClient.cachekey(out.url, out.method, out.headers, out.payload) * ".http");
+                       force = true)
+                end
+            end
+        end
+    end
     @testset "303 See Other" begin
         curl = VersionNumber(match(r"libcurl/([\d.]+)", unsafe_string(RestClient.Downloads.Curl.curl_version()))[1])
         with_server() do baseurl, _

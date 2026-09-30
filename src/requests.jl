@@ -381,8 +381,8 @@ function outgoing(req::Request{kind}) where {kind}
     kind ∈ SUPPORTED_HTTP_METHODS ||
         throw(ArgumentError("Cannot perform a :$kind request: the supported HTTP methods are \
                              $(join(SUPPORTED_HTTP_METHODS, ", "))"))
-    check_validation(req)
     content = payload(req)
+    check_validation(req, content)
     body = if isnothing(content) || content isa IO
         content
     else
@@ -403,7 +403,7 @@ function payloadio(out::Outgoing)
     out.payload
 end
 
-function check_validation(req::Request)
+function check_validation(req::Request{kind}, content) where {kind}
     result = validate(req)
     issues = if isnothing(result) || result === true
         String[]
@@ -419,6 +419,9 @@ function check_validation(req::Request)
     if authpolicy(req.endpoint) === :required && isnothing(req.config.key)
         push!(issues, "this endpoint requires authentication, but the request config has no key set (RequestConfig(url; key = ...))")
     end
+    if kind === :query && isnothing(content)
+        push!(issues, "a QUERY request needs a payload, as its content is the query (RFC 10008)")
+    end
     isempty(issues) || throw(MalformedRequest(req, issues))
     nothing
 end
@@ -429,8 +432,9 @@ end
 
 # Buffered: the whole response is read, through the HTTP cache when it may be stored.
 function transmit(req::Request, out::Outgoing)
+    # RFC 9111 §3, RFC 10008 §2.7: GET, HEAD, and QUERY (keyed on its content) are cacheable
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
-        out.method ∈ ("GET", "HEAD") && !(out.payload isa IO) # RFC 9111 §3: only GET/HEAD
+        out.method ∈ ("GET", "HEAD", "QUERY") && !(out.payload isa IO)
     iscacheable || return http_request(req, out)
     cfile = joinpath(cachedir(), cachekey(out.url, out.method, out.headers, out.payload) * ".http")
     incoming, isstored = http_cached(cfile, req, out)
