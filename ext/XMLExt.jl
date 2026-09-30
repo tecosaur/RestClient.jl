@@ -169,17 +169,24 @@ parsexml(::Type{T}, node::AbstractNode) where {T <: Union{AbstractString, Number
 parsexml(::Type{T}, ::Nothing) where {T} =
     throw(ArgumentError("Required XML field of type `$T` is missing or empty"))
 
+# A path's last component matches every such child: a single-valued field takes exactly one
+function parsexml(::Type{T}, nodes::Vector{<:AbstractNode}) where {T}
+    isempty(nodes) && return parsexml(T, nothing)
+    length(nodes) == 1 ||
+        throw(ArgumentError("Expected one <$(tag(first(nodes)))> element for a field of type \
+                             `$T`, but found $(length(nodes)); use a Vector-typed field to take all"))
+    parsexml(T, only(nodes))
+end
+parsexml(::Type{Any}, nodes::Vector{<:AbstractNode}) = nodes
+
 parsexml(::Type{Union{T, Nothing}}, ::Nothing) where {T} = nothing
 parsexml(::Type{Union{T, Nothing}}, content::String) where {T} = parsexml(T, content)
-function parsexml(::Type{Union{T, Nothing}}, x) where {T}
-    if x isa Vector{<:AbstractNode}
-        # Empty vector ≡ no match. Otherwise, unwrap to the first element
-        # unless the field genuinely wants a vector.
-        isempty(x) && return nothing
-        T <: Vector || (x = first(x))
-    end
-    parsexml(T, x)
+function parsexml(::Type{Union{T, Nothing}}, nodes::Vector{<:AbstractNode}) where {T}
+    # No match means nothing; otherwise the first, unless the field wants them all
+    isempty(nodes) && return nothing
+    parsexml(T, if T <: Vector nodes else first(nodes) end)
 end
+parsexml(::Type{Union{T, Nothing}}, x) where {T} = parsexml(T, x)
 
 # Construction
 

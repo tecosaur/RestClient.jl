@@ -39,6 +39,10 @@ module XMLClient
     @xmldef struct OneItem
         name."item/text()"::String
     end
+    @xmldef struct ChildValues
+        title."title"::String
+        count."count"::Int
+    end
     @xmldef struct Nested
         first_item."group/item[1]/text()"::Union{String, Nothing} = nothing
     end
@@ -135,6 +139,14 @@ end
         <book year="2001" ratio="1.0"><title>Odyssey</title></book>""")
     @test book.title == "Odyssey"
     @test book.year == 2001
+end
+
+@testset "child element values" begin
+    doc = "<b><title>Dune</title><count>3</count></b>"
+    @test xmlparse(XC.ChildValues, doc).title == "Dune"
+    @test xmlparse(XC.ChildValues, doc).count == 3
+    @test_throws ArgumentError xmlparse(XC.ChildValues, "<b><count>3</count></b>")
+    @test_throws ArgumentError xmlparse(XC.ChildValues, "<b><title>a</title><title>b</title><count>3</count></b>")
 end
 
 @testset "several where one expected" begin
