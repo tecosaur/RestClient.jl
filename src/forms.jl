@@ -136,9 +136,9 @@ function formlike_expand(source::LineNumberNode, struc::Expr, fmt::Type)
     kwstruct = Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), source,
                     Expr(:struct, false, decl, Expr(:block, fields...)))
     out = Any[source, esc(kwstruct),
-              :(RestClient.dataformat(::Type{$sname}) = RestClient.$(nameof(fmt))())]
+              :(RestClient.dataformat(::Type{<:$sname}) = RestClient.$(nameof(fmt))())]
     isempty(form_keys) ||
-        push!(out, :(RestClient.form_key(::Type{$sname}, name::Symbol) =
+        push!(out, :(RestClient.form_key(::Type{<:$sname}, name::Symbol) =
                      $(form_key_chain(form_keys))))
     Expr(:block, out...)
 end

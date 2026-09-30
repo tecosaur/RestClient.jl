@@ -62,6 +62,9 @@ RestClient.authpolicy(::QueryEP) = :optional
 RestClient.@multipartdef struct OddNames
     a."we\"ird"::String
 end
+RestClient.@formdef struct GenericForm{T}
+    value."the-value"::T
+end
 
 struct OneContent <: SingleResponse{Int}
     note::String
@@ -407,6 +410,11 @@ end
         @test RestClient.payloadmime(raw, Vector{UInt8}) == "application/octet-stream"
         # A raw response sets no Accept header (libcurl sends `*/*`).
         @test isempty(RestClient.mimeheaders(Request{:get}(RequestConfig("http://x"), PlainEP()), Nothing))
+    end
+    @testset "parametric form" begin
+        form = GenericForm(value = 1)
+        @test RestClient.dataformat(typeof(form)) === RestClient.FormFormat()
+        @test sprint(RestClient.writepayload, RestClient.FormFormat(), form) == "the-value=1"
     end
     @testset "multipart names" begin
         body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), OddNames(a = "v"))
