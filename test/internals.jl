@@ -49,6 +49,10 @@ RestClient.headers(::SharedHeadersEP) = SHARED_HEADERS
 RestClient.parameters(::SharedHeadersEP) = SHARED_PARAMS
 RestClient.authscheme(::SharedHeadersEP) = BearerAuth()
 RestClient.authpolicy(::SharedHeadersEP) = :optional
+struct UnreadyEP <: AbstractEndpoint end
+RestClient.urlpath(::UnreadyEP) = "p"
+RestClient.validate(::UnreadyEP) = "not ready"
+RestClient.payload(::UnreadyEP) = error("payload of a request that failed validation")
 struct PayloadEP <: AbstractEndpoint
     value::Any
 end
@@ -562,6 +566,14 @@ end
             @test_throws MalformedRequest RestClient.check_validation(
                 Request{:get}(RequestConfig("http://x"), SigningClient.SignedEndpoint()))
         end
+        @testset "before the payload" begin
+            @test_throws MalformedRequest RestClient.outgoing(Request{:post}(RequestConfig("http://x"), UnreadyEP()))
+        end
+    end
+    @testset "QUERY needs a payload" begin
+        err = try perform(Request{:query}(RequestConfig("http://x"), PlainEP())) catch e; e end
+        @test err isa MalformedRequest
+        @test occursin("QUERY", only(err.issues))
     end
     @testset "path with a query" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())

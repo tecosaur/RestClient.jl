@@ -411,6 +411,8 @@ function outgoing(req::Request{kind}) where {kind}
                              $(join(SUPPORTED_HTTP_METHODS, ", "))"))
     check_validation(req)
     content = payload(req)
+    kind === :query && isnothing(content) &&
+        throw(MalformedRequest(req, ["a QUERY request needs a payload, as its content is the query (RFC 10008)"]))
     body = if isnothing(content) || content isa IO
         content
     else
@@ -457,8 +459,9 @@ end
 
 # Buffered: the whole response is read, through the HTTP cache when it may be stored.
 function transmit(req::Request, out::Outgoing)
+    # RFC 9111 §3, RFC 10008 §2.7: GET, HEAD, and QUERY (keyed on its content) are cacheable
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
-        out.method ∈ ("GET", "HEAD") && !(out.payload isa IO) # RFC 9111 §3: only GET/HEAD
+        out.method ∈ ("GET", "HEAD", "QUERY") && !(out.payload isa IO)
     iscacheable || return http_request(req, out)
     cfile = joinpath(cachedir(), cachekey(out.url, out.method, out.headers, out.payload) * ".http")
     incoming, isstored = http_cached(cfile, req, out)

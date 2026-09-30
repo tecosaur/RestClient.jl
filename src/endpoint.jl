@@ -206,6 +206,15 @@ specified by wrapping the URL form in an HTTP method symbol, for example:
 :head("existence/{entity}")
 ```
 
+A `:query` endpoint sends its payload as a [QUERY](https://www.rfc-editor.org/rfc/rfc10008)
+request: like a `:post`, but safe and idempotent, so its responses are cached like
+a `:get`'s (keyed on the payload too). The payload is required, since it is the
+query.
+
+```julia
+@endpoint search(filter::Filter) -> filter -> :query("items") -> Vector{Item}
+```
+
 ## Response type forms
 
 It is sensible to parse the raw response into a more informative Julia
