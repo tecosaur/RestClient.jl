@@ -168,8 +168,8 @@ consumer. The default is `false` (stop only at EOF, correct for any stream); a
 client library defines one method per API over the frame's public accessors:
 
 ```julia
-isstreamend(::ChatEndpoint, fr::SSEvent)     = fr.data == codeunits("[DONE]")  # OpenAI
-isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"      # Anthropic
+isstreamend(::ChatEndpoint, fr::SSEvent)     = fr.data == codeunits("[DONE]")  # a data sentinel
+isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"      # a terminal event
 ```
 """
 isstreamend(@nospecialize(::AbstractEndpoint), @nospecialize(frame)) = false
