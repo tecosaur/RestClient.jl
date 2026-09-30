@@ -296,7 +296,7 @@ macro endpoint(args...)
     scheme, policy = einfo.auth
     scheme isa NoAuth ||
         push!(body, :($(authself(:authscheme)) = $scheme))
-    policy === :off ||
+    policy === :off && einfo.authmarker !== :noauth ||
         push!(body, :($(authself(:authpolicy)) = $(QuoteNode(policy))))
     # Function (optional)
     if !isnothing(einfo.func)
@@ -322,6 +322,9 @@ function resolve_auth(marker::Union{Symbol, Nothing}, mod::Module)
     end
 end
 
+allowsnothing(type) =
+    Meta.isexpr(type, :curly) && first(type.args) === :Union && :Nothing in type.args[2:end]
+
 function generate_funcalls(einfo; mod::Module)
     includedargs = Symbol[]
     fspecs = Dict(f.name => (; type=f.type, default=f.default) for f in einfo.fields)
@@ -331,7 +334,12 @@ function generate_funcalls(einfo; mod::Module)
     else
         einfo.func.args[2:end], Expr[]
     end
-    for set in (args, kwargs), i in eachindex(set)
+    function argexpr(name::Symbol, type, default, iskeyword::Bool)
+        iskeyword && isnothing(default) && allowsnothing(type) && (default = :nothing)
+        arg = if isnothing(type) name else Expr(:(::), name, type) end
+        if isnothing(default) arg else Expr(:kw, arg, default) end
+    end
+    for (set, iskeyword) in ((args, false), (kwargs, true)), i in eachindex(set)
         arg = set[i]
         name, type, default = nothing, nothing, nothing
         if Meta.isexpr(arg, :kw, 2)
@@ -345,34 +353,11 @@ function generate_funcalls(einfo; mod::Module)
         push!(includedargs, name)
         fspec = get(fspecs, name, nothing)
         isnothing(fspec) && throw(ArgumentError("Argument $name not found in @endpoint struct"))
-        if (isnothing(default) && !isnothing(fspec.default)) || (isnothing(type) && !isnothing(fspec.type))
-            newarg = name
-            newtype = something(fspec.type, type, Some(nothing))
-            newdefault = something(fspec.default, default, Some(nothing))
-            if isnothing(type)
-                newarg = Expr(:(::), newarg, newtype)
-            end
-            if isnothing(newdefault) && Meta.isexpr(newtype, :curly) && :Nothing ∈ newtype.args
-                newdefault = :nothing
-            end
-            if !isnothing(newdefault)
-                newarg = Expr(:kw, newarg, newdefault)
-            end
-            set[i] = newarg
-        end
+        set[i] = argexpr(name, something(type, fspec.type, Some(nothing)),
+                         something(default, fspec.default, Some(nothing)), iskeyword)
     end
     for field in einfo.fields
-        if field.name ∉ includedargs
-            farg = field.name
-            if !isnothing(field.type)
-                farg = Expr(:(::), farg, field.type)
-            end
-            default = something(fspecs[field.name].default, field.default, Some(nothing))
-            if !isnothing(default)
-                farg = Expr(:kw, farg, default)
-            end
-            push!(kwargs, farg)
-        end
+        field.name ∈ includedargs || push!(kwargs, argexpr(field.name, field.type, field.default, true))
     end
     fcall = if isempty(kwargs)
         Expr(:call, fname, args...)
@@ -384,7 +369,9 @@ function generate_funcalls(einfo; mod::Module)
     end
     estrucform = Expr(:call, einfo.structname, map(f -> f.name, einfo.fields)...)
     reqmethod = QuoteNode(einfo.method)
-    f1 = :($fcall = perform(Request{$reqmethod}(globalconfig(Val{$mod}()), $estrucform)))
+    perform_, Request_ = GlobalRef(@__MODULE__, :perform), GlobalRef(@__MODULE__, :Request)
+    globalconfig_, Val_ = GlobalRef(@__MODULE__, :globalconfig), GlobalRef(Base, :Val)
+    f1 = :($fcall = $perform_($Request_{$reqmethod}($globalconfig_($Val_{$mod}()), $estrucform)))
     confarg = gensym("request-config")
     pushfirst!(args, Expr(:(::), confarg, GlobalRef(@__MODULE__, :RequestConfig)))
     fcall = if isempty(kwargs)
@@ -395,7 +382,7 @@ function generate_funcalls(einfo; mod::Module)
     if !isnothing(einfo.structparams)
         fcall = Expr(:where, fcall, einfo.structparams...)
     end
-    f2 = :($fcall = perform(Request{$reqmethod}($confarg, $estrucform)))
+    f2 = :($fcall = $perform_($Request_{$reqmethod}($confarg, $estrucform)))
     f1, f2
 end
 
@@ -531,7 +518,7 @@ function extract_forms(args::Tuple; mod::Module)
         end
         outtype isa Type ||
             throw(ArgumentError("@endpoint result type `$eout` is not a type (it is a $(typeof(outtype)))"))
-        esuper = if outtype <: SingleResponse
+        esuper = GlobalRef(@__MODULE__, if outtype <: SingleResponse
             :SingleEndpoint
         elseif outtype <: ListResponse || outtype <: Vector
             :ListEndpoint
@@ -539,7 +526,7 @@ function extract_forms(args::Tuple; mod::Module)
             :StreamEndpoint
         else
             :AbstractEndpoint
-        end
+        end)
         if !isnothing(estruct) && !isnothing(estructname)
             estruct.args[2] = Expr(:<:, estructname, esuper)
         end
@@ -561,7 +548,7 @@ function extract_forms(args::Tuple; mod::Module)
         estruct = Expr(:struct, false, Expr(:<:, estructname, esuper), Expr(:block, fieldlines...))
     end
     (; func=efunc, structdef=estruct, structname=estructname, structparams=estructparams,
-     fields=efields, in=ein, method=emethod, url=eurl, out=eout, auth=eauth)
+     fields=efields, in=ein, method=emethod, url=eurl, out=eout, auth=eauth, authmarker=marker)
 end
 
 function decompose_struct(strux::Expr)

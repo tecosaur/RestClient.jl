@@ -268,6 +268,43 @@ end
             @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
         end
     end
+    @testset "generated functions" begin
+        # A module that only imports RestClient, whose requests stop at validation.
+        @eval module SigClient
+            import RestClient
+            RestClient.@globalconfig RestClient.RequestConfig("http://unused.test")
+            RestClient.@endpoint struct FooEndpoint
+                foo(n::Int) -> "f?{n}" -> String
+                n::Int = 1
+                tag::Union{String, Nothing}
+                flags::Vector{Nothing}
+            end
+            RestClient.validate(::FooEndpoint) = "not sent"
+            # Only keywords default to `nothing`: these stay required positional arguments
+            RestClient.@endpoint lead(a::Union{Int, Nothing}, b::String) -> "x/{b}" -> Vector{UInt8}
+            RestClient.@endpoint single(a::Union{Int, Nothing}) -> "y" -> Vector{UInt8}
+        end
+        config = RequestConfig("http://unused.test")
+        @test hasmethod(SigClient.foo, Tuple{Int})                  # the argument keeps its type
+        @test !hasmethod(SigClient.foo, Tuple{String})
+        # `tag` defaults to `nothing`; `flags` (not Union{…, Nothing}) is required
+        @test_throws MalformedRequest SigClient.foo(config, 2; flags = Nothing[])
+        @test_throws MalformedRequest SigClient.foo(2; flags = Nothing[])   # via globalconfig
+        @test_throws UndefKeywordError SigClient.foo(config, 2)
+        @test hasmethod(SigClient.lead, Tuple{Nothing, String})
+        @test !hasmethod(SigClient.single, Tuple{})
+    end
+    @testset ":noauth overrides a supertype" begin
+        @eval module NoAuthClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            RestClient.authpolicy(::API) = :required
+            @endpoint :noauth struct PublicEndpoint <: API
+                "public" -> String
+            end
+        end
+        @test RestClient.authpolicy(NoAuthClient.PublicEndpoint()) === :off
+    end
 end
 
 @testset "requests" begin
