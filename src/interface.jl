@@ -279,50 +279,27 @@ function contents end
 
 Return the content of the response.
 """
-function contents(r::R) where {T, R<:SingleResponse{T}}
-    # The determination of `cfield` can be done at compile-time,
-    # and at runtime this is a simple field access.
-    cfield = nothing
-    for f in fieldnames(R)
-        if fieldtype(R, f) == T
-            if isnothing(cfield)
-                cfield = f
-            else
-                throw(ArgumentError("Multiple fields of type $T found in $R, contents(::$(typeof(r))) must be explicitly defined"))
-            end
-        end
-    end
-    if isnothing(cfield)
-        throw(ArgumentError("No field of type $T found in $R, contents(::$(typeof(r))) must be explicitly defined"))
-    else
-        getfield(r, cfield)
-    end
-end
+contents(r::R) where {T, R <: SingleResponse{T}} = typedfield(r, T)
 
 """
     contents(response::ListResponse{T}) -> Vector{T}
 
 Return the items of the response.
 """
-function contents(r::R) where {T, R<:ListResponse{T}}
-    # The determination of `cfield` can be done at compile-time,
-    # and at runtime this is a simple field access.
-    cfield = nothing
-    for f in fieldnames(R)
-        if fieldtype(R, f) == Vector{T}
-            if isnothing(cfield)
-                cfield = f
-            else
-                throw(ArgumentError("Multiple fields of type Vector{$T} found in $R, contents(::$(typeof(r))) must be explicitly defined"))
-            end
-        end
-    end
-    if isnothing(cfield)
-        throw(ArgumentError("No field of type Vector{$T} found in $R, contents(::$(typeof(r))) must be explicitly defined"))
-    else
-        getfield(r, cfield)
-    end
+contents(r::R) where {T, R <: ListResponse{T}} = typedfield(r, Vector{T})
+
+function typedfield(r::R, ::Type{F}) where {R, F}
+    slots = fieldslots(R, F)
+    isempty(slots) &&
+        throw(ArgumentError("No field of type $F found in $R, contents(::$R) must be explicitly defined"))
+    length(slots) == 1 ||
+        throw(ArgumentError("Multiple fields of type $F found in $R, contents(::$R) must be explicitly defined"))
+    getfield(r, only(slots))
 end
+
+# Foldable, so `typedfield` compiles to a plain `getfield`
+Base.@assume_effects :foldable fieldslots(::Type{R}, ::Type{F}) where {R, F} =
+    filter(i -> fieldtype(R, i) == F, ntuple(identity, fieldcount(R)))
 
 """
     metadata(response::SingleResponse) -> Dict{Symbol, Any}

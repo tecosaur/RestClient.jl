@@ -150,6 +150,25 @@ end
 
 struct PagedListEP <: ListEndpoint end
 RestClient.urlpath(::PagedListEP) = "p"
+struct OneContent <: SingleResponse{Int}
+    note::String
+    value::Int
+end
+struct TwoContents <: SingleResponse{Int}
+    a::Int
+    b::Int
+end
+struct ListContent <: ListResponse{String}
+    total::Int
+    items::Vector{String}
+end
+
+@testset "contents finds the typed field" begin
+    @test @inferred(RestClient.contents(OneContent("n", 3))) === 3
+    @test @inferred(RestClient.contents(ListContent(1, ["x"]))) == ["x"]
+    @test_throws ArgumentError RestClient.contents(TwoContents(1, 2))
+end
+
 
 @testset "List display elides the middle" begin
     list = RestClient.List{String, PagedListEP}(
