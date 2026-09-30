@@ -18,7 +18,8 @@ struct SEP <: AbstractEndpoint end
 
 # Open a GET stream on `url` directly, below the request pipeline.
 open_get(url; timeout = Inf) =
-    open_stream(RestClient.Outgoing("GET", url, Pair{String, String}[], nothing, nothing, timeout))
+    open_stream(RestClient.Request{:get}(RestClient.RequestConfig(url), SEP()),
+                RestClient.Outgoing("GET", url, Pair{String, String}[], nothing, nothing, timeout))
 
 # Drive open_stream → decode_stream against a live route, returning the channel.
 function stream_route(url, framing::Symbol, ::Type{Elt}; ep = SEP()) where {Elt}

@@ -195,7 +195,7 @@ function decode_stream(bs::Base.BufferStream, endpoint::AbstractEndpoint,
             close(items)
         else
             result = fetch(transfer)
-            if result isa Downloads.RequestError; close(items, result) else close(items) end
+            if result isa Exception; close(items, result) else close(items) end
         end
     catch err
         if cancelled[]; close(items) else close(items, err) end
@@ -211,14 +211,15 @@ end
 # Open a streaming transfer: run the request on a task, block until the response
 # head is known, and return it with the incrementally filled body and the transfer.
 # Cancellation is `close(body)`, which collapses the transfer.
-function open_stream(out::Outgoing)
+function open_stream(req::Request, out::Outgoing)
     bs = Base.BufferStream()
     handle = Channel{Downloads.Curl.Easy}(1)
-    dl = Downloads.Downloader()
-    dl.easy_hook = (e, _info) -> (put!(handle, e); nothing)
+    # A stream is bounded by silence, not total time
+    options = TransferOptions(Watchdog(out.timeout), handle)
     transfer = Threads.@spawn try
-        Downloads.request(out.url; out.method, out.headers, out.timeout, input = payloadio(out),
-                          output = bs, downloader = dl, throw = false)
+        result = curlrequest(out.url, options; out.method, out.headers, input = payloadio(out),
+                             output = bs, throw = false)
+        if options.watchdog.fired IdleTimeout(req, options.watchdog.limit) else result end
     finally
         close(bs)
     end
@@ -229,14 +230,14 @@ function open_stream(out::Outgoing)
     # is still flowing do we read the status off the live handle.
     if istaskdone(transfer)
         result = fetch(transfer)
-        result isa Downloads.RequestError && throw(result)
+        result isa Exception && throw(result)
         return Incoming(result, bs, transfer)
     end
     res = Downloads.Response(Downloads.Curl.get_response_info(take!(handle))...)
     Incoming(res, bs, transfer)
 end
 
-transmit(::Request{<:Any, <:StreamEndpoint}, out::Outgoing) = open_stream(out)
+transmit(req::Request{<:Any, <:StreamEndpoint}, out::Outgoing) = open_stream(req, out)
 
 # Rate-limiting acts on the head status only: once frames flow there is nothing to replay.
 function deliver(req::Request{<:Any, <:StreamEndpoint}, incoming::Incoming)

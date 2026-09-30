@@ -291,6 +291,23 @@ end
     @testset "unsupported method" begin
         @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))
     end
+    @testset "idle limit" begin
+        limit(timeout; kw...) = RestClient.Watchdog(timeout; kw...).limit
+        default = RestClient.DEFAULT_IDLE_SECONDS
+        @test limit(Inf) == limit(Inf; atleast = default) == default
+        @test limit(5.0; atleast = default) == default
+        @test limit(60.0; atleast = default) == 60
+        @test limit(0.2) == 0.2
+    end
+    @testset "watchdog" begin
+        dog = RestClient.Watchdog(1.0)
+        @test dog(0, 0)
+        dog.lastactive -= 2
+        @test dog(5, 0)                                          # data moved in time
+        @test dog(5, 3)                                          # uploading counts too
+        dog.lastactive -= 2
+        @test !dog(5, 3) && dog.fired                            # silent past the limit
+    end
     @testset "auth leaves endpoint lists" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), SharedHeadersEP())
         for _ in 1:2

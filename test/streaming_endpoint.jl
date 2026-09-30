@@ -6,6 +6,7 @@ module StreamEndpointTest
 using RestClient
 using JSON3, StructTypes
 using Test
+using Downloads
 
 @jsondef struct Tok
     n::Int
@@ -30,6 +31,15 @@ RestClient.isstreamend(::ChatstopEndpoint, fr::SSEvent) = fr.event == "stop"
 
 # Rate-limited once: the POST is retried, payload and all, before streaming.
 @endpoint limitedchat(; prompt::String) -> prompt -> "sse/limited" -> Stream{Tok}
+
+# One frame, then silence (STALL_SECONDS) before the next.
+@endpoint stalling() -> "stall" -> Stream{Tok, :NDJSON}
+
+# SSE heartbeats 3 s apart, sparser than 1 byte/s but never silent for 4 s.
+@endpoint heartbeat() -> "heartbeat" -> Stream{Tok}
+
+# Four frames a second apart: longer overall than a 2 s timeout, but never silent for it.
+@endpoint steady() -> "steady" -> Stream{Tok, :NDJSON}
 
 # An error status before any frame: should raise with the body, not stream.
 @endpoint failing() -> "error500" -> Stream{Tok}
@@ -67,6 +77,20 @@ function run(base)
     end
     @testset "rate-limited" begin
         @test collect(limitedchat(cfg, prompt = "hi")) == [Tok(n=1), Tok(n=2), Tok(n=3)]
+    end
+    @testset "timeout bounds silence" begin
+        quick = RequestConfig(base; timeout = 1)
+        # Silence beyond the timeout abandons the stream after the first frame...
+        got = Tok[]
+        t = @elapsed @test_throws RestClient.IdleTimeout for tok in stalling(quick)
+            push!(got, tok)
+        end
+        @test got == [Tok(n=1)]
+        @test t < 3                                          # promptly, not after the stall
+        # ...but a stream that keeps sending outlives it.
+        @test collect(steady(RequestConfig(base; timeout = 2))) == [Tok(n=i) for i in 1:4]
+        # Heartbeats are data, however sparse
+        @test collect(heartbeat(RequestConfig(base; timeout = 4))) == [Tok(n=1), Tok(n=2)]
     end
     @testset "error status" begin
         @test_throws RestClient.ResponseError failing(cfg)

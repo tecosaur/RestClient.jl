@@ -204,8 +204,11 @@ provided as keyword arguments:
 
 - `key::Union{Nothing, String}`: The secret used to authenticate requests.
   How it is presented on the wire is declared by endpoints.
-- `timeout::Float64`: The timeout for the request, in seconds. This is passed to
-  `Downloads.download` and defaults to `Inf`.
+- `timeout::Float64`: The longest a request may take, in seconds; for a
+  [`Stream`](@ref), the longest it may go without receiving data. Defaults to
+  `Inf`. Separately, a request that sends or receives no data for 20 seconds
+  (or for `timeout`, when that is longer) is abandoned with an
+  [`IdleTimeout`](@ref).
 - `cache::Bool`: Whether to cache the response, using lifetime information from
   standard HTTP response headers. Defaults to `true`.
 
@@ -335,6 +338,23 @@ end
 Incoming(response::Downloads.Response, body::IO) = Incoming(response, body, nothing)
 
 Base.close(incoming::Incoming) = close(incoming.body)
+
+"""
+    IdleTimeout <: Exception
+
+An exception for requests abandoned after `seconds` without sending or receiving
+any data (see the `timeout` of [`RequestConfig`](@ref)).
+"""
+struct IdleTimeout{R <: Request} <: Exception
+    request::R
+    seconds::Float64
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::IdleTimeout))
+    print(io, "No data received for ", ex.seconds, " seconds from ",
+          redactsecrets(url(ex.request), authsecrets(ex.request)),
+          "; if the API is slow to respond, raise the `timeout` of its RequestConfig")
+end
 
 """
     MalformedRequest <: Exception

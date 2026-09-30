@@ -52,6 +52,39 @@ How many times a rate-limited request is attempted before giving up.
 const RATELIMIT_MAX_ATTEMPTS = 5
 
 """
+    DEFAULT_IDLE_SECONDS
+
+How long a transfer may go without sending or receiving data before it is
+abandoned, unless the request's `timeout` asks for longer (Downloads' own default).
+"""
+const DEFAULT_IDLE_SECONDS = 20
+
+# Abandons a transfer once no data has moved for `limit` seconds, as reported by
+# curl's progress callback (at least once a second).
+mutable struct Watchdog
+    const limit::Float64
+    bytes::Int
+    lastactive::Float64
+    fired::Bool
+end
+
+# The watchdog for a request's `timeout`: at least `atleast`, and the default if unlimited
+Watchdog(timeout::Real; atleast::Real = 0) =
+    Watchdog(if isfinite(timeout) max(Float64(timeout), atleast) else Float64(DEFAULT_IDLE_SECONDS) end,
+             0, time(), false)
+
+# Per-transfer settings, applied by `transferhook` (see `curlrequest`).
+struct TransferOptions
+    watchdog::Watchdog
+    handlesink::Union{Nothing, Channel{Downloads.Curl.Easy}}
+end
+
+const TRANSFER_OPTIONS = ScopedValue{Union{Nothing, TransferOptions}}(nothing)
+
+# RestClient's own Downloader, created in `__init__`, with `transferhook` as its easy_hook.
+const DOWNLOADER = Ref{Downloads.Downloader}()
+
+"""
     encode_uri_component(io::IO, str::AbstractString)
 
 Encode `str` according to RFC3986 Section 2, writing the result to `io`.
@@ -404,10 +437,63 @@ end
 function http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, String}} = out.headers)
     buf, input = IOBuffer(), payloadio(out)
     @debug debug_request(out.method, out.url, headers, input; secrets = authsecrets(req)) _file=nothing
-    res = Downloads.request(out.url; out.method, output = buf, input, headers, out.timeout)
+    # Never less than the total `timeout`, which curl enforces
+    options = TransferOptions(Watchdog(out.timeout; atleast = DEFAULT_IDLE_SECONDS), nothing)
+    res = curlrequest(out.url, options; out.method, output = buf, input, headers, out.timeout,
+                      throw = false)
+    options.watchdog.fired && throw(IdleTimeout(req, options.watchdog.limit))
+    res isa Downloads.RequestError && throw(res)
     seekstart(buf)
     @debug debug_response(out.url, res, buf; secrets = authsecrets(req)) _file=nothing
     Incoming(res, buf)
+end
+
+
+"""
+    curlrequest(url::String, options::TransferOptions; kwargs...) -> Union{Downloads.Response, Downloads.RequestError}
+
+Call `Downloads.request(url; kwargs...)` on RestClient's downloader, whose
+`easy_hook` applies `options` to the transfer.
+"""
+curlrequest(url::String, options::TransferOptions; kwargs...) =
+    with(TRANSFER_OPTIONS => options) do
+        Downloads.request(url; kwargs..., downloader = DOWNLOADER[])
+    end
+
+# Whether the transfer may continue, given the bytes moved so far
+function (w::Watchdog)(dlnow::Integer, ulnow::Integer)
+    now = time()
+    if dlnow + ulnow != w.bytes
+        w.bytes, w.lastactive = dlnow + ulnow, now
+    elseif now - w.lastactive > w.limit
+        w.fired = true
+    end
+    !w.fired
+end
+
+# Curl's progress callback (see `transferhook`); a nonzero result aborts the transfer
+watchdog_xferinfo(watchdog::Ptr{Cvoid}, _dltotal::Integer, dlnow::Integer,
+                  _ultotal::Integer, ulnow::Integer)::Cint =
+    !(unsafe_pointer_to_objref(watchdog)::Watchdog)(dlnow, ulnow)
+
+# Configure a transfer's curl handle from the `TRANSFER_OPTIONS` in scope. The
+# hook runs in the task calling `Downloads.request`, so the options are that
+# request's. A user's global `Downloads.EASY_HOOK` still applies, ours after it.
+function transferhook(easy::Downloads.Curl.Easy, info::NamedTuple)
+    userhook = Downloads.EASY_HOOK[]
+    isnothing(userhook) || userhook(easy, info)
+    options = TRANSFER_OPTIONS[]
+    isnothing(options) && return
+    # Curl's rate-based check counts sparse data (e.g. heartbeats) as silence, so it's
+    # made unreachable, but left armed: it wakes curl each second to call the watchdog.
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_LOW_SPEED_TIME, typemax(Int32))
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_XFERINFOFUNCTION,
+                          @cfunction(watchdog_xferinfo, Cint, (Ptr{Cvoid}, Downloads.Curl.curl_off_t,
+                              Downloads.Curl.curl_off_t, Downloads.Curl.curl_off_t, Downloads.Curl.curl_off_t)))
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_XFERINFODATA, pointer_from_objref(options.watchdog))
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_NOPROGRESS, false)
+    isnothing(options.handlesink) || put!(options.handlesink, easy)
+    nothing
 end
 
 

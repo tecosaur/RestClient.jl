@@ -231,6 +231,19 @@ end
             end
         end
     end
+    @testset "user easy_hook" begin
+        called = Ref(false)
+        previous = RestClient.Downloads.EASY_HOOK[]
+        RestClient.Downloads.EASY_HOOK[] = (_easy, _info) -> (called[] = true)
+        try
+            with_server() do baseurl, _
+                @test IC.getitem(cfg(baseurl), "1").id == 1
+            end
+        finally
+            RestClient.Downloads.EASY_HOOK[] = previous
+        end
+        @test called[]
+    end
     @testset "HEAD" begin
         with_server() do baseurl, _
             @test IC.exists(cfg(baseurl), "exists") === true

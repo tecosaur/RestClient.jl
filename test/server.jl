@@ -174,6 +174,8 @@ end
 # Streaming routes: handlers receive an `HTTP.Stream` and write incrementally, so
 # the client observes frames as they arrive (and connection drops mid-stream).
 const SLOW_INTERVAL = 0.15
+# Well beyond a 1 s silence window plus curl's ~6 s rate-averaging lag.
+const STALL_SECONDS = 10
 
 # Times /sse/limited has answered 429; reset by each `with_stream_server`.
 const STREAM_LIMITED_HITS = Threads.Atomic{Int}(0)
@@ -213,6 +215,13 @@ function stream_router(http::HTTP.Stream)
         else
             write_frames(http, sseframes; contenttype = "text/event-stream")
         end
+    elseif path == "/stall"              # a frame, silence, then another
+        write_frames(http, ndframes[1:2]; contenttype = "application/x-ndjson", interval = STALL_SECONDS)
+    elseif path == "/heartbeat"          # 2-byte heartbeats 3 s apart: under 1 byte/s
+        write_frames(http, ["data: {\"n\":1}\n\n", ":\n", ":\n", ":\n", ":\n", "data: {\"n\":2}\n\n"];
+                     contenttype = "text/event-stream", interval = 3)
+    elseif path == "/steady"             # frames a second apart, for a few seconds
+        write_frames(http, [ndframes; "{\"n\":4}\n"]; contenttype = "application/x-ndjson", interval = 1)
     elseif path == "/ndjson"
         write_frames(http, ndframes; contenttype = "application/x-ndjson")
     elseif path == "/slow"
@@ -237,8 +246,8 @@ end
     with_stream_server(f) -> f's return value
 
 Like [`with_server`], but serves the streaming routes (`/sse`, `/ndjson`, `/slow`,
-`/abort`, `/empty`, `/error500`, `/sse/done`, `/sse/stop`, `/sse/limited`) in HTTP
-stream mode.
+`/abort`, `/empty`, `/error500`, `/sse/done`, `/sse/stop`, `/sse/limited`, `/stall`,
+`/steady`) in HTTP stream mode.
 """
 function with_stream_server(f)
     STREAM_LIMITED_HITS[] = 0

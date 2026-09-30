@@ -4,6 +4,7 @@
 module RestClient
 
 using Downloads
+using Base.ScopedValues: ScopedValue, with
 using StyledStrings: @styled_str as @S_str
 
 export AbstractEndpoint, SingleEndpoint, ListEndpoint, Request, RequestConfig,
@@ -14,7 +15,7 @@ export SingleResponse, ListResponse, Single, List, perform, urlpath,
     remainingpages
 export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
 export FormFormat, MultipartFormat, @formdef, @multipartdef
-export MalformedRequest, ResponseError
+export MalformedRequest, ResponseError, IdleTimeout
 export Stream, StreamEndpoint, SSEvent, isstreamend
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth, authscheme, authpolicy
 export setfield
@@ -41,6 +42,8 @@ end
 function __init__()
     global MULTIPART_BOUNDARY = "----" * string(rand(UInt64); base = 16)
     global MULTIPART_MIME = "multipart/form-data; boundary=" * MULTIPART_BOUNDARY
+    DOWNLOADER[] = Downloads.Downloader()
+    DOWNLOADER[].easy_hook = transferhook
     atexit(cleancache)
 end
 
