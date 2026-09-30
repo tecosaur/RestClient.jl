@@ -704,7 +704,7 @@ function interp_curlies(str::String; filename::String = "unknown", ispath::Bool 
             Meta.isexpr(expr, :braces, 1) ||
                 throw(ArgumentError("Expected single {curly} form in URL, instead saw $expr"))
             exvar = varform(first(expr.args); kwargs...)
-            push!(components, if ispath; :($encode_uri_component($exvar)) else exvar end)
+            push!(components, if ispath; :($encode_uri_component($string($exvar))) else exvar end)
         else
             print(literal, char)
             idx = nextind(str, idx)

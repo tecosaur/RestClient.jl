@@ -239,7 +239,8 @@ end
         @test interp("a\\{b}") == "a{b}"                         # escaped brace is literal
         @test interp("a\\\\b") == "a\\b"                         # escaped backslash
         @test interp("a//b///{x}//c"; ispath = true) ==
-            Expr(:call, GlobalRef(Base, :string), "a/b/", :($(RestClient.encode_uri_component)(self.x)), "/c")
+            Expr(:call, GlobalRef(Base, :string), "a/b/",
+                 :($(RestClient.encode_uri_component)($string(self.x))), "/c")
         @test interp("a//b") == "a//b"                           # only paths are collapsed
     end
     # A trailing result type may be omitted: the body is discarded and the endpoint

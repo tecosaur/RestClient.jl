@@ -48,6 +48,7 @@ module IntegrationClient
         note::Union{String, Nothing} = nothing
     end
     @endpoint getitem(id::String) -> "items/{id}" -> Item
+    @endpoint getitem_number(id::Int) -> "items/{id}" -> Item          # a non-string path value
     @endpoint search(; q::String, limit::Int) -> "search?{q}&{limit}" -> Vector{Item}
     @endpoint reflect(; q::String) -> "reflect?{q}" -> Reflected
     @endpoint upload(; item::Item) -> item -> "echo" -> Echoed
@@ -131,6 +132,11 @@ const AC = AuthClient
             @test item.name == "item-42"
             @test item.id == 42
             @test state.requests == 1
+        end
+        @testset "numeric path value" begin
+            with_server() do baseurl, _
+                @test IC.getitem_number(cfg(baseurl), 7).id == 7
+            end
         end
     end
     @testset "list" begin
