@@ -234,7 +234,7 @@ end
 
 RequestConfig(baseurl::String; key::Union{Nothing, String} = nothing,
               timeout::Real = Inf, cache::Bool = true) =
-    RequestConfig(baseurl, RateGate(), key, Float64(timeout), cache)
+    RequestConfig(String(rstrip(baseurl, '/')), RateGate(), key, Float64(timeout), cache)
 
 function Base.show(io::IO, rc::RequestConfig)
     show(io, RequestConfig)

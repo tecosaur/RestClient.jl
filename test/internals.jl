@@ -336,6 +336,9 @@ end
         @test err isa MalformedRequest
         @test occursin("QUERY", only(err.issues))
     end
+    @testset "base URL with a trailing slash" begin
+        @test RestClient.url(Request{:get}(RequestConfig("http://x/api/"), PlainEP())) == "http://x/api/p"
+    end
     @testset "unsupported method" begin
         @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))
     end
