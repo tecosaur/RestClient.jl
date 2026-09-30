@@ -7,8 +7,8 @@
 
 using Dates
 using Downloads: Response
-using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse,
-    setexpiry, expirytime_xattr, expirytime_read, HTTP_DATE_FORMAT
+using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse, cachesave,
+    opencacheentry, readcachestamp, CACHE_STALE_DURATION, HTTP_DATE_FORMAT
 
 hdr(pairs...) = Pair{String, String}[pairs...]
 http_date(t) = Dates.format(t, HTTP_DATE_FORMAT)
@@ -36,24 +36,29 @@ http_date(t) = Dates.format(t, HTTP_DATE_FORMAT)
     end
 end
 
-@testset "expirytime(headers) edge cases" begin
-    now_unix = trunc(Int, time())
-    @test expirytime(hdr()) == 0
-    @test expirytime(hdr("cache-control" => "max-age=notanumber")) == 0
-    @test expirytime(hdr("expires" => "whenever")) == 0
-    @testset "directives that forbid caching" begin
-        @test expirytime(hdr("cache-control" => "no-store")) == 0
-        @test expirytime(hdr("cache-control" => "no-cache")) == 0
-        @test expirytime(hdr("cache-control" => "private, max-age=600")) == 0
-        @test expirytime(hdr("vary" => "*", "cache-control" => "max-age=600")) == 0
+@testset "expirytime(headers) follows RFC 9111 for a private cache" begin
+    t = 1_700_000_000
+    @testset "storage forbidden" begin
+        @test isnothing(expirytime(hdr("cache-control" => "no-store", "etag" => "x"), t))
+        @test isnothing(expirytime(hdr("vary" => "*", "cache-control" => "max-age=600"), t))
     end
-    @testset "max-age / s-maxage and Expires priority" begin
-        @test 595 <= expirytime(hdr("cache-control" => "max-age=600")) - now_unix <= 601
-        @test 295 <= expirytime(hdr("cache-control" => "public, s-maxage=300")) - now_unix <= 301
-        stamp = http_date(now(UTC) + Hour(1))
-        @test expirytime(hdr("expires" => stamp)) > now_unix
-        # max-age wins over Expires (RFC 9111 §4.2.1).
-        @test expirytime(hdr("cache-control" => "max-age=10", "expires" => stamp)) - now_unix <= 11
+    @testset "stale at once" begin
+        @test expirytime(hdr(), t) == t
+        @test expirytime(hdr("cache-control" => "no-cache, max-age=600"), t) == t
+        @test expirytime(hdr("cache-control" => "max-age=notanumber"), t) == t
+        @test expirytime(hdr("expires" => "whenever"), t) == t
+    end
+    @testset "freshness lifetime" begin
+        @test expirytime(hdr("cache-control" => "private, max-age=600"), t) == t + 600
+        @test expirytime(hdr("cache-control" => "max-age=600", "age" => "100"), t) == t + 500
+        @test expirytime(hdr("cache-control" => "public, s-maxage=300"), t) == t  # shared caches only
+        # Expires counts from the response's Date, not the local clock.
+        date = unix2datetime(t - 3600)
+        @test expirytime(hdr("date" => http_date(date),
+                             "expires" => http_date(date + Minute(10))), t) == t + 600
+        # max-age wins over Expires (§4.2.1).
+        @test expirytime(hdr("cache-control" => "max-age=10",
+                             "expires" => http_date(unix2datetime(t) + Hour(1))), t) == t + 10
     end
 end
 
@@ -80,21 +85,72 @@ sample_response(; status = 200,
     end
 end
 
-@testset "filesystem expiry" begin
-    path, _ = mktemp()
-    open(io -> dumpresponse(io, sample_response(), IOBuffer(b"body")), path, "w")
-    @test expirytime_read(path) - trunc(Int, time()) <= 601    # from max-age=600
-    if Sys.islinux()
-        @testset "xattr round-trip" begin
-            setexpiry(path, 1_700_000_000)
-            @test expirytime_xattr(path) == 1_700_000_000
-        end
-        # Regression: a missing attribute once returned -1 wrapped to a huge
-        # unsigned value (Csize_t) and read uninitialised memory.
-        @testset "absent xattr returns nothing, not garbage" begin
-            fresh, _ = mktemp()
-            @test isnothing(expirytime_xattr(fresh))
-        end
+struct CacheEP <: AbstractEndpoint end
+RestClient.urlpath(::CacheEP) = "thing"
+struct DatedCacheEP <: AbstractEndpoint end
+RestClient.urlpath(::DatedCacheEP) = "thing"
+RestClient.cachelifetime(::DatedCacheEP, ::Response) = now(UTC) + Hour(1)
+struct KeyedCacheEP <: AbstractEndpoint end
+RestClient.urlpath(::KeyedCacheEP) = "thing"
+RestClient.authscheme(::KeyedCacheEP) = QueryAuth("api_key")
+RestClient.authpolicy(::KeyedCacheEP) = :required
+
+@testset "cache entries" begin
+    cfile = joinpath(mktempdir(), "entry.http")
+    req = Request{:get}(RequestConfig("https://api.example.com"), CacheEP())
+    stamp(path) = open(readcachestamp, path)
+    body(path) = (entry = opencacheentry(path); try read(last(entry), String) finally close(last(entry)) end)
+    @testset "round-trip, with the expiry stored in the file" begin
+        cachesave(req, cfile, sample_response(), IOBuffer(b"body"))
+        @test body(cfile) == "body"
+        expiry, retain = stamp(cfile)
+        @test 595 <= expiry - trunc(Int, time()) <= 601
+        @test retain == expiry            # no validator ⇒ not kept once stale
+    end
+    @testset "an existing entry is replaced" begin
+        cachesave(req, cfile, sample_response(), IOBuffer(b"new body"))
+        @test body(cfile) == "new body"
+    end
+    @testset "a validator keeps a stale entry for revalidation" begin
+        res = sample_response(headers = ["cache-control" => "max-age=0", "etag" => "\"v1\""])
+        cachesave(req, cfile, res, IOBuffer(b"x"))
+        expiry, retain = stamp(cfile)
+        @test retain - expiry == CACHE_STALE_DURATION
+    end
+    @testset "a response that may not be kept removes the entry" begin
+        cachesave(req, cfile, sample_response(headers = ["cache-control" => "no-store"]), IOBuffer(b"x"))
+        @test !isfile(cfile)
+        cachesave(req, cfile, sample_response(headers = Pair{String, String}[]), IOBuffer(b"x"))
+        @test !isfile(cfile)              # stale at once, and no validator
+    end
+    @testset "a DateTime cachelifetime" begin
+        dreq = Request{:get}(RequestConfig("https://api.example.com"), DatedCacheEP())
+        cachesave(dreq, cfile, sample_response(), IOBuffer(b"x"))
+        @test 3595 <= first(stamp(cfile)) - trunc(Int, time()) <= 3601
+    end
+    @testset "auth keys are not stored" begin
+        kreq = Request{:get}(RequestConfig("https://api.example.com"; key = "s3cret"), KeyedCacheEP())
+        res = Response("https", RestClient.url(kreq), 200, "HTTP/1.1 200 OK",
+                       Pair{String, String}["cache-control" => "max-age=600"])
+        cachesave(kreq, cfile, res, IOBuffer(b"x"))
+        @test !occursin("s3cret", read(cfile, String))
+        @test occursin("api_key=*****", read(cfile, String))
+    end
+    @testset "a failed write only warns" begin
+        rodir = mktempdir()
+        chmod(rodir, 0o500)
+        @test_logs (:warn, r"Unable to update the response cache") cachesave(
+            req, joinpath(rodir, "sub", "entry.http"), sample_response(), IOBuffer(b"x"))
+        dir, unreadable = mktempdir(), IOBuffer(b"x")
+        close(unreadable)
+        @test_throws ArgumentError cachesave(req, joinpath(dir, "entry.http"), sample_response(), unreadable)
+        @test isempty(readdir(dir))                          # no temporary file left behind
+    end
+    @testset "unreadable entries are removed" begin
+        write(cfile, "https://old-format/\nHTTP/1.1 200 OK\n\nbody")
+        @test isnothing(opencacheentry(cfile))
+        @test !isfile(cfile)
+        @test isnothing(opencacheentry(cfile))
     end
 end
 

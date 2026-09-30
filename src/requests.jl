@@ -370,12 +370,9 @@ function cached_request(req::Request, method::String, pldtype::Type, pldio::Unio
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
         method ∈ ("GET", "HEAD") # RFC 9111 §3: only GET/HEAD are cacheable
     iscacheable || return http_request(method, rurl, pldio; headers, timeout, secrets)
-    res, body, wascached = http_cached(method, rurl, pldio; headers, timeout, secrets)
-    if !wascached && res.status ∈ 200:299
-        cachesave(req, rurl, method, headers,
-                  if !isnothing(pldio) seekstart(pldio) end,
-                  res, body)
-    end
+    cfile = joinpath(cachedir(), cachekey(rurl, method, headers, pldio) * ".http")
+    res, body, isstored = http_cached(cfile, method, rurl, pldio; headers, timeout, secrets)
+    isstored || res.status ∉ 200:299 || cachesave(req, cfile, res, body)
     res, body
 end
 

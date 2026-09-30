@@ -72,6 +72,8 @@ module IntegrationClient
     @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
     @endpoint text() -> "text" -> String
     @endpoint number() -> "number" -> Int
+    @endpoint revalidate() -> "revalidate" -> Item
+    @endpoint rotating() -> "rotating" -> Item
     @endpoint struct AuthEndpoint
         showheaders() -> "headers" -> Headers
     end
@@ -459,6 +461,32 @@ end
             config = cfg(baseurl; cache = false)
             IC.cached(config); IC.cached(config)
             @test state.requests == 2
+        end
+    end
+    @testset "a 304 refreshes the stored entry's freshness" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test IC.revalidate(config).name == "revalidated"   # stored, already stale
+                @test IC.revalidate(config).name == "revalidated"   # 304 ⇒ now fresh for 60s
+                @test IC.revalidate(config).name == "revalidated"   # served from disk
+                @test state.revalidations == 1
+                @test state.requests == 2
+            finally
+                clean_cachekey("$baseurl/revalidate", "GET", ["Accept" => "application/json"])
+            end
+        end
+    end
+    @testset "a changed response replaces the stored entry" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test IC.rotating(config).id == 1
+                @test IC.rotating(config).id == 2
+                @test IC.rotating(config).id == 3
+            finally
+                clean_cachekey("$baseurl/rotating", "GET", ["Accept" => "application/json"])
+            end
         end
     end
     @testset "Cache-Control: no-store is never cached" begin

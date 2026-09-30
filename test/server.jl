@@ -18,14 +18,15 @@ const THROTTLE_RETRY_AFTER = 3
 mutable struct ServerState
     requests::Int            # total requests served
     ratelimit_hits::Int      # times /ratelimited returned 429
-    revalidations::Int       # conditional requests seen at /cacheable
+    revalidations::Int       # conditional requests seen at /cacheable and /revalidate
     forbidden_hits::Int      # times /forbidden/limited returned 403
     echo_limited_hits::Int   # times /echo/limited returned 429
+    rotations::Int           # distinct versions served by /rotating
     # /throttled sees genuinely concurrent hits, so these are atomic
     @atomic throttle_429s::Int
     @atomic throttle_first::Float64  # time() of first hit, 0.0 until set
 end
-ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0.0)
+ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0.0)
 
 # Tiny JSON encoders, just enough to avoid a JSON dep and escaped interpolation.
 jsonval(s::AbstractString) = '"' * replace(s, '\\' => "\\\\", '"' => "\\\"") * '"'
@@ -126,6 +127,23 @@ function build_router(state::ServerState)
     end)
     HTTP.register!(router, "GET", "/text", _ -> HTTP.Response(200, "plain words"))
     HTTP.register!(router, "GET", "/number", _ -> HTTP.Response(200, "42"))
+    # Stored already stale; a 304 revalidation extends its freshness.
+    HTTP.register!(router, "GET", "/revalidate", function (req)
+        if HTTP.header(req, "If-None-Match", "") == ETAG
+            state.revalidations += 1
+            return HTTP.Response(304, ["ETag" => ETAG, "Cache-Control" => "max-age=60"])
+        end
+        HTTP.Response(200, ["Content-Type" => "application/json",
+                            "Cache-Control" => "max-age=0", "ETag" => ETAG],
+                      item_json("revalidated", 1))
+    end)
+    # A new version (and ETag) every request, so revalidation replaces the entry.
+    HTTP.register!(router, "GET", "/rotating", function (req)
+        state.rotations += 1
+        HTTP.Response(200, ["Content-Type" => "application/json", "Cache-Control" => "max-age=0",
+                            "ETag" => "\"v$(state.rotations)\""],
+                      item_json("rotation", state.rotations))
+    end)
     router
 end
 

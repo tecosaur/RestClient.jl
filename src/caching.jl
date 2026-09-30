@@ -7,10 +7,19 @@ using BaseDirs
 """
     CACHE_STALE_DURATION = 2 weeks (in seconds)
 
-How long a cached entry will be kept for after becoming stale,
-before being deleted.
+How long an expired cache entry that can be revalidated (it has an `ETag` or
+`Last-Modified` validator) is kept for, before being deleted. Entries without a
+validator are deleted as soon as they expire.
 """
-const CACHE_STALE_DURATION = 2 * 24 * 60 * 60
+const CACHE_STALE_DURATION = 14 * 24 * 60 * 60
+
+# Cache files start with `CACHE_MAGIC <expiry> <retain-until>` (Unix times); bump
+# the version on any layout change, so older files read as corrupt.
+const CACHE_MAGIC = "RestClient-Cache/1"
+
+# Stored headers a 304 must not overwrite, as they describe the stored body (RFC 9111 §3.2).
+const CACHE_BODY_HEADERS = ("content-length", "content-encoding", "content-range", "transfer-encoding")
+
 
 
 # Request caching and reading
@@ -101,7 +110,9 @@ end
 """
     cachelifetime(req::Request, res::Downloads.Response) -> Union{DateTime, Integer, Nothing}
 
-Determine the expiry time of a cached response, based on the request and response.
+Determine how long a response may be served from the cache: until a (UTC)
+`DateTime`, for a number of seconds, or `nothing` to follow the response's
+HTTP caching headers.
 
 # Specialisation
 
@@ -126,182 +137,176 @@ cachelifetime(@nospecialize(::AbstractEndpoint), res::Downloads.Response) =
 cachelifetime(@nospecialize(_::Downloads.Response)) = nothing
 
 """
-    expirytime(headers::Vector{Pair{String, String}}) -> Integer
+    expirytime(headers::Vector{Pair{String, String}}, now::Int = trunc(Int, time())) -> Union{Int, Nothing}
 
-Determine the expiry time of a response based on the headers.
+Determine when a response with `headers` stops being fresh, as a Unix time, or
+`nothing` if it must not be stored.
 
-The time is returned as a Unix timestamp, or `0` if the response should not be cached.
-
-Follows RFC 9111 §4.2.1: `Cache-Control: max-age`/`s-maxage` takes priority,
-falling back to `Expires`. The directives `no-cache`, `no-store`, and `private`
-prevent caching, as does `Vary: *` (RFC 9111 §4.1).
-
-Should the headers not contain any information about expiry, `0` is returned.
+Follows RFC 9111 for a private cache: `no-store` and `Vary: *` forbid storage;
+`no-cache` or a lack of freshness information makes the response stale at once;
+otherwise it is fresh for `max-age` less `Age`, or until `Expires` (relative to `Date`).
 """
-function expirytime(headers::Vector{Pair{String, String}})
-    cachecontrol = ""
-    expiry = ""
-    for (k, v) in headers
-        if k == "cache-control"
-            cachecontrol = lowercase(v)
-        elseif k == "expires"
-            expiry = v
-        elseif k == "vary" && strip(v) == "*"
-            return 0
-        end
+function expirytime(headers::Vector{Pair{String, String}}, now::Int = trunc(Int, time()))
+    strip(getheader(headers, "vary")) == "*" && return nothing
+    directives = [strip(d) for (k, v) in headers if k == "cache-control"
+                      for d in eachsplit(lowercase(v), ',')]
+    "no-store" ∈ directives && return nothing
+    "no-cache" ∈ directives && return now
+    for directive in directives
+        name, value = if '=' in directive split(directive, '=', limit=2) else (directive, "") end
+        name == "max-age" || continue
+        maxage = tryparse(Int, strip(value))
+        isnothing(maxage) && continue
+        return now + maxage - something(tryparse(Int, getheader(headers, "age")), 0)
     end
-    if !isempty(cachecontrol)
-        directives = map(strip, split(cachecontrol, ','))
-        any(d -> d ∈ ("no-cache", "no-store", "private"), directives) && return 0
-        for directive in directives
-            if '=' in directive
-                components = split(directive, '=', limit=2)
-                if length(components) == 2 && first(components) ∈ ("max-age", "s-maxage")
-                    age = tryparse(UInt, strip(last(components)))
-                    !isnothing(age) && return trunc(Int, time()) + age
-                end
-            end
-        end
-    end
-    if !isempty(expiry)
-        dtime = tryparse(DateTime, expiry, HTTP_DATE_FORMAT)
-        !isnothing(dtime) && return trunc(Int, datetime2unix(dtime))
-    end
-    0
+    expires = tryparse(DateTime, getheader(headers, "expires"), HTTP_DATE_FORMAT)
+    isnothing(expires) && return now # An absent or invalid Expires means stale (§5.3)
+    date = something(tryparse(DateTime, getheader(headers, "date"), HTTP_DATE_FORMAT),
+                     unix2datetime(now))
+    now + fld(Dates.value(expires - date), 1000)
 end
+
+hasvalidator(headers::Vector{Pair{String, String}}) =
+    any(((k, _),) -> k == "etag" || k == "last-modified", headers)
+
 
 
-# File age checking
+# Cache files
 
-"""
-    expirytime(path::String) -> Integer
-
-Return the expiry time of a cached response stored at `path`.
-
-On supporting Linux systems, this uses a filesystem extended attribute to store
-the expiry time.
-"""
-function expirytime(path::String)
-    @something(expirytime_xattr(path),
-               Some(expirytime_read(path)))
+# The `(expiry, retainuntil)` stamp heading a cache file, or `nothing` if it isn't one
+function readcachestamp(io::IO)
+    fields = split(readline(io), ' ')
+    length(fields) == 3 && first(fields) == CACHE_MAGIC || return nothing
+    expiry, retain = tryparse(Int, fields[2]), tryparse(Int, fields[3])
+    if !isnothing(expiry) && !isnothing(retain)
+        expiry, retain
+    end
 end
 
-@static if Sys.islinux()
-    function expirytime_xattr(path::String)
-        unixtime = Ref{Int64}()
-        nb = @ccall getxattr(path::Cstring, "user.expirytime"::Cstring, unixtime::Ptr{Int64}, sizeof(Int64)::Csize_t)::Cssize_t
-        if nb > 0
-            unixtime[]
-        end
+# `(expiry, retainuntil, response, body)` for the cache entry `cfile`, or `nothing`
+# if there is none (an unreadable entry is removed)
+function opencacheentry(cfile::String)
+    io = openifexists(cfile)
+    isnothing(io) && return nothing
+    stamp = readcachestamp(io)
+    res = if !isnothing(stamp) tryreadresponse(io) end
+    if isnothing(res)
+        close(io)
+        rm(cfile; force = true)
+        return nothing
     end
+    (stamp..., res, io)
+end
 
-    function setexpiry(path::String, unixtime::Integer)
-        timeref = Ref(Int64(unixtime))
-        @ccall setxattr(path::Cstring, "user.expirytime"::Cstring, timeref::Ptr{Int64}, sizeof(Int64)::Csize_t, 0::Cint)::Cint
+"""
+    cachesave(req::Request, cfile::String, res::Downloads.Response, body::IO)
+
+Store `res` and its `body` as the cache entry `cfile`, or remove the entry if the
+response may not be stored (see [`cachelifetime`](@ref) and [`expirytime`](@ref)).
+Caching is best-effort: a filesystem failure only warns.
+"""
+function cachesave(req::Request, cfile::String, res::Downloads.Response, body::IO)
+    now = trunc(Int, time())
+    lifetime = cachelifetime(req, res)
+    expiry = if isnothing(lifetime)
+        expirytime(res.headers, now)
+    elseif lifetime isa DateTime
+        round(Int, datetime2unix(lifetime))
+    else
+        now + lifetime
+    end
+    retain = if !isnothing(expiry)
+        expiry + ifelse(hasvalidator(res.headers), CACHE_STALE_DURATION, 0)
+    end
+    try
+        if isnothing(retain) || retain <= now
+            rm(cfile; force = true)
+        else
+            stored = Downloads.Response(res.proto, redactsecrets(res.url, authsecrets(req)),
+                                        res.status, res.message, res.headers)
+            cachewrite(cfile, stored, body, expiry, retain)
+        end
+    catch err
+        err isa Union{SystemError, Base.IOError} || rethrow()
+        @warn "Unable to update the response cache ($(dirname(cfile)))" exception = err maxlog = 1
+    end
+    nothing
+end
+
+# Written to a temporary file and moved into place, so readers never see a partial entry
+function cachewrite(cfile::String, res::Downloads.Response, body::IO, expiry::Integer, retain::Integer)
+    mkpath(dirname(cfile))
+    tmpfile, io = mktemp(dirname(cfile))
+    try
+        println(io, CACHE_MAGIC, ' ', expiry, ' ', retain)
+        dumpresponse(io, res, body)
+        close(io)
+        mv(tmpfile, cfile; force = true)
+    catch
+        close(io)
+        rm(tmpfile; force = true)
+        rethrow()
+    end
+end
+
+
+function openifexists(cfile::String)
+    try
+        open(cfile)
+    catch err
+        err isa SystemError && err.errnum == Libc.ENOENT || rethrow()
         nothing
     end
-else
-    expirytime_xattr(::String) = nothing
-    setexpiry(::String, ::Integer) = nothing
 end
 
-function expirytime_read(path::String)
-    res = open(tryreadresponse, path)
-    if !isnothing(res)
-        expirytime(res.headers)
-    end
-end
 
 
 # Performing a cached request
 
 """
-    http_cached(method::String, url::String, payload::Union{<:IO, Nothing};
-                headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                timeout::Float64 = Inf) -> Tuple{Downloads.Response, IO, Bool}
+    http_cached(cfile::String, method::String, url::String, payload::Union{IO, Nothing};
+                headers, timeout::Float64, secrets::Vector{String}) -> Tuple{Downloads.Response, IO, Bool}
 
-Perform an HTTP request, using a cached response if available.
+Perform an HTTP request through the cache entry `cfile`: serve it if fresh,
+revalidate it if stale (RFC 9111 §4.3), or else make the request afresh. The
+`Bool` is true when the response is the stored entry unchanged.
 """
-function http_cached(method::String, url::String, payload::Union{<:IO, Nothing} = nothing;
-                     headers::Union{<:AbstractVector, <:AbstractDict} = Pair{String, String}[],
-                     timeout::Float64 = Inf, secrets::Vector{String} = String[])
-    ckey = cachekey(url, method, headers, payload)
-    cfile = joinpath(cachedir(), ckey * ".http")
-    isfile(cfile) || @goto freshreq
-    etime = expirytime(cfile)
-    return if etime >= ceil(Int, time())
-        io = open(cfile)
-        res = tryreadresponse(io)
-        if isnothing(res)
-            close(io)
-            rm(cfile)
-            @goto freshreq
-        end
-        @debug debug_request("CACHE", url, headers, payload; secrets)
-        res, io, true
-    elseif etime + CACHE_STALE_DURATION >= ceil(Int, time())
-        io = open(cfile)
-        res = tryreadresponse(io)
-        if isnothing(res)
-            close(io)
-            rm(cfile)
-            @goto freshreq
-        end
-        mheaders = copy(headers)
-        @debug S"{inverse,magenta,bold: CACHE } checking validity of stale entry"
-        # Conditional revalidation via ETag/Last-Modified (RFC 9110 §13.1.2, §13.1.3).
-        for (k, v) in res.headers
-            if k == "etag"
-                push!(mheaders, "if-none-match" => v)
-                break
-            elseif k == "last-modified"
-                push!(mheaders, "if-modified-since" => v)
-                break
+function http_cached(cfile::String, method::String, url::String, payload::Union{IO, Nothing};
+                     headers::Union{<:AbstractVector, <:AbstractDict}, timeout::Float64,
+                     secrets::Vector{String})
+    entry = opencacheentry(cfile)
+    if !isnothing(entry)
+        expiry, retain, res, io = entry
+        now = time()
+        if expiry >= now
+            @debug debug_request("CACHE", url, headers; secrets) _file=nothing
+            return res, io, true
+        elseif retain >= now
+            @debug S"{inverse,magenta,bold: CACHE } revalidating stale entry" _file=nothing
+            etag, lastmod = getheader(res.headers, "etag"), getheader(res.headers, "last-modified")
+            conditions = Pair{String, String}[]
+            isempty(etag) || push!(conditions, "if-none-match" => etag)
+            isempty(lastmod) || push!(conditions, "if-modified-since" => lastmod)
+            vres, vbuf = http_request(method, url, payload; timeout, secrets,
+                                      headers = [collect(headers); conditions])
+            if vres.status == 304 # Not Modified: refresh the stored headers (§4.3.4)
+                @debug S"{inverse,magenta,bold: CACHE } stale entry is still valid" _file=nothing
+                updates = filter(((k, _),) -> k ∉ CACHE_BODY_HEADERS, vres.headers)
+                kept = filter(((k, _),) -> !any(u -> first(u) == k, updates), res.headers)
+                body = IOBuffer(read(io))
+                close(io)
+                return Downloads.Response(res.proto, res.url, res.status, res.message,
+                                          vcat(kept, updates)), body, false
             end
-        end
-        if length(mheaders) == length(headers)
-            mtime = Dates.format(unix2datetime(ctime(cfile)), HTTP_DATE_FORMAT)
-            push!(mheaders, "if-modified-since" => mtime)
-        end
-        eres, buf = http_request(method, url, payload; headers=mheaders, timeout, secrets)
-        if eres.status == 304 # RFC 9110 §15.4.5: Not Modified — cached response still valid
-            close(buf)
-            @debug S"{inverse,magenta,bold: CACHE } stale entry is valid"
-            fperm = filemode(cfile)
-            chmod(cfile, fperm | 0o200)
-            setexpiry(cfile, trunc(Int, time()))
-            chmod(cfile, fperm)
-            res, io, true
-        else
             close(io)
-            res, buf, false
+            return vres, vbuf, false
         end
-    else
-        @goto freshreq
+        close(io)
     end
-    @label freshreq
     res, buf = http_request(method, url, payload; headers, timeout, secrets)
     res, buf, false
 end
 
-function cachesave(req::Request, url::String, method::String, headers, payload, res::Downloads.Response, body::IO)
-    cachetime = cachelifetime(req, res)
-    etime = if isnothing(cachetime)
-        expirytime(res.headers)
-    elseif cachetime isa DateTime
-        datetime2unix(cachetime)
-    else
-        trunc(Int, time()) + cachetime
-    end
-    iszero(etime) && return
-    cdir = cachedir()
-    isdir(cdir) || mkpath(cdir)
-    cfile = joinpath(cdir, cachekey(url, method, headers, payload) * ".http")
-    open(io -> dumpresponse(io, res, body), cfile, "w")
-    setexpiry(cfile, etime)
-    chmod(cfile, 0o100444 & filemode(cfile)) # Make read-only
-    nothing
-end
 
 
 # Cleanup
@@ -311,14 +316,14 @@ const CLEANUP_BLOCK_MAX_SIZE = 100
 """
     cleancache()
 
-Remove some of the files under `cachedir()` that have expired.
+Remove some of the files under `cachedir()` that are past retention (or unreadable).
 
-Statistically, this will eventually remove all expired files.
+Statistically, this will eventually remove all such files.
 """
 function cleancache()
     cdir = cachedir()
     isdir(cdir) || return
-    cachefiles = readdir(cdir, join=true)
+    cachefiles = filter!(endswith(".http"), readdir(cdir, join=true))
     isempty(cachefiles) && return
     for i in eachindex(cachefiles)
         j = rand(i:length(cachefiles))
@@ -326,12 +331,15 @@ function cleancache()
     end
     bsize = clamp(length(cachefiles) ÷ 6, 1, CLEANUP_BLOCK_MAX_SIZE)
     strike = false
-    cleantime = trunc(Int, time()) - CACHE_STALE_DURATION
+    now = trunc(Int, time())
     for block in Iterators.partition(cachefiles, bsize)
         nexpired = 0
         for cfile in block
-            if expirytime(cfile) < cleantime
-                rm(cfile)
+            io = openifexists(cfile)
+            isnothing(io) && continue
+            stamp = try readcachestamp(io) finally close(io) end
+            if isnothing(stamp) || last(stamp) < now
+                rm(cfile; force = true)
                 nexpired += 1
             end
         end
