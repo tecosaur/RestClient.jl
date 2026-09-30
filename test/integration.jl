@@ -64,6 +64,11 @@ module IntegrationClient
     @endpoint nostore() -> "nostore" -> Item
     @endpoint errored() -> "error" -> Item
     @endpoint missing_() -> "notfound" -> Item
+    @endpoint forbidden() -> "forbidden" -> Item
+    @endpoint forbidden_limited() -> "forbidden/limited" -> Item
+    @endpoint always429() -> "always429" -> Item
+    @endpoint long_limited() -> "ratelimited/long" -> Item
+    @endpoint upload_limited(; item::Item) -> item -> "echo/limited" -> Echoed
     @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
     @endpoint text() -> "text" -> String
     @endpoint number() -> "number" -> Int
@@ -366,6 +371,44 @@ end
         @test item.id == 1
         @test state.ratelimit_hits == 1
         @test state.requests == 2            # 429 + successful retry
+    end
+end
+
+@testset "rate limiting is recognised, and bounded" begin
+    @testset "a plain 403 is an error, not a rate limit" begin
+        with_server() do baseurl, state
+            @test_throws RestClient.ResponseError IC.forbidden(cfg(baseurl))
+            @test state.requests == 1
+        end
+    end
+    @testset "a 403 with exhausted rate-limit headers is retried" begin
+        with_server() do baseurl, state
+            @test IC.forbidden_limited(cfg(baseurl)).id == 1
+            @test state.requests == 2
+        end
+    end
+    @testset "retries stop after RATELIMIT_MAX_ATTEMPTS" begin
+        with_server() do baseurl, state
+            err = try IC.always429(cfg(baseurl)) catch e; e end
+            @test err isa RestClient.ResponseError
+            @test err.response.status == 429
+            @test state.requests == RestClient.RATELIMIT_MAX_ATTEMPTS
+        end
+    end
+    @testset "a wait beyond the timeout isn't made" begin
+        with_server() do baseurl, state
+            t = @elapsed err = try IC.long_limited(cfg(baseurl; timeout = 5)) catch e; e end
+            @test err isa RestClient.ResponseError && err.response.status == 429
+            @test t < 5
+            @test state.requests == 1
+        end
+    end
+    @testset "a retry resends the whole payload" begin
+        with_server() do baseurl, state
+            resp = IC.upload_limited(cfg(baseurl), item = IC.Item("again", 2))
+            @test JSON3.read(resp.body, IC.Item) == IC.Item("again", 2)
+            @test state.requests == 2
+        end
     end
 end
 

@@ -28,6 +28,14 @@ String escape sequence to clear the current line in a terminal.
 const ANSI_CLEAR_LINE = "\e[A\e[2K"
 
 """
+    RATELIMIT_MAX_ATTEMPTS
+
+How many times a rate-limited request is attempted before giving up.
+"""
+const RATELIMIT_MAX_ATTEMPTS = 5
+
+
+"""
     encode_uri_component(io::IO, str::AbstractString)
 
 Encode `str` according to RFC3986 Section 2, writing the result to `io`.
@@ -114,26 +122,32 @@ function mimeheaders(req::Request, in::Type)
 end
 
 """
-    catch_ratelimit(f::Function, gate::RateGate, args...; kwargs...)
+    catch_ratelimit(f::Function, gate::RateGate, args...; maxwait::Real = Inf, kwargs...)
 
-Call `f(args...; kwargs...)`, handling rate-limit headers appropriately.
+Call `f(args...; kwargs...)`, retrying while the response is rate-limited: a
+429, or a 403 with rate-limit headers (see [`retrydelay`](@ref)).
 
-The first value returned by `f` must be a `Downloads.Response` object.
-
-If the request is rate-limited, this function will wait until the rate limit
-is reset before retrying the request. Concurrent calls sharing `gate` observe
-a single shared backoff: only one task sleeps, the rest wait on the deadline
-held by the gate (see [`RateGate`](@ref)).
+`f` must return a `Downloads.Response`, optionally followed by its body (closed
+when a retry discards it). Retries wait the delay the headers ask for, or back
+off exponentially, up to `RATELIMIT_MAX_ATTEMPTS` attempts; a wait longer than
+`maxwait` seconds isn't made, returning the rate-limited response at once. Calls
+sharing `gate` share one backoff (see [`RateGate`](@ref)).
 """
-function catch_ratelimit(f::F, gate::RateGate, args...; kwargs...) where {F <: Function}
+function catch_ratelimit(f::F, gate::RateGate, args...; maxwait::Real = Inf, kwargs...) where {F <: Function}
+    attempt = 1
     while true
         while (@atomic gate.nextallowed) - time() > 0
             lock(gate.lock) # block until the in-progress backoff releases
             unlock(gate.lock)
         end
         res, rest... = f(args...; kwargs...)
-        res.status ∉ (403, 429) && return res, rest...
-        backoff!(gate, retrydelay(res.headers))
+        delay = retrydelay(res.headers)
+        islimited = res.status == 429 || (res.status == 403 && !isnothing(delay))
+        wait = something(delay, 2^(attempt - 1))
+        islimited && attempt < RATELIMIT_MAX_ATTEMPTS && wait <= maxwait || return res, rest...
+        isempty(rest) || close(first(rest))
+        backoff!(gate, wait)
+        attempt += 1
     end
 end
 
@@ -166,23 +180,18 @@ function alert_sleep(delay::Real)
 end
 
 """
-    retrydelay(headers::Vector{Pair{String, String}}) -> Int
+    retrydelay(headers::Vector{Pair{String, String}}) -> Union{Int, Nothing}
 
-Examine `headers` to find how many seconds should be waited before retrying a request.
+Examine `headers` to find how many seconds should be waited before retrying a
+rate-limited request, or `nothing` if they carry no rate-limit information.
 
 Checks (in order):
 - `Retry-After`: which may be a timestamp or seconds delta
-- `X-RateLimit-Remaining`: if not zero, no delay is needed
+- `X-RateLimit-Remaining`: if not zero, the limit is not exhausted (`nothing`)
 - `X-RateLimit-Reset`: which may be a timestamp, seconds delta, or unix time
 """
 function retrydelay(headers::Vector{Pair{String, String}})
-    function listsearch(hs::Vector{Pair{String, String}}, key::String, default::String = "")
-        for (hkey, val) in hs
-            key == hkey && return val
-        end
-        default
-    end
-    retryafter = listsearch(headers, "retry-after", "")
+    retryafter = getheader(headers, "retry-after")
     if isempty(retryafter)
     elseif all(isdigit, retryafter)
         delay = tryparse(Int, retryafter)
@@ -192,9 +201,9 @@ function retrydelay(headers::Vector{Pair{String, String}})
         isnothing(resettime) ||
             return max(0, ceil(Int, datetime2unix(resettime) - time()))
     end
-    ratelimit = something(tryparse(Int, listsearch(headers, "x-ratelimit-remaining", "0")), 0)
-    ratelimit == 0 || return 0
-    xreset = listsearch(headers, "x-ratelimit-reset", "")
+    something(tryparse(Int, getheader(headers, "x-ratelimit-remaining")), 0) == 0 ||
+        return nothing
+    xreset = getheader(headers, "x-ratelimit-reset")
     if isempty(xreset)
     elseif all(isdigit, xreset)
         resetsec = tryparse(Int, xreset)
@@ -208,7 +217,15 @@ function retrydelay(headers::Vector{Pair{String, String}})
         resettime = tryparse(DateTime, xreset, HTTP_DATE_FORMAT)
         isnothing(resettime) || return max(0, ceil(Int, datetime2unix(resettime) - time()))
     end
-    0
+    nothing
+end
+
+# The first header called `name` (received headers are lowercased by Downloads)
+function getheader(headers, name::String, default::String = "")
+    for (key, val) in headers
+        key == name && return val
+    end
+    default
 end
 
 
@@ -278,13 +295,11 @@ end
 function handle_response(req::Request, res::Downloads.Response, body::IO)
     dtype = responsetype(req.endpoint)
     data = if dtype !== Nothing
-        fmt = dataformat(req.endpoint, dtype)
-        bytes = read(body)
-        close(body)
-        interpretresponse(bytes, fmt, dtype)
+        interpretresponse(read(body), dataformat(req.endpoint, dtype), dtype)
     end
     postprocess(res, req, data)
 end
+
 
 
 # HTTP method implementations
@@ -327,12 +342,26 @@ function format_payload(endpoint::AbstractEndpoint, payload)
     seekstart(buf)
 end
 
-function cached_request(req::Request, method::String, payload)
-    pldtype, pldio = if isnothing(payload)
-        Nothing, nothing
-    else
-        typeof(payload), format_payload(req.endpoint, payload)
+# A thunk yielding `pldio` for each (re)send of a request, rewound to its start
+# (a rate-limit retry resends the whole payload)
+function resendable(pldio::Union{IO, Nothing})
+    isnothing(pldio) && return Returns(nothing)
+    start = if applicable(position, pldio) position(pldio) end
+    issent = false
+    function ()
+        if issent
+            isnothing(start) &&
+                throw(ArgumentError("Cannot resend a request payload read from a non-seekable \
+                                     $(typeof(pldio)) (to retry after rate limiting); provide \
+                                     the payload as bytes or a seekable IO instead"))
+            seek(pldio, start)
+        end
+        issent = true
+        pldio
     end
+end
+
+function cached_request(req::Request, method::String, pldtype::Type, pldio::Union{IO, Nothing})
     rurl, headers = url(req), mimeheaders(req, pldtype)
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
         method ∈ ("GET", "HEAD") # RFC 9111 §3: only GET/HEAD are cacheable
@@ -367,32 +396,31 @@ function check_validation(req::Request)
     nothing
 end
 
-function bare_request(req::Request, method::String)
+function payload_request(req::Request, method::String, pld)
     check_validation(req)
-    res, body = catch_ratelimit(
-        cached_request, req.config.rategate, req, method, nothing)
-    res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
-    handle_response(req, res, body)
+    nextpayload = resendable(format_payload(req.endpoint, pld))
+    res, body = catch_ratelimit(req.config.rategate; maxwait = req.config.timeout) do
+        cached_request(req, method, typeof(pld), nextpayload())
+    end
+    try
+        res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
+        handle_response(req, res, body)
+    finally
+        close(body)
+    end
 end
 
-function payload_request(req::Request, method::String)
-    check_validation(req)
-    res, body = catch_ratelimit(
-        cached_request, req.config.rategate, req, method, payload(req))
-    res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
-    handle_response(req, res, body)
-end
 
 
 # Specific HTTP methods
 
-perform(req::Request{:get}) = bare_request(req, "GET")
-perform(req::Request{:options}) = bare_request(req, "OPTIONS")
+perform(req::Request{:get}) = payload_request(req, "GET", nothing)
+perform(req::Request{:options}) = payload_request(req, "OPTIONS", nothing)
 
-perform(req::Request{:post}) = payload_request(req, "POST")
-perform(req::Request{:put}) = payload_request(req, "PUT")
-perform(req::Request{:patch}) = payload_request(req, "PATCH")
-perform(req::Request{:delete}) = payload_request(req, "DELETE")
+perform(req::Request{:post}) = payload_request(req, "POST", payload(req))
+perform(req::Request{:put}) = payload_request(req, "PUT", payload(req))
+perform(req::Request{:patch}) = payload_request(req, "PATCH", payload(req))
+perform(req::Request{:delete}) = payload_request(req, "DELETE", payload(req))
 
 function perform(req::Request{:head})
     check_validation(req)
@@ -404,6 +432,7 @@ function perform(req::Request{:head})
     end
     res, = catch_ratelimit(
         head_request, req.config.rategate, url(req);
+        maxwait=req.config.timeout,
         headers=headers(req),
         timeout=req.config.timeout)
     postprocess(res, req, res.status ∈ 200:299)

@@ -243,12 +243,11 @@ end
 function stream_request(req::Request, method::String)
     check_validation(req)
     pld = payload(req)
-    pldio = format_payload(req.endpoint, pld)
-    pldtype = if isnothing(pld); Nothing else typeof(pld) end
-    rurl, hdrs = url(req), mimeheaders(req, pldtype)
-    res, body, transfer = catch_ratelimit(
-        open_stream, req.config.rategate, method, rurl, pldio;
-        headers = hdrs, timeout = req.config.timeout)
+    nextpayload = resendable(format_payload(req.endpoint, pld))
+    rurl, hdrs = url(req), mimeheaders(req, typeof(pld))
+    res, body, transfer = catch_ratelimit(req.config.rategate; maxwait = req.config.timeout) do
+        open_stream(method, rurl, nextpayload(); headers = hdrs, timeout = req.config.timeout)
+    end
     res.status ∈ 200:299 || throw(ResponseError(req, res, read(body)))
     dtype = responsetype(req.endpoint)
     fmt = dataformat(req.endpoint, dtype)
