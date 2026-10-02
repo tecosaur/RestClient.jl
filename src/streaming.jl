@@ -245,7 +245,7 @@ function open_stream(req::Request, out::Outgoing)
     transfer = Threads.@spawn try
         result = curlrequest(out.url, options; out.method, out.headers, input = payloadio(out),
                              output = gate, throw = false)
-        if result isa Downloads.RequestError transfererror(result, options.watchdog) else result end
+        if result isa Downloads.RequestError transfererror(req, result, options.watchdog) else result end
     finally
         close(bs)
         put!(gate.signal, :done)

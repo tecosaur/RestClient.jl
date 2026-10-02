@@ -50,6 +50,10 @@ const REJECTED = Ref{Any}(nothing)
 RestClient.postprocess(::RestClient.Request{<:Any, RejectedEndpoint}, s::Stream) =
     (REJECTED[] = s; error("rejected"))
 
+@endpoint keyedchat() -> "sse" -> Stream{Tok}
+RestClient.authscheme(::KeyedchatEndpoint) = QueryAuth("api_key")
+RestClient.authpolicy(::KeyedchatEndpoint) = :required
+
 function run(base)
     cfg = RequestConfig(base)
     @testset "supertype inference" begin
@@ -112,6 +116,12 @@ function run(base)
         @test err isa RestClient.ResponseError
         @test err.response.status == 500
         @test err.body == codeunits("boom")
+    end
+    @testset "transport error" begin
+        # Nothing listens on port 1, so the request fails before any response
+        err = try keyedchat(RequestConfig("http://127.0.0.1:1"; key = "topsecret")) catch e; e end
+        @test err isa RestClient.Downloads.RequestError
+        @test !occursin("topsecret", sprint(showerror, err))
     end
     @testset "failed postprocess closes" begin
         @test_throws ErrorException rejected(cfg)

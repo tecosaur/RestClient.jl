@@ -403,6 +403,12 @@ end
             @test !occursin("topsecret", limited)
             @test occursin("*****", limited)
         end
+        @testset "transport errors" begin
+            # Nothing listens on port 1, so the request fails before any response
+            err = try IC.queryauth(cfg("http://127.0.0.1:1"; key = "topsecret")) catch e; e end
+            @test err isa RestClient.Downloads.RequestError
+            @test !occursin("topsecret", sprint(showerror, err))
+        end
     end
     @testset "module default" begin
         @testset "inherited" begin

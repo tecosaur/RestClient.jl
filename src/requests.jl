@@ -321,13 +321,19 @@ end
 redactsecrets(res::Downloads.Response, secrets::NamedTuple) =
     Downloads.Response(res.proto, redactsecrets(res.url, secrets), res.status, res.message, res.headers)
 
-# A transport failure's error as callers see it: an abort by `watchdog` is reported as
-# curl reports its own timeouts
-function transfererror(err::Downloads.RequestError, watchdog::Watchdog)
-    watchdog.fired || return err
-    Downloads.RequestError(err.url, Downloads.Curl.CURLE_OPERATION_TIMEDOUT,
-                           "No data received for $(watchdog.limit) seconds; if the API is slow \
-                            to respond, raise the `timeout` of its RequestConfig", err.response)
+# A transport failure's error as callers see it: `req`'s auth secrets removed from its
+# URLs, and an abort by `watchdog` reported as curl reports its own timeouts
+function transfererror(req::Request, err::Downloads.RequestError, watchdog::Watchdog)
+    secrets = authsecrets(req)
+    code, reason = if watchdog.fired
+        Downloads.Curl.CURLE_OPERATION_TIMEDOUT,
+        "No data received for $(watchdog.limit) seconds; if the API is slow to respond, \
+         raise the `timeout` of its RequestConfig"
+    else
+        err.code, err.message
+    end
+    Downloads.RequestError(redactsecrets(err.url, secrets), code, reason,
+                           redactsecrets(err.response, secrets))
 end
 
 const DEBUG_DIR = Ref("")
@@ -480,7 +486,7 @@ function http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, 
     options = TransferOptions(Watchdog(timeout; atleast = DEFAULT_IDLE_SECONDS), nothing)
     res = curlrequest(out.url, options; out.method, output = buf, input, headers, timeout,
                       throw = false)
-    res isa Downloads.RequestError && throw(transfererror(res, options.watchdog))
+    res isa Downloads.RequestError && throw(transfererror(req, res, options.watchdog))
     seekstart(buf)
     @debug debug_response(out.url, res, buf; secrets = authsecrets(req)) _file=nothing
     Incoming(res, buf)

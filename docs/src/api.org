@@ -40,7 +40,8 @@ A failed [[@ref][~perform~]] raises one of these. A request that does not valida
 a [[@ref][~MalformedRequest~]] before anything is sent; an unsuccessful HTTP status raises
 a [[@ref][~ResponseError~]] carrying the server's response body. A transport failure (DNS,
 connection refused, TLS, exceeding the total ~timeout~, or going silent for too long)
-surfaces as a =Downloads.RequestError=; both kinds of timeout carry curl's timeout code, 28.
+surfaces as a =Downloads.RequestError=, with any auth secrets hidden from its URL; both
+kinds of timeout carry curl's timeout code, 28.
 
 #+begin_src @docs
 ResponseError
