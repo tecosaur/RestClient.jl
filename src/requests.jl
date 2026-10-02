@@ -180,9 +180,8 @@ function catch_ratelimit(send::F, gate::RateGate; isretryable::Bool = true,
                          maxwait::Real = Inf) where {F <: Function}
     attempt = 1
     while true
-        while (@atomic gate.nextallowed) - time() > 0
-            lock(gate.lock) # block until the in-progress backoff releases
-            unlock(gate.lock)
+        while (remaining = (@atomic gate.nextallowed) - time()) > 0
+            sleep(remaining)
         end
         deadline = @atomic gate.nextallowed
         incoming = send()::Incoming
@@ -198,19 +197,12 @@ function catch_ratelimit(send::F, gate::RateGate; isretryable::Bool = true,
     end
 end
 
-# Skip the wait when another task has backed off since `deadline` was read before sending
+# Move the gate's deadline, unless another task has done so since `deadline` was read
+# before sending; either way, the next attempt waits out the gate
 function backoff!(gate::RateGate, delay::Real, deadline::Float64)
-    @lock gate.lock begin
-        (@atomic gate.nextallowed) == deadline || return
-        @atomic gate.nextallowed = time() + delay
-        if delay <= 0
-            sleep(0.1)
-        elseif isinteractive()
-            @noinline alert_sleep(delay)
-        else
-            sleep(delay)
-        end
-    end
+    _, claimed = @atomicreplace gate.nextallowed deadline => time() + max(delay, 0.1)
+    claimed && delay > 0 && isinteractive() && @noinline alert_sleep(delay)
+    nothing
 end
 
 function alert_sleep(delay::Real)

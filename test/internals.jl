@@ -139,6 +139,21 @@ end
                                  "x-ratelimit-reset" => "999")) == 10
         end
     end
+    @testset "waiting out a deadline" begin
+        gate = RestClient.RateGate()
+        @atomic gate.nextallowed = time() + 1      # as an interrupted backoff leaves it
+        ticks = Ref(0)
+        ticker = @async while time() < gate.nextallowed
+            ticks[] += 1
+            sleep(0.05)
+        end
+        waited = @elapsed RestClient.catch_ratelimit(gate) do
+            RestClient.Incoming(sample_response(), IOBuffer())
+        end
+        wait(ticker)
+        @test waited >= 0.9
+        @test ticks[] > 5                          # the wait yields, rather than spinning
+    end
     @testset "payload resending" begin
         prepare(value) = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), PayloadEP(value)))
         send(out) = read(RestClient.payloadio(out), String)

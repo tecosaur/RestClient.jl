@@ -187,25 +187,25 @@ end
 """
     RateGate
 
-Per-config coordination point for rate-limit backoff.
+The rate-limit backoff shared by every request with the same config.
 
-`nextallowed` is a shared deadline (a `time()` value, `0.0` when open) read
-atomically on the request fast path. When ratelimiting occurs, concurrent
-requests can share a single backoff, coordinated by the lock.
+`nextallowed` is the deadline (a `time()` value, `0.0` when open) that requests
+wait out before sending. The first rate-limited request moves it, and any others
+limited at the same time wait for that same deadline rather than adding their own.
 """
 mutable struct RateGate
-    const lock::ReentrantLock
     @atomic nextallowed::Float64
 end
 
-RateGate() = RateGate(ReentrantLock(), 0.0)
+RateGate() = RateGate(0.0)
 
 """
     RequestConfig
 
 The general configuration for a request to the API, not tied to any specific endpoint.
 
-At a minimum, this holds the base URL of the API and a lock for handling rate-limiting.
+At a minimum, this holds the base URL of the API, and the rate-limit state its
+requests share.
 
 Other fields are optional, but may be useful for changing the way requests are
 performed or handling authentication. The following additional fields can be
