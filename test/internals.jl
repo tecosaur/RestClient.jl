@@ -327,6 +327,23 @@ end
     end
 end
 
+@testset "API macros" begin
+    @eval module ImportAPIClient
+        using RestClient
+        RestClient.@importapi
+        RestClient.@reexport
+        struct ThingEndpoint <: AbstractEndpoint end
+        urlpath(::ThingEndpoint) = "thing"            # extends RestClient's, unqualified
+        isstreamend(::ThingEndpoint, _) = true
+        struct PinAuth <: AuthScheme end
+        authheaders(::PinAuth, key::String) = "X-Pin" => key
+    end
+    @test RestClient.urlpath(ImportAPIClient.ThingEndpoint()) == "thing"
+    @test RestClient.isstreamend(ImportAPIClient.ThingEndpoint(), nothing)
+    @test RestClient.authheaders(ImportAPIClient.PinAuth(), "k") == ("X-Pin" => "k")
+    @test [:Single, :List, :nextpage] ⊆ names(ImportAPIClient)
+end
+
 @testset "requests" begin
     @testset "path with a query" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())

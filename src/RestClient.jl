@@ -29,9 +29,11 @@ include("utilities.jl")
 include("endpoint.jl")
 
 macro importapi()
-    :(import $(__module__): urlpath, parameters, responsetype,
-      validate, postprocess, thispagenumber, nextpage, remainingpages,
-      contents, metadata) |> esc
+    api = (:urlpath, :headers, :parameters, :payload, :validate, :responsetype,
+           :dataformat, :mimetype, :interpretresponse, :writepayload, :postprocess,
+           :contents, :metadata, :thispagenumber, :nextpage, :remainingpages,
+           :authscheme, :authpolicy, :authheaders, :authparams, :isstreamend, :cachelifetime)
+    Expr(:import, Expr(:(:), Expr(:., fullname(@__MODULE__)...), (Expr(:., name) for name in api)...)) |> esc
 end
 
 macro reexport()
