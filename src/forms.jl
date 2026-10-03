@@ -31,22 +31,16 @@ mimetype(::Type{MultipartFormat}) = MULTIPART_MIME
 # RFC 3986 percent-encoding (via `encode_uri_component`) is universally
 # accepted; we don't bother with the legacy `+`-for-space substitution.
 function writepayload(io::IO, ::FormFormat, data)
-    fields = (name => getproperty(data, name) for name in propertynames(data))
-    print(io, url_parameters(form_key(typeof(data), name) => string(val)
-                             for (name, val) in fields if !isnothing(val)))
+    print(io, url_parameters(querypairs(form_key(typeof(data), name) => getproperty(data, name)
+                                        for name in propertynames(data))))
 end
 
 const MultipartBinary = Union{AbstractVector{UInt8}, IO}
 
-# Each property becomes one MIME part: a boundary, headers, then the value written
-# in its own `dataformat`. Binary values are sent as files, named after their field,
-# and other values without a format as their text (as in a URL-encoded form).
+# Binary values are sent as files named after their field, and other values without a
+# format as their text (as in a URL-encoded form), one part per element of a collection
 function writepayload(io::IO, ::MultipartFormat, data)
-    for name in propertynames(data)
-        val = getproperty(data, name)
-        isnothing(val) && continue
-        # Percent-encode what would break the quoted name (RFC 7578 §4.2)
-        fieldname = replace(form_key(typeof(data), name), '"' => "%22", '\r' => "%0D", '\n' => "%0A")
+    function writepart(fieldname::String, val)
         fmt = dataformat(typeof(val))
         fmt isa RawFormat && !(val isa MultipartBinary) && (val = string(val))
         mime = payloadmime(fmt, typeof(val))
@@ -57,6 +51,15 @@ function writepayload(io::IO, ::MultipartFormat, data)
         print(io, "\r\n\r\n")
         writepayload(io, fmt, val)
         print(io, "\r\n")
+    end
+    for name in propertynames(data)
+        val = getproperty(data, name)
+        # Percent-encode what would break the quoted name (RFC 7578 §4.2)
+        fieldname = replace(form_key(typeof(data), name), '"' => "%22", '\r' => "%0D", '\n' => "%0A")
+        issplit = val isa MultiValue && !(val isa MultipartBinary) && dataformat(typeof(val)) isa RawFormat
+        for part in (if issplit val else (val,) end)
+            isnothing(part) || writepart(fieldname, part)
+        end
     end
     print(io, "--", MULTIPART_BOUNDARY, "--\r\n")
 end
@@ -76,7 +79,8 @@ form_key(::Type, name::Symbol) = string(name)
 Define a struct that serialises as [`FormFormat`](@ref). Supports the
 `name."form_key"::Type` syntax for remapping a field's form name. A field typed
 `Union{…, Nothing}` defaults to `nothing`, and is left out of the form when
-`nothing`.
+`nothing`. A collection (a `Vector`, `Tuple`, or `Set`) is sent as one field per
+element, as in `tags=a&tags=b`.
 
 # Example
 ```julia
@@ -97,8 +101,10 @@ end
 Define a struct that serialises as [`MultipartFormat`](@ref). Each field is
 encoded with its type's own [`dataformat`](@ref): `@jsondef` fields become
 JSON parts, `Vector{UInt8}` / `IO` fields become octet-stream parts, others
-become text parts. As with [`@formdef`](@ref), a field typed `Union{…, Nothing}`
-defaults to `nothing`, and is left out when `nothing`.
+become text parts. A collection without a format of its own, such as a
+`Vector{String}` or a `Vector{Vector{UInt8}}`, is sent as one part per element
+under the field's name. As with [`@formdef`](@ref), a field typed
+`Union{…, Nothing}` defaults to `nothing`, and is left out when `nothing`.
 
 # Example
 ```julia

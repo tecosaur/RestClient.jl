@@ -171,10 +171,10 @@ global variables) by surrounding them with curly braces.
 "page/{somefield}?param={another}&{globalvar}=7"
 ```
 
-Parameters with a value of `nothing` are omitted from the query string, and a
-component without a value (`?verbose`) is sent as written. Other values are
-converted with `string`, so to send a collection (say, a `Vector` as repeated
-keys), define a [`parameters`](@ref) method instead.
+Parameters with a value of `nothing` are omitted from the query string, a
+collection (a `Vector`, `Tuple`, or `Set`) is sent as one parameter per element
+(`?tag=a&tag=b`), and other values are converted with `string`. A component
+without a value (`?verbose`) is sent as written.
 
 For convenience, a parameter by the same name as the field can be referred to by
 the field name alone (e.g. `?{var}` instead of `?var={var}`).
@@ -303,13 +303,8 @@ macro endpoint(args...)
         varform(einfo.url; varcontext...), nothing
     end
     push!(body, methoddef(:urlpath, path))
-    if !isnothing(params)
-        paramvec = Expr(:vect, params...)
-        finalparam = :($(Vector{Pair{String, String}})(
-            $filter($(!isnothing), $(Vector{Union{Pair{String, String}, Nothing}})(
-                $paramvec))))
-        push!(body, methoddef(:parameters, finalparam))
-    end
+    isnothing(params) ||
+        push!(body, methoddef(:parameters, :($querypairs($(Expr(:tuple, params...))))))
     push!(body, methoddef(:responsetype, einfo.out; withconfig = false))
     # Authentication: only a marker's policy; defaults are looked up at runtime
     isnothing(einfo.authpolicy) ||
@@ -623,21 +618,17 @@ function parse_endpoint_url(url::String; kwargs...)
     isnothing(query) && return interp_curlies(String(path); ispath=true, kwargs...), nothing
     components = split_template(query, '&')
     parameters, flags = Expr[], String[]
-    function mkparam(key, val)
-        valvar = gensym("val")
-        :(let $valvar = $val; if !isnothing($valvar); $string($key) => $string($valvar) end end)
-    end
     for comp in components
         keyvalue = split_template(comp, '='; limit = 2)
         if length(keyvalue) == 2
             keyex, valex = interp_curlies(first(keyvalue); kwargs...), interp_curlies(last(keyvalue); kwargs...)
-            push!(parameters, mkparam(keyex, valex))
+            push!(parameters, :($keyex => $valex))
         elseif startswith(comp, '{') && endswith(comp, '}')
             # `{name}` is short for `name={name}`
             name = Meta.parse(comp)
             Meta.isexpr(name, :braces, 1) && only(name.args) isa Symbol ||
                 throw(ArgumentError("Invalid query component $comp"))
-            push!(parameters, mkparam(String(only(name.args)), interp_curlies(comp; kwargs...)))
+            push!(parameters, :($(String(only(name.args))) => $(interp_curlies(comp; kwargs...))))
         elseif !isempty(comp) && (flag = interp_curlies(comp; kwargs...)) isa String
             push!(flags, encode_uri_component(flag))
         else

@@ -109,10 +109,19 @@ module FieldSyntax
         n::Int
         PositiveJSON(n) = if n > 0 new(n) else throw(ArgumentError("n must be positive")) end
     end
+    @multipartdef struct CollectionParts
+        tags::Vector{Union{String, Nothing}} = String[]
+        files::Vector{Vector{UInt8}} = Vector{UInt8}[]
+        derived::Vector{Derived} = Derived[]
+    end
 end
 RestClient.@formdef struct OptionalForm
     a::Union{Int, Nothing} = nothing
     b::Union{String, Nothing} = nothing
+end
+RestClient.@formdef struct TaggedForm
+    tags::Vector{Union{String, Nothing}} = String[]
+    pair::Tuple{Int, Int} = (1, 2)
 end
 
 struct OneContent <: SingleResponse{Int}
@@ -409,6 +418,7 @@ end
             @endpoint globals(q::String) -> "s?v={VERSION_TAG}&{KEYNAME}={q}&{N + 0}=n" -> String
             @endpoint literals() -> "s?n={3}&f={true}&c={'c'}&{1}=one" -> String
             @endpoint flag(q::Union{String, Nothing}) -> "s?verbose&{q}" -> String
+            @endpoint tagged(tags::Vector{String}) -> "s?tag={tags}&{tags}" -> String
         end
         urlof(endpoint) = RestClient.url(RestClient.Request{:get}(RequestConfig("http://x"), endpoint))
         @test urlof(URLClient.OpEndpoint(true, 1)) == "http://x/page/a?x=true&a=1"
@@ -418,6 +428,8 @@ end
         @test urlof(URLClient.LiteralsEndpoint()) == "http://x/s?n=3&f=true&c=c&1=one"
         @test urlof(URLClient.FlagEndpoint("a b")) == "http://x/s?verbose&q=a%20b"
         @test urlof(URLClient.FlagEndpoint(nothing)) == "http://x/s?verbose"
+        @test urlof(URLClient.TaggedEndpoint(["a", "b c"])) == "http://x/s?tag=a&tag=b%20c&tags=a&tags=b%20c"
+        @test urlof(URLClient.TaggedEndpoint(String[])) == "http://x/s"
         @test RestClient.decode_uri_component("a%C3%A9%2x%") == "aé%2x%"
         @test RestClient.split_template("a?b=c\\", '?') == ["a", "b=c\\"]   # trailing `\` is literal
         @test RestClient.split_template("a\\", '&') == ["a\\"]
@@ -774,6 +786,8 @@ end
         @test formbody(OptionalForm()) == ""
         @test formbody(OptionalForm(b = "x y&z")) == "b=x%20y%26z"
         @test formbody(OptionalForm(a = 1, b = "")) == "a=1&b="
+        @test formbody(TaggedForm(tags = ["a", nothing, "b"])) == "tags=a&tags=b&pair=1&pair=2"
+        @test formbody(TaggedForm()) == "pair=1&pair=2"
     end
     @testset "multipart names" begin
         body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), OddNames(a = "v"))
@@ -782,6 +796,20 @@ end
     @testset "multipart plain values" begin
         body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), DatedParts(day = Date(2026, 1, 2)))
         @test occursin("name=\"day\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n2026-01-02\r\n", body)
+    end
+    @testset "multipart collections" begin
+        parts(form) = sprint(RestClient.writepayload, RestClient.MultipartFormat(), form)
+        textpart(name, value) = "name=\"$name\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n$value\r\n"
+        body = parts(FieldSyntax.CollectionParts(tags = ["a", nothing, "b"]))
+        @test occursin(textpart("tags", "a"), body) && occursin(textpart("tags", "b"), body)
+        @test count("name=\"tags\"", body) == 2              # one part per element, `nothing` left out
+        body = parts(FieldSyntax.CollectionParts(files = [b"x", b"y"]))
+        @test count("name=\"files\"; filename=\"files\"", body) == 2
+        body = parts(FieldSyntax.CollectionParts(derived = [FieldSyntax.Derived(a = 1)]))
+        @test count("name=\"derived\"", body) == 1           # a JSON array is one part
+        @test occursin("Content-Type: application/json\r\n\r\n[{", body)
+        body = parts(FieldSyntax.CollectionParts())
+        @test !occursin("name=\"tags\"", body) && !occursin("name=\"files\"", body)   # empty: no parts
     end
 end
 

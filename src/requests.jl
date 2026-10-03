@@ -165,6 +165,17 @@ julia> url_parameters(Pair{String, String}[])
 url_parameters(params) =
     join((encode_uri_component(key) * '=' * encode_uri_component(val) for (key, val) in params), '&')
 
+const MultiValue = Union{AbstractVector, Tuple, AbstractSet}
+
+function querypairs(fields)
+    pairs = Pair{String, String}[]
+    for (key, val) in fields
+        vals = if val isa MultiValue val else (val,) end
+        append!(pairs, string(key) => string(v) for v in vals if !isnothing(v))
+    end
+    pairs
+end
+
 function url(req::Request)
     path, query = urlpath(req.config, req.endpoint)::String, url_parameters(parameters(req))
     isempty(query) && return string(req.config.baseurl, '/', path)
