@@ -203,4 +203,5 @@ end
     @test_throws Exception @macroexpand @xmldef struct Bad2
         x."a/text()/more"::String    # component after a terminal text()
     end
+    @test_throws "Malformed field" macroexpand(XMLClient, :(@xmldef struct Bad3; x.y::String; end))
 end

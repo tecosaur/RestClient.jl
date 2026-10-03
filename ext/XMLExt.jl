@@ -174,83 +174,14 @@ parsexml(::Type{Union{T, Nothing}}, x) where {T} = parsexml(T, x)
 # Construction
 
 macro xmldef(struc::Expr)
-    Meta.isexpr(struc, :struct, 3) ||
-        throw(ArgumentError("@xmldef expects a struct definition"))
-    Meta.isexpr(struc.args[3], :block) ||
-        throw(ArgumentError("@xmldef expects a block definition within the struct"))
-    fields = @NamedTuple{
-        name::Symbol,
-        xml::Union{String, Nothing},
-        type::Union{Symbol, Expr, Nothing},
-        default::Any,
-        line::LineNumberNode
-    }[]
-    # Collect information from `struc`
-    _, structdecl, structdef = struc.args
-    structlabel = if Meta.isexpr(structdecl, :(<:))
-        first(structdecl.args)
-    else structdecl end
-    structname, isparametric = if Meta.isexpr(structlabel, :curly)
-        first(structlabel.args)::Symbol, true
-    else
-        structlabel::Symbol, false
-    end
-    lastline = __source__
-    for line in structdef.args
-        if line isa LineNumberNode
-            lastline = line
-            continue
-        end
-        xml, type, default = nothing, nothing, nothing
-        if Meta.isexpr(line, :(=), 2)
-            line, default = line.args
-        end
-        if Meta.isexpr(line, :(::), 2)
-            line, type = line.args
-        end
-        if isnothing(default) && RestClient.allowsnothing(type)
-            default = :nothing
-        end
-        if Meta.isexpr(line, :(.), 2)
-            name, qxml::QuoteNode = line.args
-            xml = qxml.value
-        else
-            name = line
-        end
-        push!(fields, (name, xml, type, default, lastline))
-    end
-    # Generate the struct definition
-    body = Expr[]
-    structbody = Union{Expr, Symbol, LineNumberNode}[]
-    for (; name, type, default, line) in fields
-        push!(structbody, line,
-              if isnothing(default)
-                  if isnothing(type)
-                      name
-                  else
-                      :($name::$type)
-                  end
-              else
-                  if isnothing(type)
-                      :($name = $default)
-                  else
-                      :($name::$type = $default)
-                  end
-              end)
-    end
-    structredef = Expr(:struct, false, structdecl, Expr(:block, structbody...))
-    push!(body, esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, structredef)))
+    (; name, fields, structdef) = RestClient.parsefields(struc, __source__)
+    body = Expr[esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, structdef))]
     # Create the parse rule
-    structref = if isparametric
-        Expr(:(<:), esc(structname))
-    else
-        esc(structname)
-    end
     fieldparsers = Any[]
-    for (i, (; xml, default)) in enumerate(fields)
-        node = if !isnothing(xml)
+    for (i, (; key, default)) in enumerate(fields)
+        node = if !isnothing(key)
             ex = Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")),
-                      __source__, xml)
+                      __source__, key)
             :($(esc(ex))(node))
         else
             :node
@@ -266,13 +197,13 @@ macro xmldef(struc::Expr)
               end)
         end)
     end
-    push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{S}, node::$AbstractNode) where {S <: $(esc(structname))}
+    push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{S}, node::$AbstractNode) where {S <: $(esc(name))}
                       S isa UnionAll &&
                           throw(ArgumentError("Cannot parse XML as $S without its type parameters (e.g. $S{Int})"))
                       S($(fieldparsers...))
                   end))
     # Declare that this struct is XML formatted
-    push!(body, :($RestClient.dataformat(::Type{$structref}) = XMLFormat()))
+    push!(body, :($RestClient.dataformat(::Type{<:$(esc(name))}) = XMLFormat()))
     # Return the generated code
     Expr(:block, body...)
 end

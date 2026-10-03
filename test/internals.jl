@@ -83,6 +83,20 @@ RestClient.@formdef struct GenericForm{T}
     value."the-value"::T
 end
 RestClient.@formdef struct NoFields end
+module FieldSyntax
+    using RestClient, JSON3
+    @formdef struct Positive
+        n::Int
+        Positive(n) = if n > 0 new(n) else throw(ArgumentError("n must be positive")) end
+    end
+    @jsondef struct Derived
+        a::Int
+        b::Int = a + 1
+    end
+    @formdef struct OptionalNote
+        note::Union{String, Nothing}
+    end
+end
 RestClient.@formdef struct OptionalForm
     a::Union{Int, Nothing} = nothing
     b::Union{String, Nothing} = nothing
@@ -319,6 +333,23 @@ end
         # An expression URL needs an explicit result type.
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> "a" * x
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> "a" * x
+    end
+    @testset "field syntax" begin
+        D = FieldSyntax.Derived
+        @test sprint(show, D(a = 1)) == "$D(a=1)"               # a default may use earlier fields
+        @test sprint(show, D(a = 1, b = 5)) == "$D(a=1, b=5)"
+        @test FieldSyntax.OptionalNote().note === nothing
+        @test sprint(RestClient.writepayload, RestClient.FormFormat(), FieldSyntax.Positive(n = 2)) == "n=2"
+        @test_throws "positive" FieldSyntax.Positive(n = 0)     # inner constructors are kept
+        expand(ex) = macroexpand(FieldSyntax, ex)
+        @test_throws "Malformed field" expand(:(@jsondef struct J; x.y::Int; end))
+        @test_throws "Malformed field" expand(:(@formdef struct F; x.y::Int; end))
+        @test_throws "Malformed field" expand(:(@multipartdef struct M; x.y::Int; end))
+        @test_throws "Malformed field" expand(:(@formdef struct F; f(x)::Int; end))
+        @test_throws "cannot rename" expand(:(@endpoint struct KeyedEndpoint
+            "u" -> String
+            x."k"::Int
+        end))
     end
     @testset "template variables" begin
         vf(ex) = RestClient.varform(ex; varname = :self, localvars = [:self, :config],

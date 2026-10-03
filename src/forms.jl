@@ -74,7 +74,9 @@ form_key(::Type, name::Symbol) = string(name)
     @formdef struct ... end
 
 Define a struct that serialises as [`FormFormat`](@ref). Supports the
-`name."form_key"::Type` syntax for remapping a field's form name.
+`name."form_key"::Type` syntax for remapping a field's form name. A field typed
+`Union{…, Nothing}` defaults to `nothing`, and is left out of the form when
+`nothing`.
 
 # Example
 ```julia
@@ -95,14 +97,15 @@ end
 Define a struct that serialises as [`MultipartFormat`](@ref). Each field is
 encoded with its type's own [`dataformat`](@ref): `@jsondef` fields become
 JSON parts, `Vector{UInt8}` / `IO` fields become octet-stream parts, others
-become text parts.
+become text parts. As with [`@formdef`](@ref), a field typed `Union{…, Nothing}`
+defaults to `nothing`, and is left out when `nothing`.
 
 # Example
 ```julia
 @multipartdef struct Upload
     file::Vector{UInt8}
     metadata::Metadata    # `@jsondef struct Metadata ... end`
-    note::Union{String, Nothing} = nothing
+    note::Union{String, Nothing}
 end
 ```
 """
@@ -110,70 +113,18 @@ macro multipartdef(struc::Expr)
     formlike_expand(__source__, struc, MultipartFormat)
 end
 
-# Shared expansion for `@formdef` / `@multipartdef`. Strips `name."form_key"`
-# syntax from field declarations, then emits a `@kwdef` struct plus a
+# Shared expansion for `@formdef` / `@multipartdef`: a `@kwdef` struct plus a
 # `dataformat` method and (if any keys were remapped) a `form_key` method.
 function formlike_expand(source::LineNumberNode, struc::Expr, fmt::Type)
-    Meta.isexpr(struc, :struct, 3) ||
-        throw(ArgumentError("expected a struct definition"))
-    _, decl, body = struc.args
-    Meta.isexpr(body, :block) ||
-        throw(ArgumentError("expected a block as the struct body"))
-    structname = struct_name(decl)
-    form_keys = Tuple{Symbol, String}[]
-    fields = map(body.args) do line
-        line isa LineNumberNode && return line
-        rewritten, keypair = rewrite_field(line)
-        isnothing(keypair) || push!(form_keys, keypair)
-        rewritten
-    end
-    sname = esc(structname)
-    kwstruct = Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), source,
-                    Expr(:struct, false, decl, Expr(:block, fields...)))
-    out = Any[source, esc(kwstruct),
+    (; name, fields, structdef) = parsefields(struc, source)
+    form_keys = Tuple{Symbol, String}[(f.name, f.key) for f in fields if !isnothing(f.key)]
+    sname = esc(name)
+    out = Any[source, esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), source, structdef)),
               :(RestClient.dataformat(::Type{<:$sname}) = RestClient.$(nameof(fmt))())]
     isempty(form_keys) ||
         push!(out, :(RestClient.form_key(::Type{<:$sname}, name::Symbol) =
                      $(form_key_chain(form_keys))))
     Expr(:block, out...)
-end
-
-# Peel through `[ = default][::Type][name."form_key"]`, returning the rewritten
-# field (with the form-key syntax replaced by a bare identifier) and an
-# optional `(:field, "form_key")` pair to register.
-function rewrite_field(line)
-    default = nothing
-    field = line
-    if Meta.isexpr(field, :(=), 2)
-        field, default = field.args
-    end
-    ftype = nothing
-    if Meta.isexpr(field, :(::), 2)
-        field, ftype = field.args
-    end
-    fname, keypair = if Meta.isexpr(field, :., 2)
-        base, qkey = field.args
-        base isa Symbol && qkey isa QuoteNode && qkey.value isa AbstractString ||
-            throw(ArgumentError("malformed form-key syntax in $line"))
-        base, (base, String(qkey.value))
-    else
-        field, nothing
-    end
-    rebuilt = fname
-    isnothing(ftype) || (rebuilt = Expr(:(::), rebuilt, ftype))
-    isnothing(default) || (rebuilt = Expr(:(=), rebuilt, default))
-    rebuilt, keypair
-end
-
-# Extract a bare struct-name `Symbol` from a struct declaration, peeling
-# `<: Super` and `{T,...}` wrappers.
-struct_name(decl::Symbol) = decl
-function struct_name(decl::Expr)
-    if decl.head === :<: || decl.head === :curly
-        struct_name(decl.args[1])
-    else
-        throw(ArgumentError("could not extract struct name from $decl"))
-    end
 end
 
 # Build an `if name === :foo "foo_form" elseif ... else string(name) end`

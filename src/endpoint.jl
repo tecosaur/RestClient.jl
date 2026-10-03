@@ -533,20 +533,9 @@ function extract_forms(args::Tuple; mod::Module)
         end
     end
     if isnothing(estruct) && !isnothing(efunc)
-        fieldlines = Any[]
-        for (; name, type, default) in efields
-            fline = name
-            if !isnothing(type)
-                fline = Expr(:(::), name, type)
-            end
-            if !isnothing(default)
-                fline = Expr(:(=), fline, default)
-            end
-            push!(fieldlines, fline)
-        end
         estructname = Symbol(titlecase(String(efunc.args[1])) * "Endpoint")
         estructparams = nothing
-        estruct = Expr(:struct, false, Expr(:<:, estructname, esuper), Expr(:block, fieldlines...))
+        estruct = Expr(:struct, false, Expr(:<:, estructname, esuper), Expr(:block, map(fielddecl, efields)...))
     end
     (; func=efunc, structdef=estruct, structname=estructname, structparams=estructparams,
      fields=efields, in=ein, method=emethod, url=eurl, out=eout, authpolicy=if isnothing(marker) nothing else AUTH_MARKERS[marker] end)
@@ -586,17 +575,10 @@ function decompose_struct(strux::Expr; allowspecial::Bool = true)
         elseif line isa String # a field docstring, kept in the struct
             continue
         end
-        type, default = :Any, nothing
-        if Meta.isexpr(line, :(=), 2)
-            line, default = line.args
-        end
-        if Meta.isexpr(line, :(::), 2)
-            line, type = line.args
-        end
-        line isa Symbol ||
-            throw(ArgumentError("Malformed field $(sprint(show, line)) in @endpoint struct"))
-        name::Symbol = line
-        push!(fields, (name, type, default))
+        (; name, key, type, default) = parsefield(line)
+        isnothing(key) ||
+            throw(ArgumentError("@endpoint struct field $line cannot rename its key, only @jsondef/@xmldef/@formdef fields can"))
+        push!(fields, (name, something(type, :Any), default))
     end
     desugar = if isnothing(specialline)
         strux

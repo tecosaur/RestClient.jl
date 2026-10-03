@@ -131,6 +131,90 @@ macro globalconfig(config, opts::Expr...)
 end
 
 """
+    parsefield(line) -> (; name::Symbol, key, type, default)
+
+Parse the struct field declaration `name[."key"][::type][ = default]`, with
+`nothing` for the parts not given.
+
+Throws an `ArgumentError` when `line` is not of that form.
+"""
+function parsefield(line)
+    field, key, type, default = line, nothing, nothing, nothing
+    Meta.isexpr(field, :(=), 2) && ((field, default) = field.args)
+    Meta.isexpr(field, :(::), 2) && ((field, type) = field.args)
+    if Meta.isexpr(field, :., 2) && field.args[2] isa QuoteNode && field.args[2].value isa String
+        field, key = field.args[1], field.args[2].value
+    end
+    field isa Symbol ||
+        throw(ArgumentError("Malformed field $line, expected `name[.\"key\"][::Type][ = default]`"))
+    (; name = field, key, type, default)
+end
+
+"""
+    parsefields(struc::Expr, source::LineNumberNode; declare = fielddecl)
+        -> (; name::Symbol, fields, structdef::Expr)
+
+Parse the fields of the struct definition `struc` with [`parsefield`](@ref),
+giving those typed `Union{…, Nothing}` a default of `nothing`.
+
+`structdef` is `struc` with each field rewritten by `declare(field)`, ready for
+a `@kwdef`-like macro. Docstrings, line numbers and inner constructors in the
+body are kept.
+"""
+function parsefields(struc, source::LineNumberNode; declare = fielddecl)
+    Meta.isexpr(struc, :struct, 3) && Meta.isexpr(struc.args[3], :block) ||
+        throw(ArgumentError("Expected a struct definition, not $struc"))
+    mutable, decl, body = struc.args
+    label = if Meta.isexpr(decl, :(<:), 2) first(decl.args) else decl end
+    name = if Meta.isexpr(label, :curly) first(label.args) else label end
+    name isa Symbol || throw(ArgumentError("Malformed struct name in $decl"))
+    fields = @NamedTuple{name::Symbol, key::Union{String, Nothing}, type::Any, default::Any}[]
+    newbody = map(body.args) do line
+        line isa Union{LineNumberNode, String} && return line
+        isconstructor = Meta.isexpr(line, :function) ||
+            Meta.isexpr(line, :(=), 2) && Meta.isexpr(line.args[1], (:call, :where))
+        isconstructor && return line
+        field = parsefield(line)
+        if isnothing(field.default) && allowsnothing(field.type)
+            field = (; field..., default = :nothing)
+        end
+        push!(fields, field)
+        declare(field)
+    end
+    (; name, fields, structdef = Expr(:struct, mutable, decl, Expr(:block, newbody...)))
+end
+
+# `name[::type][ = default]`, with `tag(name[::type])` in place of the declaration
+function fielddecl((; name, type, default), tag = identity)
+    decl = tag(if isnothing(type) name else :($name::$type) end)
+    if isnothing(default) decl else Expr(:(=), decl, default) end
+end
+
+"""
+    kwshow(structname::Symbol, fields) -> Expr
+
+A `Base.show` method printing a `structname` value as `structname(field=value, …)`,
+leaving out fields equal (`===`) to their default. Defaults may refer to other
+fields, as in a `@kwdef` struct.
+"""
+function kwshow(structname::Symbol, fields)
+    showfields = map(fields) do (; name, default)
+        showfield = :(print(io, ifelse(needscomma, ", ", ""), $("$name=")); show(io, $(esc(name))); needscomma = true)
+        if isnothing(default) showfield else :($(esc(name)) === $(esc(default)) || $showfield) end
+    end
+    bindings = [:($(esc(name)) = x.$name) for (; name) in fields]
+    quote
+        function Base.show(io::IO, x::$(esc(structname)))
+            show(io, $(esc(structname)))
+            print(io, '(')
+            needscomma = false
+            $(Expr(:let, Expr(:block, bindings...), Expr(:block, showfields...)))
+            print(io, ')')
+        end
+    end
+end
+
+"""
     _jsondef_expand(::Val{backend}, source::LineNumberNode, mod::Module, option::Symbol, kind::Symbol, struc::Expr) -> Expr
 
 Expand a `@jsondef` struct definition for the given JSON `backend`
@@ -209,6 +293,7 @@ This macro conveniently combines the following pieces:
 
 Note the `name."json_field"` syntax demonstrated in the examples, that allows
 for declaration of the JSON object key that should be mapped to the field.
+A field typed `Union{…, Nothing}` defaults to `nothing`.
 
 The optional `kind` argument selects the JSON representation, defaulting
 to `Struct`. Both backends support `Struct`, `Dict`, `Array`, `Vector`,

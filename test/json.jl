@@ -129,6 +129,7 @@ end
 end
 
 @testset "errors" begin
+    @test_throws "Malformed field" macroexpand(JSONClient, :(@jsondef struct J; x.y::Int; end))
     # Number/Bool need user-defined lift/lower under JSON.jl, so the macro
     # refuses them with guidance rather than emitting broken code.
     @test_throws Exception @eval module BadNumber
