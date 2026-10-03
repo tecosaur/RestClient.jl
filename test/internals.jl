@@ -315,6 +315,18 @@ end
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> "a" * x
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> "a" * x
     end
+    @testset "template variables" begin
+        vf(ex) = RestClient.varform(ex; varname = :self, localvars = [:self, :config],
+                                    knownfields = [:id, :item], mod = @__MODULE__)
+        @test vf(:id) == :(self.id)
+        @test vf(:(item.name.first)) == :(self.item.name.first)
+        @test vf(:(id.(x))) == :(self.id.(x))
+        @test vf(:(config.baseurl)) == :(config.baseurl)        # locals and globals pass through
+        @test vf(:(Base.pi)) == :(Base.pi)
+        @test vf(:(length(items))) == :(length(items))          # as do other expressions
+        @test_throws ArgumentError vf(:undefinedthing)
+        @test_throws ArgumentError vf(:(undefinedthing.x))
+    end
     @testset "URL templates" begin
         interp(str; kw...) = RestClient.interp_curlies(str; varname = :self, localvars = Symbol[],
                                                        knownfields = [:x], mod = @__MODULE__, kw...)

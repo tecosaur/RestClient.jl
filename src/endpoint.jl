@@ -283,46 +283,37 @@ macro endpoint(args...)
                          "    $(einfo.structname)\n\nThe request made by `$(first(einfo.func.args))`, which see.\n",
                          einfo.structname))
     end
-    defform(func::Symbol, ::Nothing, body) =
-        :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $body)
-    defform(func::Symbol, params::Vector{Symbol}, body) =
-        :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname){$(params...)}) where {$(params...)} = $body)
+    # `RestClient.func([config,] self::Struct{params...}) where {params...} = body`
+    function methoddef(func::Symbol, body; withconfig::Bool = true)
+        (; structname, structparams) = einfo
+        selftype = if isnothing(structparams) structname else :($structname{$(structparams...)}) end
+        sigargs = [:($ANAPHORIC_VAR::$selftype)]
+        withconfig && pushfirst!(sigargs, :($CONFIG_VAR::$RequestConfig))
+        sig = :($(@__MODULE__).$func($(sigargs...)))
+        isnothing(structparams) || (sig = Expr(:where, sig, structparams...))
+        :($sig = $body)
+    end
     varcontext = (; varname = ANAPHORIC_VAR, localvars = [ANAPHORIC_VAR, CONFIG_VAR], knownfields = efields, mod=__module__)
     if !isnothing(einfo.in)
-        inval = varform(einfo.in; varcontext...)
-        push!(body, :($(@__MODULE__).payload($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $inval))
+        push!(body, methoddef(:payload, varform(einfo.in; varcontext...)))
     end
     path, params = if einfo.url isa String
         parse_endpoint_url(einfo.url; varcontext..., filename = string(__source__.file))
     else
         varform(einfo.url; varcontext...), nothing
     end
-    push!(body, defform(:urlpath, einfo.structparams, path))
+    push!(body, methoddef(:urlpath, path))
     if !isnothing(params)
         paramvec = Expr(:vect, params...)
         finalparam = :($(Vector{Pair{String, String}})(
             $filter($(!isnothing), $(Vector{Union{Pair{String, String}, Nothing}})(
                 $paramvec))))
-        push!(body, defform(:parameters, einfo.structparams, finalparam))
+        push!(body, methoddef(:parameters, finalparam))
     end
-    # `responsetype` takes a single endpoint argument (no `config`), so it
-    # needs its own emission path, not the two-arg `defform`.
-    rt_def = if isnothing(einfo.structparams)
-        self = :($ANAPHORIC_VAR::$(einfo.structname))
-        :($(@__MODULE__).responsetype($self) = $(einfo.out))
-    else
-        self = :($ANAPHORIC_VAR::$(einfo.structname){$(einfo.structparams...)})
-        :($(@__MODULE__).responsetype($self) where {$(einfo.structparams...)} = $(einfo.out))
-    end
-    push!(body, rt_def)
+    push!(body, methoddef(:responsetype, einfo.out; withconfig = false))
     # Authentication: only a marker's policy; defaults are looked up at runtime
-    authself(name) = if isnothing(einfo.structparams)
-        :($(@__MODULE__).$name($ANAPHORIC_VAR::$(einfo.structname)))
-    else
-        :($(@__MODULE__).$name($ANAPHORIC_VAR::$(einfo.structname){$(einfo.structparams...)}) where {$(einfo.structparams...)})
-    end
     isnothing(einfo.authpolicy) ||
-        push!(body, :($(authself(:authpolicy)) = $(QuoteNode(einfo.authpolicy))))
+        push!(body, methoddef(:authpolicy, QuoteNode(einfo.authpolicy); withconfig = false))
     # Function (optional)
     if !isnothing(einfo.func)
         fnoconfig, fconfig = generate_funcalls(einfo; mod=__module__)
@@ -356,37 +347,40 @@ const AUTH_MARKERS = (auth = :required, authoption = :optional, noauth = :off)
 allowsnothing(type) =
     Meta.isexpr(type, :curly) && first(type.args) === :Union && :Nothing in type.args[2:end]
 
+# The positional and keyword arguments of a call expression
+function splitargs(call::Expr)
+    if length(call.args) >= 2 && Meta.isexpr(call.args[2], :parameters)
+        call.args[3:end], call.args[2].args
+    else
+        call.args[2:end], Any[]
+    end
+end
+
+# `(name, type, default)` of a function argument `name[::type][ = default]`, with
+# `nothing` for the parts not given
+function parsearg(arg)
+    name, type, default = arg, nothing, nothing
+    Meta.isexpr(name, :kw, 2) && ((name, default) = name.args)
+    Meta.isexpr(name, :(::), 2) && ((name, type) = name.args)
+    name isa Symbol || throw(ArgumentError("Malformed function argument $arg in @endpoint function"))
+    name, type, default
+end
+
 function generate_funcalls(einfo; mod::Module)
     includedargs = Symbol[]
     fspecs = Dict(f.name => (; type=f.type, default=f.default) for f in einfo.fields)
-    fname = first(einfo.func.args)
-    args, kwargs = if length(einfo.func.args) >= 2 && Meta.isexpr(einfo.func.args[2], :parameters)
-        einfo.func.args[3:end], einfo.func.args[2].args
-    else
-        einfo.func.args[2:end], Expr[]
-    end
+    args, kwargs = splitargs(einfo.func)
     function argexpr(name::Symbol, type, default, iskeyword::Bool)
         iskeyword && isnothing(default) && allowsnothing(type) && (default = :nothing)
         arg = if isnothing(type) name else Expr(:(::), name, type) end
         if isnothing(default) arg else Expr(:kw, arg, default) end
     end
     function isrequired(arg)
-        Meta.isexpr(arg, :kw) && return false
-        name = if Meta.isexpr(arg, :(::), 2) first(arg.args) else arg end
-        isnothing(get(fspecs, name, (; default = nothing)).default)
+        name, _, default = parsearg(arg)
+        isnothing(default) && isnothing(get(fspecs, name, (; default = nothing)).default)
     end
     for (set, iskeyword) in ((args, false), (kwargs, true)), i in eachindex(set)
-        arg = set[i]
-        name, type, default = nothing, nothing, nothing
-        if Meta.isexpr(arg, :kw, 2)
-            arg, default = arg.args
-        end
-        if Meta.isexpr(arg, :(::), 2)
-            name, type = arg.args
-        elseif arg isa Symbol
-            name = arg
-        end
-        name isa Symbol || throw(ArgumentError("Malformed function argument $(set[i]) in @endpoint function"))
+        name, type, default = parsearg(set[i])
         push!(includedargs, name)
         fspec = get(fspecs, name, nothing)
         isnothing(fspec) && throw(ArgumentError("Argument $name not found in @endpoint struct"))
@@ -398,31 +392,19 @@ function generate_funcalls(einfo; mod::Module)
     for field in einfo.fields
         field.name ∈ includedargs || push!(kwargs, argexpr(field.name, field.type, field.default, true))
     end
-    fcall = if isempty(kwargs)
-        Expr(:call, fname, args...)
-    else
-        Expr(:call, fname, Expr(:parameters, kwargs...), args...)
-    end
-    if !isnothing(einfo.structparams)
-        fcall = Expr(:where, fcall, einfo.structparams...)
-    end
-    estrucform = Expr(:call, einfo.structname, map(f -> f.name, einfo.fields)...)
-    reqmethod = QuoteNode(einfo.method)
     perform_, Request_ = GlobalRef(@__MODULE__, :perform), GlobalRef(@__MODULE__, :Request)
     globalconfig_, Val_ = GlobalRef(@__MODULE__, :globalconfig), GlobalRef(Base, :Val)
-    f1 = :($fcall = $perform_($Request_{$reqmethod}($globalconfig_($Val_{$mod}()), $estrucform)))
+    # `func(args...; kwargs...) = perform(Request{method}(config, Struct(fields...)))`
+    function definition(args, config)
+        call = Expr(:call, first(einfo.func.args), args...)
+        isempty(kwargs) || insert!(call.args, 2, Expr(:parameters, kwargs...))
+        isnothing(einfo.structparams) || (call = Expr(:where, call, einfo.structparams...))
+        endpoint = Expr(:call, einfo.structname, map(f -> f.name, einfo.fields)...)
+        :($call = $perform_($Request_{$(QuoteNode(einfo.method))}($config, $endpoint)))
+    end
     confarg = gensym("request-config")
-    pushfirst!(args, Expr(:(::), confarg, GlobalRef(@__MODULE__, :RequestConfig)))
-    fcall = if isempty(kwargs)
-        Expr(:call, fname, args...)
-    else
-        Expr(:call, fname, Expr(:parameters, kwargs...), args...)
-    end
-    if !isnothing(einfo.structparams)
-        fcall = Expr(:where, fcall, einfo.structparams...)
-    end
-    f2 = :($fcall = $perform_($Request_{$reqmethod}($confarg, $estrucform)))
-    f1, f2
+    definition(args, :($globalconfig_($Val_{$mod}()))),
+    definition([:($confarg::$(GlobalRef(@__MODULE__, :RequestConfig))); args], confarg)
 end
 
 function extract_forms(args::Tuple; mod::Module)
@@ -475,26 +457,9 @@ function extract_forms(args::Tuple; mod::Module)
     # 3: Extract fields from function arguments
     if !isnothing(efunc) && isnothing(estruct)
         efields = @NamedTuple{name::Symbol, type::Any, default::Any}[]
-        fargs = if length(efunc.args) <= 1
-            Expr[]
-        elseif Meta.isexpr(efunc.args[2], :parameters)
-            vcat(efunc.args[3:end], efunc.args[2].args)
-        else
-            efunc.args[2:end]
-        end
-        for arg in fargs
-            name, type, default = nothing, Any, nothing
-            if Meta.isexpr(arg, :kw, 2)
-                arg, default = arg.args
-            end
-            if arg isa Symbol
-                name = arg
-            elseif Meta.isexpr(arg, :(::), 2)
-                name, type = arg.args
-            else
-                throw(ArgumentError("Malformed function argument $arg in @endpoint function"))
-            end
-            push!(efields, (name, type, default))
+        for arg in vcat(splitargs(efunc)...)
+            name, type, default = parsearg(arg)
+            push!(efields, (name, something(type, Any), default))
         end
     end
     isnothing(efields) && throw(ArgumentError("Unable to extract fields from @endpoint function"))
@@ -686,13 +651,11 @@ function parse_endpoint_url(url::String; kwargs...)
             keyex, valex = interp_curlies(first(keyvalue); kwargs...), interp_curlies(last(keyvalue); kwargs...)
             push!(parameters, mkparam(keyex, valex))
         elseif startswith(comp, '{') && endswith(comp, '}')
-            compparsed = Meta.parse(comp)
-            Meta.isexpr(compparsed, :braces, 1) || throw(ArgumentError("Invalid query component $comp"))
-            compvar = first(compparsed.args)
-            compvar isa Symbol || throw(ArgumentError("Invalid query component $comp"))
-            kwargs2 = ((; filename, k...) -> k)(; kwargs...)
-            compex = varform(compvar; kwargs2...)
-            push!(parameters, mkparam(String(compvar), compex))
+            # `{name}` is short for `name={name}`
+            name = Meta.parse(comp)
+            Meta.isexpr(name, :braces, 1) && only(name.args) isa Symbol ||
+                throw(ArgumentError("Invalid query component $comp"))
+            push!(parameters, mkparam(String(only(name.args)), interp_curlies(comp; kwargs...)))
         elseif !isempty(comp) && (flag = interp_curlies(comp; kwargs...)) isa String
             push!(flags, encode_uri_component(flag))
         else
@@ -781,35 +744,17 @@ A field reference is recognised when `exval` is one of `knownfields`. If `exval`
 but not a member of `knownfields` or a global variable, an `ArgumentError` is thrown.
 """
 function varform(exval; varname::Symbol, localvars::Vector{Symbol}, knownfields::Vector{Symbol}, mod::Module)
-    if exval isa Symbol
-        if exval ∈ knownfields
-            :($varname.$exval)
-        elseif exval ∈ localvars
-            exval
-        elseif isdefined(mod, exval)
-            exval
-        else
-            throw(ArgumentError("$exval is not a known field, local variable, or global variable"))
-        end
-    elseif Meta.isexpr(exval, :., 2)
-        dotpath = Any[exval]
-        while Meta.isexpr(dotpath[end], :., 2)
-            elt = dotpath[end]
-            dotpath[end] = elt.args[2]
-            push!(dotpath, elt.args[1])
-        end
-        last(dotpath) isa Symbol || return exval
-        if last(dotpath) ∈ knownfields
-            dotpath[end] = QuoteNode(last(dotpath))
-            foldl((d, x) -> Expr(:., d, x), reverse(dotpath), init=varname)
-        elseif last(dotpath) ∈ localvars
-            exval
-        elseif isdefined(mod, last(dotpath))
-            exval
-        else
-            throw(ArgumentError("$exval is not a known field, local variable, or global variable"))
-        end
-    else
+    root = exval
+    while Meta.isexpr(root, :., 2)
+        root = root.args[1]
+    end
+    root isa Symbol || return exval
+    if root ∈ knownfields
+        qualify(ex) = if ex === root Expr(:., varname, QuoteNode(ex)) else Expr(:., qualify(ex.args[1]), ex.args[2]) end
+        qualify(exval)
+    elseif root ∈ localvars || isdefined(mod, root)
         exval
+    else
+        throw(ArgumentError("$exval is not a known field, local variable, or global variable"))
     end
 end
