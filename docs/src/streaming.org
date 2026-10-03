@@ -21,7 +21,9 @@ A streamed body has two layers, and =RestClient= keeps them separate:
   JSON) puts one record per line. =RestClient= supports both.
 + Interpretation :: how each message's payload becomes a typed value. This is the
   same machinery that parses a buffered response. A [[@ref][~@jsondef~]] type is decoded
-  identically whether it arrives whole, in an SSE event, or as an NDJSON line.
+  identically whether it arrives whole, in an SSE event, or as an NDJSON line, and a
+  message that can't be decoded ends the stream with a [[@ref][~MalformedResponse~]]
+  holding its payload.
 
 The framing is a property of the /stream/; the element type is a property of the
 /payload/. They are independent, so the same element type can appear in a

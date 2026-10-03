@@ -398,10 +398,41 @@ function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     print(io, "HTTP ", ex.response.status)
     isempty(ex.response.message) || print(io, ' ', ex.response.message)
     print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
-    isempty(ex.body) && return
+    isempty(ex.body) || print(io, "\n  ", bodypreview(ex.body))
+end
+
+"""
+    MalformedResponse <: Exception
+
+An exception type for successful responses that cannot be read as the expected
+type, such as malformed JSON or a missing required key.
+
+`request` and `response` say where the response came from, `type` is what it was
+being read as, `body` holds the bytes that failed (for a [`Stream`](@ref), the
+frame's payload), and `error` is the underlying exception.
+
+See also: [`perform`](@ref), [`interpretresponse`](@ref).
+"""
+struct MalformedResponse{R <: Request, E <: Exception} <: Exception
+    request::R
+    response::Downloads.Response
+    type::Type
+    body::Vector{UInt8}
+    error::E
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::MalformedResponse))
+    print(io, "Could not read a ", ex.type, " from the HTTP ", ex.response.status,
+          " response to ", nameof(typeof(ex.request.endpoint)), " at ",
+          redactsecrets(ex.response.url, authsecrets(ex.request)), "\n  ",
+          replace(rstrip(sprint(showerror, ex.error; context = io)), '\n' => "\n  "))
+    isempty(ex.body) || print(io, "\n  Body: ", bodypreview(ex.body))
+end
+
+function bodypreview(body::Vector{UInt8})
     shown = map(c -> if isvalid(c) && (isprint(c) || isspace(c)) c else '�' end,
-                String(ex.body[1:min(end, 512)]))
-    print(io, "\n  ", rstrip(shown), ifelse(length(ex.body) > 512, " …", ""))
+                String(body[1:min(end, 512)]))
+    rstrip(shown) * ifelse(length(body) > 512, " …", "")
 end
 
 

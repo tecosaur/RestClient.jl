@@ -23,11 +23,13 @@ open_get(url; timeout = Inf) =
 
 # Drive open_stream → decode_stream against a live route, returning the channel.
 function stream_route(url, framing::Symbol, ::Type{Elt}; ep = SEP()) where {Elt}
-    (; response, body, transfer) = open_get(url)
+    incoming = open_get(url)
+    (; response, body) = incoming
     @assert response.status == 200 "status $(response.status)"
     fmt = StreamFormat{framing}(dataformat(Tok))
     cancelled = Threads.Atomic{Bool}(false)
-    items = decode_stream(body, ep, fmt, Elt, transfer, cancelled)
+    req = RestClient.Request{:get}(RestClient.RequestConfig(url), ep)
+    items = decode_stream(req, incoming, fmt, Elt, cancelled)
     (; items, body, cancelled, response)
 end
 

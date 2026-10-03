@@ -3,8 +3,9 @@
 
 module StreamDecodeTest
 
-using RestClient: @jsondef, AbstractEndpoint, SSEvent, Stream, StreamFormat,
-    decode_stream, isstreamend, dataformat, mimetype, framingtype, interpretresponse
+using RestClient: @jsondef, AbstractEndpoint, SSEvent, Stream, StreamFormat, Request,
+    RequestConfig, Incoming, MalformedResponse, decode_stream, isstreamend, dataformat,
+    mimetype, framingtype, interpretresponse
 import RestClient
 using JSON
 using Test
@@ -34,11 +35,15 @@ function feed(payload::AbstractString; close_after::Bool = true)
     bs
 end
 
+# The request and response a stream of `ep`'s, with body `bs`, would come from
+streamreq(ep) = Request{:get}(RequestConfig("http://x"), ep)
+incoming(bs, transfer) = Incoming(Response("http", "http://x/s", 200, "HTTP/1.1 200 OK", []), bs, transfer)
+
 function run_decode(ep, framing::Symbol, ::Type{Elt}, payload; transfer = okxfer(),
                     cancelled = Threads.Atomic{Bool}(false), close_after = true) where {Elt}
     bs = feed(payload; close_after)
     fmt = StreamFormat{framing}(dataformat(Tok))
-    items = decode_stream(bs, ep, fmt, Elt, transfer, cancelled)
+    items = decode_stream(streamreq(ep), incoming(bs, transfer), fmt, Elt, cancelled)
     (; items, bs, cancelled)
 end
 
@@ -98,8 +103,11 @@ end
 @testset "decode error" begin
     bad = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\nnot json\n")
     got = Tok[]
-    @test_throws Exception for t in bad.items; push!(got, t); end
+    err = try for t in bad.items; push!(got, t); end catch e; e end
     @test got == [Tok(n=1)]
+    @test err isa MalformedResponse                 # names the request, with the frame's bytes
+    @test err.type === Tok && err.body == codeunits("not json")
+    @test occursin("PlainEP", sprint(showerror, err))
 end
 
 # Cancelling ends iteration cleanly, without throwing.
@@ -124,7 +132,7 @@ end
         bs = Base.BufferStream()
         write(bs, collect(codeunits("{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n")))
         fmt = StreamFormat{:NDJSON}( dataformat(Tok))
-        items = decode_stream(bs, PlainEP(), fmt, Tok, errxfer(), cancelled; buffer = 1)
+        items = decode_stream(streamreq(PlainEP()), incoming(bs, errxfer()), fmt, Tok, cancelled; buffer = 1)
         sleep(0.05)                              # framer fills the 1-slot channel, parks in put!
         cancelled[] = true; close(items); close(bs)
         # Draining must not throw: the cancel routes through the catch-guard, not close(items, err).

@@ -109,6 +109,7 @@ module FieldSyntax
         n::Int
         PositiveJSON(n) = if n > 0 new(n) else throw(ArgumentError("n must be positive")) end
     end
+    @endpoint defaulted() -> "defaulted" -> Defaulted
     @multipartdef struct CollectionParts
         tags::Vector{Union{String, Nothing}} = String[]
         files::Vector{Vector{UInt8}} = Vector{UInt8}[]
@@ -814,6 +815,16 @@ end
 end
 
 @testset "responses" begin
+    @testset "malformed" begin
+        req = Request{:get}(RequestConfig("https://api.example.com"), FieldSyntax.DefaultedEndpoint())
+        res = Response("https", "https://api.example.com/defaulted", 200, "HTTP/1.1 200 OK", [])
+        err = try RestClient.deliver(req, RestClient.Incoming(res, IOBuffer("{\"see\":2}"))) catch e; e end
+        @test err isa MalformedResponse{<:Request, ArgumentError}
+        @test err.type === FieldSyntax.Defaulted && err.body == codeunits("{\"see\":2}")
+        msg = sprint(showerror, err)
+        @test all(s -> occursin(s, msg), ("DefaultedEndpoint", "https://api.example.com/defaulted",
+                                          "required key \"ay\"", "{\"see\":2}"))
+    end
     @testset "contents" begin
         @test @inferred(RestClient.contents(OneContent("n", 3))) === 3
         @test @inferred(RestClient.contents(ListContent(1, ["x"]))) == ["x"]

@@ -175,24 +175,24 @@ isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"      #
 """
 isstreamend(@nospecialize(::AbstractEndpoint), @nospecialize(frame)) = false
 
-# Decode a streamed body into a channel of `Elt` (the decoded payload, or a whole
-# frame like `SSEvent{P}`). Spawns a framer task; `transfer` is read only at EOF to
+# Decode `req`'s streamed body into a channel of `Elt` (the decoded payload, or a whole
+# frame like `SSEvent{P}`). Spawns a framer task; the transfer is read only at EOF to
 # distinguish a clean end from a server truncation, and `cancelled` (shared with the
 # owning `Stream`) keeps a deliberate cancel from being reported as that truncation.
-function decode_stream(bs::Base.BufferStream, endpoint::AbstractEndpoint,
-                       fmt::StreamFormat, ::Type{Elt},
-                       transfer::Task, cancelled::Threads.Atomic{Bool};
+function decode_stream(req::Request, incoming::Incoming{Base.BufferStream, Task},
+                       fmt::StreamFormat, ::Type{Elt}, cancelled::Threads.Atomic{Bool};
                        buffer::Int = STREAM_BUFFER) where {Elt}
+    (; response, body, transfer) = incoming
     P = elementpayload(Elt)
     items = Channel{Elt}(buffer)
     state = framestate(fmt)
     Threads.@spawn try
-        while (frame = readframe(bs, state, fmt)) !== nothing
-            if isstreamend(endpoint, frame)
+        while (frame = readframe(body, state, fmt)) !== nothing
+            if isstreamend(req.endpoint, frame)
                 cancelled[] = true # end the transfer as a deliberate stop
                 break
             end
-            data = interpretresponse(framedata(frame), fmt.element, P)
+            data = interpret(req, response, framedata(frame), fmt.element, P)
             put!(items, if P === Elt data else remake(frame, data, P) end)
         end
         if cancelled[]
@@ -204,7 +204,7 @@ function decode_stream(bs::Base.BufferStream, endpoint::AbstractEndpoint,
     catch err
         if cancelled[]; close(items) else close(items, err) end
     finally
-        close(bs)
+        close(body)
     end
     items
 end
@@ -276,12 +276,12 @@ transmit(req::Request{<:Any, <:StreamEndpoint}, out::Outgoing) = open_stream(req
 
 # Rate-limiting acts on the head status only: once frames flow there is nothing to replay.
 function deliver(req::Request{<:Any, <:StreamEndpoint}, incoming::Incoming)
-    (; response, body, transfer) = incoming
+    (; response, body) = incoming
     response.status ∈ 200:299 || throw(ResponseError(req, response, read(body)))
     dtype = responsetype(req.endpoint)
     Elt, F = eltype(dtype), framingtype(dtype)
     cancelled = Threads.Atomic{Bool}(false)
-    items = decode_stream(body, req.endpoint, dataformat(req.endpoint, dtype), Elt, transfer, cancelled)
+    items = decode_stream(req, incoming, dataformat(req.endpoint, dtype), Elt, cancelled)
     stream = Stream{Elt, F}(items, response, body, cancelled)
     try
         postprocess(response, req, stream)

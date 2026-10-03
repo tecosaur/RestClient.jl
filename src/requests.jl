@@ -21,6 +21,8 @@ the resource exists: `true` on success, `false` on 404 or 410.
 - [`MalformedRequest`](@ref) if the request fails validation.
 - [`ResponseError`](@ref) if the server responds with an unsuccessful status,
   including a rate limit that outlasts the retries.
+- [`MalformedResponse`](@ref) if a successful response can't be read as the
+  endpoint's [`responsetype`](@ref).
 - `ArgumentError` if `kind` is not a supported HTTP method.
 
 See also: [`Request`](@ref).
@@ -537,11 +539,22 @@ function deliver(req::Request, incoming::Incoming)
         response.status ∈ 200:299 || throw(ResponseError(req, response, read(body)))
         dtype = responsetype(req.endpoint)
         data = if dtype !== Nothing
-            interpretresponse(read(body), dataformat(req.endpoint, dtype), dtype)
+            interpret(req, response, read(body), dataformat(req.endpoint, dtype), dtype)
         end
         postprocess(response, req, data)
     finally
         close(incoming)
+    end
+end
+
+# `interpretresponse`, with an exception raised as a `MalformedResponse` naming the request
+function interpret(req::Request, response::Downloads.Response, bytes::AbstractVector{UInt8},
+                   fmt::AbstractFormat, ::Type{T}) where {T}
+    try
+        interpretresponse(bytes, fmt, T)
+    catch err
+        err isa InterruptException && rethrow()
+        throw(MalformedResponse(req, response, T, collect(bytes), err))
     end
 end
 
