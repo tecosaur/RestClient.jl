@@ -383,6 +383,15 @@ end
         @test read(FieldSyntax.Boxed{Int}, """{"value":3}""") == FieldSyntax.Boxed(value = 3)
         @test_throws "required key \"ay\"" read(FieldSyntax.Defaulted, """{"see":2}""")
     end
+    @testset "generated names" begin
+        @eval module NamedClient
+            using RestClient
+            @endpoint getUserInfo() -> "u" -> String
+            @endpoint list_repos() -> "r" -> String
+            @endpoint ping() -> "p" -> String
+        end
+        @test all(n -> isdefined(NamedClient, n), (:GetUserInfoEndpoint, :ListReposEndpoint, :PingEndpoint))
+    end
     @testset "template variables" begin
         vf(ex) = RestClient.varform(ex; varname = :self, localvars = [:self, :config],
                                     knownfields = [:id, :item], mod = @__MODULE__)

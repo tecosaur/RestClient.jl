@@ -100,8 +100,8 @@ SSE metadata.
 
 #+begin_warning
 The endpoint type a method dispatches on must match the one =@endpoint= generated.
-The function form ~chat(...)~ creates a struct named ~ChatEndpoint~ (that is,
-~titlecase(funcname) * "Endpoint"~), so the ~isstreamend~ method must be written on
+The function form ~chat(...)~ creates a struct named ~ChatEndpoint~ (the function
+name, capitalised, with =Endpoint= appended), so the ~isstreamend~ method must be written on
 ~ChatEndpoint~, as above. If you want a name you control, use the explicit struct
 form ~@endpoint struct MessagesEndpoint ... end~ and dispatch on that.
 #+end_warning

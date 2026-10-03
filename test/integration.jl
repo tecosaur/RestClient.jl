@@ -419,9 +419,9 @@ end
             @test RestClient.authpolicy(AC.EarlyEndpoint("1")) === :required
         end
         @testset "markers" begin
-            @test RestClient.authpolicy(AC.Public_Endpoint("1")) === :off      # :noauth turns it off
-            @test RestClient.authscheme(AC.Optional_Endpoint("1")) == BearerAuth()  # :authoption keeps scheme
-            @test RestClient.authpolicy(AC.Optional_Endpoint("1")) === :optional
+            @test RestClient.authpolicy(AC.PublicEndpoint("1")) === :off      # :noauth turns it off
+            @test RestClient.authscheme(AC.OptionalEndpoint("1")) == BearerAuth()  # :authoption keeps scheme
+            @test RestClient.authpolicy(AC.OptionalEndpoint("1")) === :optional
         end
         @testset "no policy" begin
             # IntegrationClient declares no @globalconfig auth, so its plain endpoints default.
@@ -441,9 +441,9 @@ end
                 @test AC.public_(cfg(baseurl), "42").id == 42
                 # :optional sends the key when present, but does not require it.
                 @test AC.optional_(cfg(baseurl), "42").id == 42                 # no key: fine
-                oreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), AC.Optional_Endpoint("1"))
+                oreq = RestClient.Request{:get}(cfg("http://x"; key = "k"), AC.OptionalEndpoint("1"))
                 @test ("Authorization" => "Bearer k") in RestClient.headers(oreq)
-                ooff = RestClient.Request{:get}(cfg("http://x"), AC.Optional_Endpoint("1"))
+                ooff = RestClient.Request{:get}(cfg("http://x"), AC.OptionalEndpoint("1"))
                 @test isempty(RestClient.headers(ooff))                         # no key: nothing sent
             end
         end

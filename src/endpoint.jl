@@ -71,8 +71,9 @@ definition with a matching signature will be generated. This requires
 done by [`@globalconfig`](@ref).
 
 Without a `struct` form, the arguments of the function will be used to generate
-a `struct` with a derived name (`\$(titlecase(funcname))Endpoint`), and populate
-its fields.
+a `struct` named after the function, with each `_`-separated word capitalised and
+joined, and `Endpoint` appended (`getUserInfo` gives `GetUserInfoEndpoint`,
+and `list_repos` gives `ListReposEndpoint`), and populate its fields.
 
 With a `struct` form, all arguments that match a field name will inherit the
 field's type and default value, though a positional argument followed by a
@@ -528,7 +529,7 @@ function extract_forms(args::Tuple; mod::Module)
         end
     end
     if isnothing(estruct) && !isnothing(efunc)
-        estructname = Symbol(titlecase(String(efunc.args[1])) * "Endpoint")
+        estructname = Symbol(join(map(uppercasefirst, split(String(efunc.args[1]), '_'))) * "Endpoint")
         estructparams = nothing
         estruct = Expr(:struct, false, Expr(:<:, estructname, esuper), Expr(:block, map(fielddecl, efields)...))
     end
