@@ -10,8 +10,8 @@ Usually you will want to subtype either `SingleEndpoint` or `ListEndpoint`,
 which share the same interface as `AbstractEndpoint` but have additional
 semantics.
 
-Cross-cutting concerns (auth, logging, shared validation) are best expressed
-by defining an API-specific abstract subtype and attaching generic methods to it.
+To share behaviour across an API's endpoints (auth, validation, logging), define
+an abstract subtype for the API and give it the shared methods.
 
 # Interface
 
@@ -115,10 +115,10 @@ const AUTH_POLICIES = (:off, :optional, :required)
 """
     AuthScheme
 
-Supertype for authentication schemes: *how* an API presents its secret on the wire.
-A scheme holds only API-specific shape (e.g. a header name), never the secret — the
-secret is the `key` of a [`RequestConfig`](@ref). Declare a scheme for an endpoint
-with [`authscheme`](@ref), and it is applied to `key` on every request.
+Supertype for authentication schemes, which describe *how* an API expects its
+secret: in which header or query parameter, and in what form. A scheme never holds
+the secret itself, which is the `key` of a [`RequestConfig`](@ref). Declare an
+endpoint's scheme with [`authscheme`](@ref), and every request applies it to `key`.
 
 The provided schemes are [`BearerAuth`](@ref), [`BasicAuth`](@ref),
 [`HeaderAuth`](@ref), [`QueryAuth`](@ref), and [`NoAuth`](@ref) (the default).

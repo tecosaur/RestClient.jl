@@ -18,7 +18,7 @@ A streamed body has two layers, and =RestClient= keeps them separate:
 
 + Framing :: how the byte stream is divided into messages. /Server-Sent Events/
   (=text/event-stream=) separate events with a blank line; /NDJSON/ (newline-delimited
-  JSON) puts one record per line. These are the two framings shipped out of the box.
+  JSON) puts one record per line. =RestClient= supports both.
 + Interpretation :: how each message's payload becomes a typed value. This is the
   same machinery that parses a buffered response. A [[@ref][~@jsondef~]] type is decoded
   identically whether it arrives whole, in an SSE event, or as an NDJSON line.
@@ -39,7 +39,7 @@ an ordinary [[@ref][~@jsondef~]] struct:
     text."delta.text"::Union{String, Nothing} = nothing
 end
 
-# SSE is the default framing, so the common case costs one word:
+# SSE is the default framing
 @endpoint chat(; messages) -> "messages" -> Stream{Delta}
 #+end_src
 
@@ -66,25 +66,22 @@ for delta in chat(messages = msgs)
 end
 #+end_src
 
-Everything that works on an iterator works here. ~collect~ gathers the stream into
-a vector once it completes; ~reduce~ folds it as it arrives:
+It works anywhere an iterator does: ~collect~ gathers the stream into a vector
+once it completes, and ~reduce~ folds it as it arrives:
 
 #+begin_src julia
 collect(chat(messages = msgs))            # Vector{Delta}, once the stream ends
 reduce(merge_delta, chat(messages = msgs)) # you supply merge_delta
 #+end_src
 
-How partial results combine into a final answer is left to you, because it is
-API-specific: each API shapes its incremental deltas differently, and
-=RestClient= would have to pick one to bake in. It represents the typed stream and
-lets you fold it as the API demands.
+Combining the elements into a final answer is up to you, since every API shapes
+its deltas differently.
 
 * Knowing when to stop
 
-By default a stream ends when the connection closes, which is correct for any
-stream and all that the SSE specification itself promises. Many APIs instead mark the
-end /in band/, with a sentinel value or a terminal event, and expect the client to
-stop there. You declare that rule by defining [[@ref][~isstreamend~]] for your endpoint:
+By default a stream ends when the connection closes, which is all the SSE
+specification promises. Many APIs also mark the end /in band/, with a sentinel
+value or a terminal event, and expect the client to stop there. You declare that rule by defining [[@ref][~isstreamend~]] for your endpoint:
 
 #+begin_src julia
 # An API that feels special might decide to shove event type information into the data
@@ -167,17 +164,16 @@ for delta in stream
 end
 #+end_src
 
-Closing a stream ends a blocked iteration /cleanly/, the way ~break~ would, not by
-raising. You write no ~try~/~catch~ for the cancellation case. A genuine mid-stream
-failure is different: a server that drops the connection partway, or a payload
-that fails to parse, surfaces as a thrown exception when you next iterate, so a
-truncated stream is never silently mistaken for a complete one. A stream you
-simply stop iterating and drop is reclaimed by its finaliser, though closing it
-explicitly is better.
+Closing a stream ends a blocked iteration the way ~break~ would, without raising,
+so cancelling needs no ~try~/~catch~. A failure is another matter: a server that
+drops the connection partway, or a payload that fails to parse, raises an
+exception when you next iterate, so a truncated stream is never mistaken for a
+complete one. A stream you stop iterating and drop is eventually reclaimed by its
+finaliser, but closing it frees the connection straight away.
 
 #+begin_info
-Streaming bypasses the response cache (a stream has no settled body to store),
-and the rate limiter acts only on the initial response status. Once frames
-are flowing there is nothing to retry, so a rate-limit response is handled before
-the first element is ever exposed, exactly as for a buffered request.
+Streams are never cached, as there is no complete body to store. Rate limiting
+still applies, but only to the response status: a 429 is retried before the first
+element reaches you, as for a buffered request, and once elements flow there is
+nothing to retry.
 #+end_info

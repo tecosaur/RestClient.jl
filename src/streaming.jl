@@ -80,8 +80,8 @@ framestate(::StreamFormat) = nothing
 """
     readframe(bs::IO, state, fmt::StreamFormat) -> frame | nothing
 
-Read one complete frame from `bs`, returning the framing's public frame with its
-**undecoded** payload bytes, or `nothing` at clean EOF. `state` is
+Read one complete frame from `bs`, with its payload still **undecoded** bytes, or
+return `nothing` at a clean EOF. `state` is
 [`framestate`](@ref)'s value, reused across calls. Dispatched on `fmt`'s framing.
 
 The read blocks on `bs`, reassembling a frame split across network reads. As `bs` is
@@ -109,13 +109,14 @@ abstract type StreamEndpoint <: AbstractEndpoint end
 """
     Stream{T, F}
 
-A lazily-consumed stream of elements of type `T`, framed by `F` (a symbol, e.g.
-`:SSE`/`:NDJSON`). A peer of [`Single`](@ref)/[`List`](@ref), selected through an
-endpoint's output type; `F` defaults to `:SSE`.
+A lazily consumed stream of elements of type `T`, framed by `F` (`:SSE`, the
+default, or `:NDJSON`). Like [`Single`](@ref) and [`List`](@ref), it is chosen
+through an endpoint's output type.
 
-Iterate it to pull decoded elements as bytes arrive (blocking per frame). It is a
-plain value: `close` it from any task to end iteration cleanly (see the manual on
-cancellation), and a dropped, undrained stream is reclaimed by its finalizer.
+Iterating it blocks until the next element has arrived and been decoded. Any task
+may `close` it, which ends iteration without an error (see the manual on
+cancellation), and a stream that is dropped before it is drained is reclaimed by
+its finalizer.
 
 See also: [`isstreamend`](@ref).
 """
@@ -162,10 +163,10 @@ dataformat(S::Type{<:Stream}) =
 """
     isstreamend(endpoint::AbstractEndpoint, frame) -> Bool
 
-Whether `frame` terminates the stream from `endpoint`. Applied to the undecoded
-public frame before it is decoded or emitted, so a terminator is never seen by the
-consumer. The default is `false` (stop only at EOF, correct for any stream); a
-client library defines one method per API over the frame's public accessors:
+Whether `frame` ends the stream from `endpoint`. It sees each frame before it is
+decoded, so the terminating frame never reaches the consumer. The default is
+`false`, ending a stream only when the connection closes; an API that marks its
+end in band needs a method checking the frame's fields:
 
 ```julia
 isstreamend(::ChatEndpoint, fr::SSEvent)     = fr.data == codeunits("[DONE]")  # a data sentinel
