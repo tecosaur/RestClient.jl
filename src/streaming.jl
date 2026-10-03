@@ -44,21 +44,23 @@ framing whose payload is located differently can override this.
 end
 
 """
-    remake(frame, data) -> frame
+    remake(frame, data, ::Type{P} = typeof(data)) -> frame
 
-Return a copy of `frame` with its payload replaced by `data` (re-typed to `data`'s
-type), preserving the other fields. This is the decode step: `{bytes} → {T}`. The
+Return a copy of `frame` with its payload replaced by `data`, as a frame of payload
+type `P`, preserving the other fields. This is the decode step: `{bytes} → {P}`. The
 payload field is located as in [`framedata`](@ref).
 """
-@generated function remake(frame, data)
+@generated function remake(frame, data, ::Type{P}) where {P}
     slot = let T = TypeVar(:T)
         findfirst(==(T), fieldtypes(frame.name.wrapper{T}))
     end
     isnothing(slot) &&
         return :(throw(ArgumentError("no payload field in $frame; define remake")))
     args = [if i == slot; :data else :(getfield(frame, $i)) end for i in 1:fieldcount(frame)]
-    :($(frame.name.wrapper)($(args...)))
+    :($(frame.name.wrapper){P}($(args...)))
 end
+
+remake(frame, data) = remake(frame, data, typeof(data))
 
 """
     elementpayload(::Type{Elt}) -> Type
@@ -190,8 +192,8 @@ function decode_stream(bs::Base.BufferStream, endpoint::AbstractEndpoint,
                 cancelled[] = true # end the transfer as a deliberate stop
                 break
             end
-            decoded = remake(frame, interpretresponse(framedata(frame), fmt.element, P))
-            put!(items, if decoded isa Elt; decoded else framedata(decoded) end)
+            data = interpretresponse(framedata(frame), fmt.element, P)
+            put!(items, if P === Elt data else remake(frame, data, P) end)
         end
         if cancelled[]
             close(items)

@@ -67,6 +67,12 @@ end
     whole = collect(run_decode(PlainEP(), :SSE, SSEvent{Tok}, sse).items)
     @test all(f -> f isa SSEvent{Tok}, whole)
     @test [f.data for f in whole] == [Tok(n=1), Tok(n=2)]
+    # Untyped payloads are told apart by type too: Stream{Any} yields payloads,
+    # Stream{SSEvent{Any}} whole frames
+    anys = collect(run_decode(PlainEP(), :SSE, Any, sse).items)
+    @test !any(x -> x isa SSEvent, anys) && anys[1]["n"] == 1
+    frames = collect(run_decode(PlainEP(), :SSE, SSEvent{Any}, sse).items)
+    @test all(f -> f isa SSEvent{Any}, frames) && frames[2].data["n"] == 2
 end
 
 @testset "end predicate" begin
