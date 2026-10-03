@@ -4,7 +4,7 @@
 module StreamEndpointTest
 
 using RestClient
-using JSON3, StructTypes
+using JSON
 using Test
 using Downloads
 

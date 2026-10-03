@@ -14,7 +14,7 @@ include("server.jl")            # local HTTP harness shared by the live-request 
         include("internals.jl")     # edge cases no live request can reach
     end
     @testset "JSON.jl" begin
-        include("json.jl")          # the JSON.jl @jsondef backend (integration uses JSON3)
+        include("json.jl")          # @jsondef's JSON.jl extension
     end
     @testset "XML" begin
         include("xml.jl")           # @xmldef, the xpath subset, parsexml dispatch

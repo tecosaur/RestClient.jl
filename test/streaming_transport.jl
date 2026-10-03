@@ -6,7 +6,7 @@ module StreamTransportTest
 using RestClient: @jsondef, open_stream, decode_stream, StreamFormat, dataformat,
     AbstractEndpoint, SSEvent, Stream
 import RestClient
-using JSON3, StructTypes
+using JSON
 using Test
 using Downloads: RequestError
 

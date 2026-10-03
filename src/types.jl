@@ -77,15 +77,12 @@ received as-is, numbers as their decimal text. Other types need a format of thei
 struct RawFormat <: AbstractFormat end
 
 """
-    JSONFormat{backend} <: AbstractFormat
+    JSONFormat <: AbstractFormat
 
-Singleton type for JSON request/response formats. The `backend` parameter
-selects the JSON implementation: `:json` for JSON.jl, `:json3` for JSON3.jl.
-
-The zero-argument constructor `JSONFormat()` picks an available backend
-at the time of construction.
+Singleton type for JSON request/response formats, read and written with JSON.jl
+(which must be loaded).
 """
-struct JSONFormat{backend} <: AbstractFormat end
+struct JSONFormat <: AbstractFormat end
 
 """
     XMLFormat <: AbstractFormat

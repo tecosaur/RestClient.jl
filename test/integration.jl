@@ -5,7 +5,7 @@
 # server (test/server.jl), driving the full pipeline a real client uses.
 
 using RestClient
-using JSON3
+using JSON
 
 # The local HTTP harness (`with_server`/`ServerState`) is included once by
 # runtests.jl so the JSON.jl suite can share it.
@@ -15,7 +15,7 @@ using JSON3
 # `func(config, …)` methods rather than `@globalconfig`.
 module IntegrationClient
     using RestClient
-    using JSON3
+    using JSON
     @jsondef struct Item
         name::String
         id::Int
@@ -119,7 +119,7 @@ cfg(baseurl; kw...) = RestClient.RequestConfig(baseurl; kw...)
 # macro-expansion resolution (module default, inheritance, and :auth/:noauth markers).
 module AuthClient
     using RestClient
-    using JSON3
+    using JSON
     @jsondef struct Item; name::String; id::Int; end
     @endpoint early(id::String) -> "items/{id}" -> Item            # declared before the default
     @globalconfig RequestConfig("http://unused.test") auth=(BearerAuth(), :required)
@@ -273,7 +273,7 @@ end
                 resp = IC.query(config, item = IC.Item("widgets", 1))
                 @test resp.method == "QUERY"
                 @test occursin("application/json", resp.content_type)
-                @test JSON3.read(resp.body, IC.Item) == IC.Item("widgets", 1)
+                @test JSON.parse(resp.body, IC.Item) == IC.Item("widgets", 1)
                 @testset "cached per query" begin
                     @test IC.query(config, item = IC.Item("widgets", 1)) == resp
                     @test state.queries == 1                 # the same query, from cache
@@ -315,7 +315,7 @@ end
                 resp = IC.upload(cfg(baseurl), item = IC.Item("widget", 7))
                 @test resp.method == "POST"
                 @test occursin("application/json", resp.content_type)
-                echoed = JSON3.read(resp.body, IC.Item)
+                echoed = JSON.parse(resp.body, IC.Item)
                 @test echoed.name == "widget"
                 @test echoed.id == 7
             end
@@ -324,14 +324,14 @@ end
             with_server() do baseurl, _
                 resp = IC.lookup(cfg(baseurl), item = IC.Item("query", 3))
                 @test resp.method == "GET"
-                @test JSON3.read(resp.body, IC.Item) == IC.Item("query", 3)
+                @test JSON.parse(resp.body, IC.Item) == IC.Item("query", 3)
             end
         end
         @testset "PUT" begin
             with_server() do baseurl, _
                 resp = IC.replace(cfg(baseurl), item = IC.Item("gadget", 9))
                 @test resp.method == "PUT"
-                @test JSON3.read(resp.body, IC.Item).id == 9
+                @test JSON.parse(resp.body, IC.Item).id == 9
             end
         end
         @testset "form" begin
@@ -491,7 +491,7 @@ end
     @testset "payload resent" begin
         with_server() do baseurl, state
             resp = IC.upload_limited(cfg(baseurl), item = IC.Item("again", 2))
-            @test JSON3.read(resp.body, IC.Item) == IC.Item("again", 2)
+            @test JSON.parse(resp.body, IC.Item) == IC.Item("again", 2)
             @test state.requests == 2
         end
     end

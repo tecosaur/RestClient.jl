@@ -22,16 +22,16 @@ pkg> generate DeckAPI
     DeckAPI/src/DeckAPI.jl
 #+end_example
 
-Then, we activate the project and add =JSON3= and =RestClient= as
+Then, we activate the project and add =JSON= and =RestClient= as
 dependencies.
 
 #+begin_example
 pkg> activate DeckAPI
 
-(DeckAPI) pkg> add RestClient JSON3
+(DeckAPI) pkg> add RestClient JSON
     Updating `/tmp/DeckAPI/Project.toml`
-  [e1389577] + RestClient v0.1.0
-  [0f8b85d8] + JSON3 v1.14.1
+  [682c06a0] + JSON v1.10.0
+  [e1389577] + RestClient v2.0.0
     Updating `/tmp/DeckAPI/Manifest.toml`
   [...] ...
 #+end_example
@@ -40,7 +40,7 @@ Then we can navigate to =DeckAPI/src/DeckAPI.jl=, get rid of the default
 ~greet() = print("Hello World!")~, and add
 
 #+begin_src julia
-using RestClient, JSON3
+using RestClient, JSON
 #+end_src
 
 Now we're ready to get started implementing the API! To start with, we'll want
@@ -156,7 +156,7 @@ RestClient.parameters(new::NewDeckEndpoint) = ["deck_count" => string(new.count)
 #+end_src
 
 After performing this request, we expect a JSON representation of a ~Deck~ to be
-returned. Since we used [[@ref][~@jsondef~]] to create the type, JSON3 will know how to
+returned. Since we used [[@ref][~@jsondef~]] to create the type, JSON.jl will know how to
 parse it and we need only declare that we expect a ~Deck~ response.
 
 #+begin_src julia

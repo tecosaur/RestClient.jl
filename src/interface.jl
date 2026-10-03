@@ -223,8 +223,7 @@ mimetype(::Type) = nothing
 
 Interpret `data` as a response of type `T` according to `fmt`.
 
-For `JSONFormat`, the backend-specific methods are implemented in package
-extensions (`JSONExt` for JSON.jl, `JSON3Ext` for JSON3.jl).
+For `JSONFormat`, the methods are implemented in the JSON.jl package extension.
 """
 function interpretresponse end
 
@@ -256,6 +255,16 @@ writepayload(::IO, ::RawFormat, data::T) where {T} =
     throw(ArgumentError("Cannot send a $T as a raw (text/bytes) payload. \
                          Declare its format with a `RestClient.dataformat(::Type{$T})` \
                          method (e.g. via @jsondef), or define `writepayload` for it."))
+
+const FORMAT_PACKAGES = (JSONFormat = :JSON, XMLFormat = :XML)
+
+interpretresponse(::AbstractVector{UInt8}, fmt::Union{JSONFormat, XMLFormat}, ::Type{T}) where {T} =
+    throw(ArgumentError("Cannot read a $T as $(nameof(typeof(fmt))) without its package loaded: \
+                         add `using $(FORMAT_PACKAGES[nameof(typeof(fmt))])`"))
+
+writepayload(::Any, fmt::Union{JSONFormat, XMLFormat}, data::T) where {T} =
+    throw(ArgumentError("Cannot send a $T as $(nameof(typeof(fmt))) without its package loaded: \
+                         add `using $(FORMAT_PACKAGES[nameof(typeof(fmt))])`"))
 
 payloadmime(fmt::AbstractFormat, ::Type) = mimetype(typeof(fmt))
 payloadmime(::RawFormat, ::Type{<:Union{AbstractString, Number}}) = "text/plain; charset=utf-8"

@@ -84,7 +84,7 @@ RestClient.@formdef struct GenericForm{T}
 end
 RestClient.@formdef struct NoFields end
 module FieldSyntax
-    using RestClient, JSON3
+    using RestClient, JSON
     @formdef struct Positive
         n::Int
         Positive(n) = if n > 0 new(n) else throw(ArgumentError("n must be positive")) end
@@ -95,6 +95,19 @@ module FieldSyntax
     end
     @formdef struct OptionalNote
         note::Union{String, Nothing}
+    end
+    @jsondef struct Defaulted
+        a."ay"::Int
+        c."see"::Int = 7
+        d::Int = c + 1
+    end
+    @jsondef struct Boxed{T}
+        value::T
+        label::String = "box"
+    end
+    @jsondef struct PositiveJSON
+        n::Int
+        PositiveJSON(n) = if n > 0 new(n) else throw(ArgumentError("n must be positive")) end
     end
 end
 RestClient.@formdef struct OptionalForm
@@ -350,6 +363,15 @@ end
             "u" -> String
             x."k"::Int
         end))
+    end
+    @testset "JSON defaults" begin
+        read(T, body) = RestClient.interpretresponse(codeunits(body), RestClient.dataformat(T), T)
+        @test read(FieldSyntax.PositiveJSON, """{"n":2}""").n == 2
+        @test_throws "positive" read(FieldSyntax.PositiveJSON, """{"n":0}""")   # via the inner constructor
+        @test read(FieldSyntax.Defaulted, """{"ay":1}""") == FieldSyntax.Defaulted(a = 1, c = 7, d = 8)
+        @test read(FieldSyntax.Defaulted, """{"see":2,"ay":1}""") == FieldSyntax.Defaulted(a = 1, c = 2, d = 3)
+        @test read(FieldSyntax.Boxed{Int}, """{"value":3}""") == FieldSyntax.Boxed(value = 3)
+        @test_throws "required key \"ay\"" read(FieldSyntax.Defaulted, """{"see":2}""")
     end
     @testset "template variables" begin
         vf(ex) = RestClient.varform(ex; varname = :self, localvars = [:self, :config],
@@ -731,6 +753,20 @@ end
         form = GenericForm(value = 1)
         @test RestClient.dataformat(typeof(form)) === RestClient.FormFormat()
         @test sprint(RestClient.writepayload, RestClient.FormFormat(), form) == "the-value=1"
+    end
+    @testset "format package not loaded" begin
+        # In a process with neither JSON.jl nor XML.jl, each format says what to load
+        script = """
+            using RestClient
+            for fmt in (RestClient.JSONFormat(), RestClient.XMLFormat())
+                for act in (() -> RestClient.interpretresponse(codeunits("[]"), fmt, Vector{String}),
+                            () -> sprint(RestClient.writepayload, fmt, ["a"]))
+                    try act() catch err println(sprint(showerror, err)) end
+                end
+            end"""
+        messages = readlines(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $script`)
+        @test length(messages) == 4
+        @test all(contains("using JSON"), messages[1:2]) && all(contains("using XML"), messages[3:4])
     end
     @testset "form bodies" begin
         formbody(form) = sprint(RestClient.writepayload, RestClient.FormFormat(), form)

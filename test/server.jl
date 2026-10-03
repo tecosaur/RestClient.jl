@@ -6,6 +6,7 @@
 # port; `state` exposes server-side counters for cross-request assertions.
 
 using HTTP
+using JSON
 using Sockets
 
 const ETAG = "\"v1-abc\""
@@ -29,18 +30,12 @@ mutable struct ServerState
 end
 ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0, 0.0)
 
-# Tiny JSON encoders, just enough to avoid a JSON dep and escaped interpolation.
-jsonval(s::AbstractString) = '"' * replace(s, '\\' => "\\\\", '"' => "\\\"") * '"'
-jsonval(n::Integer) = string(n)
-jsonval(b::Bool) = string(b)
-
 json_response(body::AbstractString) =
     HTTP.Response(200, ["Content-Type" => "application/json"], body)
-json_object(pairs::Pair...) =
-    json_response('{' * join(("$(jsonval(k)):$(jsonval(v))" for (k, v) in pairs), ',') * '}')
+json_object(pairs::Pair...) = json_response(JSON.json(Dict(pairs)))
 json_array(elements::Vector{<:AbstractString}) =
     json_response('[' * join(elements, ',') * ']')
-item_json(name::AbstractString, id::Integer) = "{\"name\":$(jsonval(name)),\"id\":$id}"
+item_json(name::AbstractString, id::Integer) = JSON.json((; name, id))
 
 queryparam(req, key, default = "") = get(HTTP.queryparams(HTTP.URI(req.target)), key, default)
 

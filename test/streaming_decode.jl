@@ -6,7 +6,7 @@ module StreamDecodeTest
 using RestClient: @jsondef, AbstractEndpoint, SSEvent, Stream, StreamFormat,
     decode_stream, isstreamend, dataformat, mimetype, framingtype, interpretresponse
 import RestClient
-using JSON3, StructTypes
+using JSON
 using Test
 using Downloads: RequestError, Response
 

@@ -3,24 +3,7 @@
 
 using Base64: base64encode
 
-"""
-    JSONFormat()
-
-Construct a `JSONFormat` singleton for whichever JSON backend is loaded.
-JSON.jl takes priority if both are loaded; throws if neither is.
-"""
-function JSONFormat()
-    backends = loadedjsonbackends()
-    isempty(backends) && throw(ArgumentError("No JSON backend loaded; load JSON or JSON3"))
-    JSONFormat{first(backends)}()
-end
-
-# The JSON backends whose extensions are loaded, JSON.jl's first.
-loadedjsonbackends() =
-    [backend for (backend, ext) in ((:json, :JSONExt), (:json3, :JSON3Ext))
-         if !isnothing(Base.get_extension(@__MODULE__, ext))]
-
-mimetype(::Type{<:JSONFormat}) = "application/json"
+mimetype(::Type{JSONFormat}) = "application/json"
 
 """
     authheaders(scheme::AuthScheme, key) -> Union{Pair{String, String}, Nothing}
@@ -151,17 +134,17 @@ function parsefield(line)
 end
 
 """
-    parsefields(struc::Expr, source::LineNumberNode; declare = fielddecl)
+    parsefields(struc::Expr, source::LineNumberNode)
         -> (; name::Symbol, fields, structdef::Expr)
 
 Parse the fields of the struct definition `struc` with [`parsefield`](@ref),
 giving those typed `Union{…, Nothing}` a default of `nothing`.
 
-`structdef` is `struc` with each field rewritten by `declare(field)`, ready for
-a `@kwdef`-like macro. Docstrings, line numbers and inner constructors in the
+`structdef` is `struc` with each field rewritten as `name[::Type][ = default]`, ready
+for `@kwdef`. Docstrings, line numbers and inner constructors in the
 body are kept.
 """
-function parsefields(struc, source::LineNumberNode; declare = fielddecl)
+function parsefields(struc, source::LineNumberNode)
     Meta.isexpr(struc, :struct, 3) && Meta.isexpr(struc.args[3], :block) ||
         throw(ArgumentError("Expected a struct definition, not $struc"))
     mutable, decl, body = struc.args
@@ -179,105 +162,22 @@ function parsefields(struc, source::LineNumberNode; declare = fielddecl)
             field = (; field..., default = :nothing)
         end
         push!(fields, field)
-        declare(field)
+        fielddecl(field)
     end
     (; name, fields, structdef = Expr(:struct, mutable, decl, Expr(:block, newbody...)))
 end
 
-# `name[::type][ = default]`, with `tag(name[::type])` in place of the declaration
-function fielddecl((; name, type, default), tag = identity)
-    decl = tag(if isnothing(type) name else :($name::$type) end)
+function fielddecl((; name, type, default))
+    decl = if isnothing(type) name else :($name::$type) end
     if isnothing(default) decl else Expr(:(=), decl, default) end
 end
 
 """
-    kwshow(structname::Symbol, fields) -> Expr
+    _jsondef_expand(source::LineNumberNode, option::Symbol, kind::Symbol, struc::Expr) -> Expr
 
-A `Base.show` method printing a `structname` value as `structname(field=value, …)`,
-leaving out fields equal (`===`) to their default. Defaults may refer to other
-fields, as in a `@kwdef` struct.
-"""
-function kwshow(structname::Symbol, fields)
-    showfields = map(fields) do (; name, default)
-        showfield = :(print(io, ifelse(needscomma, ", ", ""), $("$name=")); show(io, $(esc(name))); needscomma = true)
-        if isnothing(default) showfield else :($(esc(name)) === $(esc(default)) || $showfield) end
-    end
-    bindings = [:($(esc(name)) = x.$name) for (; name) in fields]
-    quote
-        function Base.show(io::IO, x::$(esc(structname)))
-            show(io, $(esc(structname)))
-            print(io, '(')
-            needscomma = false
-            $(Expr(:let, Expr(:block, bindings...), Expr(:block, showfields...)))
-            print(io, ')')
-        end
-    end
-end
-
-"""
-    _jsondef_expand(::Val{backend}, source::LineNumberNode, mod::Module, option::Symbol, kind::Symbol, struc::Expr) -> Expr
-
-Expand a `@jsondef` struct definition for the given JSON `backend`
-(`:json` for JSON.jl, `:json3` for JSON3.jl).
-
-Implemented by a package extension.
+Expand a `@jsondef` struct definition. Implemented by the JSON.jl extension.
 """
 function _jsondef_expand end
-
-"""
-    _jsondef_wrapper_field(kind::Symbol, fieldtypes, mod::Module) -> Union{Any, Nothing}
-
-Return the field type expression for a single-field container wrapper, or
-`nothing` for any other shape. The type is resolved in `mod`; a forward
-reference (unevaluable) falls back to `nothing`.
-"""
-function _jsondef_wrapper_field(kind::Symbol, fieldtypes, mod::Module)
-    kind ∈ (:Dict, :Array, :Vector) || return nothing
-    length(fieldtypes) == 1 || return nothing
-    ftype = only(fieldtypes)
-    isnothing(ftype) && return nothing
-    T = try Core.eval(mod, ftype) catch; return nothing end
-    T isa Type || return nothing
-    iswrapper = if kind === :Dict
-        T <: AbstractDict
-    else
-        T <: AbstractVector
-    end
-    if iswrapper ftype end
-end
-
-"""
-    _jsondef_wrapper_methods(structname, fmtexpr) -> Vector{Expr}
-
-Emit `interpretresponse`/`writepayload` methods for a single-field container
-wrapper, delegating to the wrapped field's own type (`fieldtype(T, 1)`).
-"""
-function _jsondef_wrapper_methods(structname, fmtexpr)
-    fmttype = :(typeof($fmtexpr))
-    Expr[
-        :(function RestClient.interpretresponse(data::AbstractVector{UInt8}, fmt::$fmttype, ::Type{T}) where {T <: $structname}
-              T(RestClient.interpretresponse(data, fmt, fieldtype(T, 1)))
-          end),
-        :(function RestClient.writepayload(io::IO, fmt::$fmttype, x::$structname)
-              RestClient.writepayload(io, fmt, getfield(x, 1))
-          end),
-    ]
-end
-
-function _jsondef_backend(mod::Module)
-    backends = loadedjsonbackends()
-    isempty(backends) && throw(ArgumentError("@jsondef requires JSON or JSON3 to be loaded"))
-    length(backends) == 1 && return only(backends)
-    # `jl_module_usings` is an internal API but stable since at least 1.0.
-    usings = ccall(:jl_module_usings, Vector{Any}, (Any,), mod)
-    inmodjson  = any(m -> nameof(m) === :JSON,  usings)
-    inmodjson3 = any(m -> nameof(m) === :JSON3, usings)
-    inmodjson && !inmodjson3 && return :json
-    inmodjson3 && !inmodjson && return :json3
-    throw(ArgumentError(
-        "@jsondef in $mod is ambiguous: both JSON and JSON3 extensions are loaded. \
-         `using` only one of them in this module."))
-end
 
 """
     @jsondef [:noshow] [kind] struct ... end
@@ -288,24 +188,23 @@ This macro conveniently combines the following pieces:
 - `@kwdef` to define keyword constructors for the struct.
 - Custom `Base.show` method to show the struct with keyword arguments,
   omitting default values (suppress with the `:noshow` option).
-- Registration of JSON field-name mapping with the active JSON backend.
+- Registration of the JSON field-name mapping with JSON.jl.
 - `RestClient.dataformat` to declare that this struct is JSON-formatted.
 
 Note the `name."json_field"` syntax demonstrated in the examples, that allows
 for declaration of the JSON object key that should be mapped to the field.
 A field typed `Union{…, Nothing}` defaults to `nothing`.
 
-The optional `kind` argument selects the JSON representation, defaulting
-to `Struct`. Both backends support `Struct`, `Dict`, `Array`, `Vector`,
-`Nothing`, and `String`; for `String`, the user must define `Base.string`
-and a `T(::AbstractString)` constructor. The JSON3 backend additionally
-supports `Number` and `Bool`; with the JSON.jl backend these require
-user-defined `StructUtils.lift` / `StructUtils.lower` methods.
+The optional `kind` argument selects the JSON representation, one of `Struct`
+(the default), `Dict`, `Array`, `Vector`, `Nothing`, and `String`. For `String`,
+the user must define `Base.string` and a `T(::AbstractString)` constructor. A
+number or boolean representation needs user-defined `StructUtils.lift` /
+`StructUtils.lower` methods instead.
 
-For an open-ended JSON object or array, a struct wrapping a *single*
-`AbstractDict` (`kind=Dict`) or `AbstractVector` (`kind=Array`/`Vector`) field
-decodes the whole payload into that field (recursively) and wraps it. Any other
-shape declares only `dataformat`, leaving the backend integration to the user.
+For an open-ended JSON object or array, a struct with a *single* field of kind
+`Dict` or `Array`/`Vector` reads the whole object or array into that field, whether
+it is the response itself or nested within another struct. A container kind with
+more fields is read and written as a struct of its fields, like `Struct`.
 
 ```julia
 @jsondef Dict struct Translations
@@ -314,10 +213,8 @@ end
 ```
 
 !!! warning "Soft JSON dependency"
-    This macro is implemented in package extensions, and so
-    requires either `JSON` or `JSON3` to be loaded before it can be used.
-    If both are loaded, the backend is chosen based on which of `JSON`
-    or `JSON3` is `using`'d in the calling module.
+    This macro is implemented in a package extension, and so
+    requires `JSON` to be loaded before it can be used.
 
 # Examples
 
@@ -334,7 +231,9 @@ macro jsondef(args...)
     option, kind, struc = _jsondef_parse_args(args)
     struc isa Expr ||
         throw(ArgumentError("@jsondef expects a struct definition"))
-    _jsondef_expand(Val(_jsondef_backend(__module__)), __source__, __module__, option, kind, struc)
+    isnothing(Base.get_extension(@__MODULE__, :JSONExt)) &&
+        throw(ArgumentError("@jsondef requires JSON to be loaded"))
+    _jsondef_expand(__source__, option, kind, struc)
 end
 
 function _jsondef_parse_args(args::Tuple)
