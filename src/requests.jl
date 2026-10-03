@@ -353,11 +353,7 @@ function debug_request(method::String, url::String, headers, payload::Union{IO, 
         end
         S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) sent to "
     end
-    strheaders = if isempty(headers)
-        S""
-    else
-        join((S"\n       {emphasis:$k:} $(shown(k, v))" for (k, v) in headers), "")
-    end
+    strheaders = join((S"\n       {emphasis:$k:} $(shown(k, v))" for (k, v) in headers), "")
     S"{inverse,bold,magenta: $method } $payloadinfo{light,underline:$url}$strheaders"
 end
 
@@ -376,11 +372,7 @@ function debug_response(url::String, res::Downloads.Response, buf::IOBuffer;
     msg = S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
     headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, res.headers)
     nhiddenheaders = length(res.headers) - length(headers)
-    strheaders = if isempty(headers)
-        S""
-    else
-        join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
-    end
+    strheaders = join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
     strhiddenheaders = if iszero(nhiddenheaders)
         S""
     else

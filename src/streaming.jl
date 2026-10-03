@@ -314,15 +314,7 @@ struct SSEvent{T}
     id::Union{String, Nothing}
 end
 
-function Base.iterate(ev::SSEvent, s::Int = 1)
-    if s == 1
-        (ev.event, 2)
-    elseif s == 2
-        (ev.data, 3)
-    elseif s == 3
-        (ev.id, 4)
-    end
-end
+Base.iterate(ev::SSEvent, s::Int = 1) = if s <= 3 (getfield(ev, s), s + 1) end
 
 elementpayload(::Type{SSEvent{T}}) where {T} = T
 
