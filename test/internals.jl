@@ -263,6 +263,35 @@ end
         @test fieldnames(DocClient.DocEndpoint) == (:id, :rev)
         @test RestClient.urlpath(RequestConfig("http://x"), DocClient.DocEndpoint(id = 4)) == "doc/4"
     end
+    @testset "docstrings" begin
+        @test_nowarn @eval module DocsClient
+            using RestClient
+            """
+                dothing(input) -> String
+
+            Does the thing.
+            """
+            @endpoint struct DoThingEndpoint
+                dothing(input) -> "thing/{input}" -> String
+                input::Int
+            end
+            "Fetches a widget."
+            @endpoint widget(id::Int) -> "widgets/{id}" -> String
+            "A plain endpoint."
+            @endpoint struct PlainDocEndpoint
+                "plain" -> String
+            end
+        end
+        # The raw docstrings (rendering them needs the REPL, absent under Pkg.test)
+        doc(name) = join((join(string.(d.text)) for d in values(
+            Base.Docs.meta(DocsClient)[Base.Docs.Binding(DocsClient, name)].docs)), '\n')
+        @test occursin("Does the thing.", doc(:dothing))
+        @test occursin("The request made by `dothing`", doc(:DoThingEndpoint))
+        @test !occursin("Does the thing.", doc(:DoThingEndpoint))
+        @test occursin("Fetches a widget.", doc(:widget))
+        @test occursin("The request made by `widget`", doc(:WidgetEndpoint))
+        @test occursin("A plain endpoint.", doc(:PlainDocEndpoint))   # no function
+    end
     @testset "chained struct with a field docstring" begin
         @eval module ChainDocClient
             using RestClient

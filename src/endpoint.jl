@@ -83,6 +83,19 @@ fields defaulting to `nothing`. This makes function forms an easy way to
 prescribe positional, mandatory arguments with the flexibility to fully specify
 the endpoint with keyword arguments.
 
+A docstring on an `@endpoint` with a function form documents the function, and
+the struct is given a docstring that points to it. Without a function form, the
+docstring documents the struct.
+
+```julia
+\"\"\"
+    dothing(input) -> Output
+
+Do the thing to `input`.
+\"\"\"
+@endpoint dothing(input::Foo) -> "thing/{input}" -> Output
+```
+
 ## Struct forms
 
 The endpoint struct can be given explicitly, or generated from the function
@@ -250,7 +263,16 @@ macro endpoint(args...)
     efields = Symbol[f.name for f in einfo.fields]
     body = Expr[]
     # Standard components: struct, page, parameters, responsetype
-    push!(body, Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, einfo.structdef))
+    structdef = Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, einfo.structdef)
+    if isnothing(einfo.func)
+        push!(body, structdef)
+    else
+        # The docstring goes to the function (marked below), and the struct points to it
+        push!(body, undocumented(macroexpand(__module__, structdef; recursive = false)))
+        push!(body, Expr(:macrocall, GlobalRef(Core, Symbol("@doc")), __source__,
+                         "    $(einfo.structname)\n\nThe request made by `$(first(einfo.func.args))`, which see.\n",
+                         einfo.structname))
+    end
     defform(func::Symbol, ::Nothing, body) =
         :($(@__MODULE__).$func($CONFIG_VAR::$RequestConfig, $ANAPHORIC_VAR::$(einfo.structname)) = $body)
     defform(func::Symbol, params::Vector{Symbol}, body) =
@@ -296,12 +318,21 @@ macro endpoint(args...)
         push!(body, :($(authself(:authpolicy)) = $(QuoteNode(policy))))
     # Function (optional)
     if !isnothing(einfo.func)
-        for fn in generate_funcalls(einfo; mod=__module__)
-            push!(body, fn)
-        end
+        fnoconfig, fconfig = generate_funcalls(einfo; mod=__module__)
+        push!(body, Expr(:macrocall, GlobalRef(Base, Symbol("@__doc__")), __source__, fnoconfig), fconfig)
     end
     esc(Expr(:block, body...))
 end
+
+# `expr` with its `@__doc__` markers removed, so a docstring passes it by
+undocumented(expr) =
+    if Meta.isexpr(expr, :macrocall) && isdocmarker(expr.args[1])
+        undocumented(last(expr.args))
+    elseif expr isa Expr
+        Expr(expr.head, map(undocumented, expr.args)...)
+    else
+        expr
+    end
 
 const AUTH_MARKERS = (:auth, :authoption, :noauth)
 
@@ -317,6 +348,16 @@ function resolve_auth(marker::Union{Symbol, Nothing}, mod::Module)
         (scheme, policy)
     end
 end
+
+# Whether `f` names `@__doc__`, written as a GlobalRef or a `Base.@__doc__`-style reference
+isdocmarker(f) =
+    Symbol("@__doc__") === if f isa GlobalRef
+        f.name
+    elseif Meta.isexpr(f, :., 2) && f.args[2] isa QuoteNode
+        f.args[2].value
+    else
+        f
+    end
 
 allowsnothing(type) =
     Meta.isexpr(type, :curly) && first(type.args) === :Union && :Nothing in type.args[2:end]
