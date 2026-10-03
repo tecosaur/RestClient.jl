@@ -31,16 +31,9 @@ mimetype(::Type{MultipartFormat}) = MULTIPART_MIME
 # RFC 3986 percent-encoding (via `encode_uri_component`) is universally
 # accepted; we don't bother with the legacy `+`-for-space substitution.
 function writepayload(io::IO, ::FormFormat, data)
-    firstpair = true
-    for name in propertynames(data)
-        val = getproperty(data, name)
-        isnothing(val) && continue
-        firstpair || print(io, '&')
-        firstpair = false
-        encode_uri_component(io, form_key(typeof(data), name))
-        print(io, '=')
-        encode_uri_component(io, string(val))
-    end
+    fields = (name => getproperty(data, name) for name in propertynames(data))
+    print(io, url_parameters(form_key(typeof(data), name) => string(val)
+                             for (name, val) in fields if !isnothing(val)))
 end
 
 const MultipartBinary = Union{AbstractVector{UInt8}, IO}

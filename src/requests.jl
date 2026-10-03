@@ -147,44 +147,28 @@ function decode_uri_component(s::AbstractString)
 end
 
 """
-    url_parameters(params::Vector{Pair{String, String}})
+    url_parameters(params)
 
-Return a URL query string from a vector of key-value pairs `params`.
-
-The returned string is of the form `?key1=value1&key2=value2&...`,
-with keys and values encoded by `encode_uri_component`. If `params` is empty,
-the empty string is returned.
+Return the query string `key1=value1&key2=value2&...` for the `key => value`
+string pairs in `params`, with keys and values encoded by `encode_uri_component`.
 
 # Examples
 
 ```julia
 julia> url_parameters(["foo" => "bar", "baz" => "qux"])
-"?foo=bar&baz=qux"
+"foo=bar&baz=qux"
 
 julia> url_parameters(Pair{String, String}[])
 ""
 ```
 """
-function url_parameters(params::Vector{Pair{String, String}})
-    if isempty(params)
-        ""
-    else
-        iob = IOBuffer()
-        print(iob, '?')
-        for (i, (key, val)) in enumerate(params)
-            i > 1 && print(iob, '&')
-            encode_uri_component(iob, key)
-            print(iob, '=')
-            encode_uri_component(iob, val)
-        end
-        String(take!(iob))
-    end
-end
+url_parameters(params) =
+    join((encode_uri_component(key) * '=' * encode_uri_component(val) for (key, val) in params), '&')
 
 function url(req::Request)
     path, query = urlpath(req.config, req.endpoint)::String, url_parameters(parameters(req))
-    '?' in path && !isempty(query) && (query = "&" * chopprefix(query, "?"))
-    string(req.config.baseurl, '/', path, query)
+    isempty(query) && return string(req.config.baseurl, '/', path)
+    string(req.config.baseurl, '/', path, ifelse('?' in path, '&', '?'), query)
 end
 
 # `headers(req)` plus the Content-Type/Accept implied by the payload and response formats

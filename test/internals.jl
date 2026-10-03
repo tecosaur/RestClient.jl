@@ -82,6 +82,11 @@ end
 RestClient.@formdef struct GenericForm{T}
     value."the-value"::T
 end
+RestClient.@formdef struct NoFields end
+RestClient.@formdef struct OptionalForm
+    a::Union{Int, Nothing} = nothing
+    b::Union{String, Nothing} = nothing
+end
 
 struct OneContent <: SingleResponse{Int}
     note::String
@@ -695,6 +700,13 @@ end
         form = GenericForm(value = 1)
         @test RestClient.dataformat(typeof(form)) === RestClient.FormFormat()
         @test sprint(RestClient.writepayload, RestClient.FormFormat(), form) == "the-value=1"
+    end
+    @testset "form bodies" begin
+        formbody(form) = sprint(RestClient.writepayload, RestClient.FormFormat(), form)
+        @test formbody(NoFields()) == ""
+        @test formbody(OptionalForm()) == ""
+        @test formbody(OptionalForm(b = "x y&z")) == "b=x%20y%26z"
+        @test formbody(OptionalForm(a = 1, b = "")) == "a=1&b="
     end
     @testset "multipart names" begin
         body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), OddNames(a = "v"))
