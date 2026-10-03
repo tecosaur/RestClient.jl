@@ -142,6 +142,7 @@ end
     # compile-time errors, which have no request analogue.
     @testset "errors" begin
         @test_throws Exception @macroexpand @endpoint 42               # not a struct/arrow form
+        @test_throws "Unknown @jsondef option" @macroexpand @jsondef :nosho struct J; x::Int; end
         # Function forms take plain names and arguments
         @test_throws "plain name" @macroexpand @endpoint Base.f(x) -> "u" -> String
         @test_throws "Malformed function argument" @macroexpand @endpoint f(xs...) -> "u" -> String

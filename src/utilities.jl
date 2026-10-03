@@ -235,6 +235,8 @@ function _jsondef_parse_args(args::Tuple)
     option, kind, struc = :default, :Struct, nothing
     for arg in args
         if arg isa QuoteNode && arg.value isa Symbol
+            arg.value === :noshow ||
+                throw(ArgumentError("Unknown @jsondef option `:$(arg.value)`; the only option is `:noshow`"))
             option = arg.value
         elseif arg isa Symbol
             kind = arg
