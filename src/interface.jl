@@ -209,7 +209,7 @@ dataformat(@nospecialize(::Type)) = RawFormat()
 dataformat(@nospecialize(::AbstractEndpoint), T::Type) = dataformat(T)
 
 dataformat(::Type{Vector{T}}) where T = dataformat(T)
-dataformat(::Type{<:Dict{<:Union{String, Integer, Float64}, T}}) where T = dataformat(T)
+dataformat(::Type{<:Dict{<:Any, T}}) where T = dataformat(T)
 
 """
     mimetype(::Type{<:AbstractFormat}) -> Union{String, Nothing}

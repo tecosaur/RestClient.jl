@@ -119,6 +119,11 @@ end
         @test l.items == [JC.Item(name = "x", id = 1), JC.Item(name = "y", id = 2)]
         @test jsonparse(JC.ItemList, jsonwrite(l)).items == l.items
     end
+    @testset "plain Dict" begin
+        T = Dict{Symbol, JC.Item}
+        @test RestClient.dataformat(T) == RestClient.JSONFormat()     # any key type
+        @test jsonparse(T, """{"a":{"name":"x","id":1}}""") == Dict(:a => JC.Item(name = "x", id = 1))
+    end
     @testset "nested" begin
         json = """{"byname":{"a":{"name":"x","id":1}},"listed":[{"name":"y","id":2}]}"""
         c = jsonparse(JC.Catalogue, json)
