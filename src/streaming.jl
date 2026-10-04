@@ -157,8 +157,10 @@ function closefinalized(s::Stream)
     nothing
 end
 
-dataformat(S::Type{<:Stream}) =
-    StreamFormat{framingtype(S)}(dataformat(elementpayload(eltype(S))))
+function dataformat(S::Type{<:Stream})
+    fmt = dataformat(elementpayload(eltype(S)))
+    StreamFormat{framingtype(S)}(if fmt isa UnspecifiedFormat RawFormat() else fmt end)
+end
 
 """
     isstreamend(endpoint::AbstractEndpoint, frame) -> Bool

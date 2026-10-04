@@ -55,10 +55,10 @@ function setfield(x::T, field::Symbol, value) where {T}
 end
 
 """
-    @globalconfig config [auth=scheme | auth=(scheme, policy)]
+    @globalconfig config [auth=scheme | auth=(scheme, policy)] [format=fmt]
 
-Define [`globalconfig`](@ref) for the current module as `config`, and optionally a
-module-wide authentication default applied to endpoints defined with [`@endpoint`](@ref).
+Define [`globalconfig`](@ref) for the current module as `config`, and optionally
+module-wide authentication and format defaults for its endpoints.
 
 This avoids having to write the slightly awkward
 `RestClient.globalconfig(::Val{@__MODULE__}) = config` by hand. Similarly, the
@@ -74,6 +74,12 @@ may take one of two forms:
   - `:optional` — send the `key` if one is set, but do not require it;
   - `:required` — send the `key`, and reject a request that has none before sending.
 
+The `format` clause sets the [`AbstractFormat`](@ref) of values that have none of
+their own, such as a `Vector{String}` or `Dict{String, Any}` result, or a `String`
+to decode as JSON, in place of [`RawFormat`](@ref). Bytes (`Vector{UInt8}`, `IO`)
+stay raw. It may be a format, such as `JSONFormat()`, or the shorthand `:json` or
+`:xml`. A [`dataformat`](@ref) method for an endpoint and type still takes precedence.
+
 See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 
 # Examples
@@ -84,15 +90,26 @@ See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 @globalconfig RequestConfig("https://api.example.com") auth=(BearerAuth(), :optional)
 # Require a key on every endpoint (mark public ones `:noauth`):
 @globalconfig RequestConfig("https://api.example.com") auth=(BearerAuth(), :required)
+# Read and send plain values (e.g. a `Vector{String}`) as JSON:
+@globalconfig RequestConfig("https://api.example.com") format=:json
 ```
 """
 macro globalconfig(config, opts::Expr...)
-    scheme, policy = :($(@__MODULE__).NoAuth()), QuoteNode(:off)
+    scheme, policy, format = :($(@__MODULE__).NoAuth()), QuoteNode(:off), RawFormat()
     for opt in opts
-        Meta.isexpr(opt, :(=), 2) && first(opt.args) === :auth ||
-            throw(ArgumentError("@globalconfig accepts only an `auth=...` option, got `$opt`"))
-        val = opt.args[2]
-        if Meta.isexpr(val, :tuple, 2)
+        Meta.isexpr(opt, :(=), 2) && first(opt.args) ∈ (:auth, :format) ||
+            throw(ArgumentError("@globalconfig accepts only `auth=...` and `format=...` options, got `$opt`"))
+        name, val = opt.args
+        if name === :format
+            format = if val isa QuoteNode
+                get(FORMAT_SHORTHANDS, val.value) do
+                    throw(ArgumentError("unknown format `$val` in @globalconfig; use one of \
+                                         $(join(map(repr, keys(FORMAT_SHORTHANDS)), ", ")) or a format such as `JSONFormat()`"))
+                end
+            else
+                esc(val)
+            end
+        elseif Meta.isexpr(val, :tuple, 2)
             scheme, policy = val.args
             policy isa QuoteNode && policy.value ∈ AUTH_POLICIES ||
                 throw(ArgumentError("auth policy must be one of $AUTH_POLICIES, got `$policy`"))
@@ -110,8 +127,11 @@ macro globalconfig(config, opts::Expr...)
                 $RequestConfig(c.baseurl, $gate, c.key, c.timeout, c.cache)
             end
         $(@__MODULE__).globalauthdefault(::Val{$__module__}) = ($(esc(scheme)), $policy)
+        $(@__MODULE__).globalformatdefault(::Val{$__module__}) = $format
     end
 end
+
+const FORMAT_SHORTHANDS = (json = JSONFormat(), xml = XMLFormat())
 
 """
     parsefield(line) -> (; name::Symbol, key, type, default)

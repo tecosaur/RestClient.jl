@@ -776,6 +776,41 @@ end
         @test RestClient.dataformat(typeof(form)) === RestClient.FormFormat()
         @test sprint(RestClient.writepayload, RestClient.FormFormat(), form) == "the-value=1"
     end
+    @testset "API format" begin
+        @eval module FormatClient
+            using RestClient, JSON
+            @globalconfig RequestConfig("http://x") format = :json
+            @formdef struct Login; user::String; end
+            @endpoint names() -> "n" -> Vector{String}
+            @endpoint name() -> "n" -> String
+            @endpoint bytes() -> "b" -> Vector{UInt8}
+            @endpoint login(user::String) -> Login(user) -> "l" -> String
+            @endpoint tag(tags::Vector{String}) -> tags -> :post("t") -> Nothing
+            @endpoint words() -> "w" -> Stream{String}
+            struct CsvText; text::String; end
+            RestClient.dataformat(::Type{CsvText}) = RawFormat()     # explicitly raw
+            @endpoint csv() -> "c" -> CsvText
+        end
+        FC, json = FormatClient, RestClient.JSONFormat()
+        # Values without a format of their own take the API's; bytes stay raw
+        @test @inferred(RestClient.dataformat(FC.NamesEndpoint(), Vector{String})) === json
+        @test RestClient.dataformat(FC.NameEndpoint(), String) === json
+        @test RestClient.dataformat(FC.BytesEndpoint(), Vector{UInt8}) === RawFormat()
+        @test RestClient.dataformat(FC.LoginEndpoint("u"), FC.Login) === RestClient.FormFormat()
+        @test RestClient.dataformat(FC.WordsEndpoint(), Stream{String}) == RestClient.StreamFormat{:SSE}(json)
+        @test RestClient.dataformat(PlainEP(), Vector{String}) === RawFormat()   # no API format
+        @test RestClient.dataformat(FC.CsvEndpoint(), FC.CsvText) === RawFormat()  # declared raw stays raw
+        @test RestClient.dataformat(Vector{String}) === RestClient.UnspecifiedFormat()
+        # Resolved when compiled: the call is just its result
+        ci = only(code_typed(RestClient.dataformat, Tuple{FC.NamesEndpoint, Type{Vector{String}}}))[1]
+        @test count(s -> !Meta.isexpr(s, :code_coverage_effect), ci.code) == 1
+        # A JSON string decodes, and a collection payload is sent as JSON
+        @test RestClient.interpretresponse(codeunits("\"bob\""), RestClient.dataformat(FC.NameEndpoint(), String), String) == "bob"
+        out = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), FC.TagEndpoint(["a", "b"])))
+        @test String(copy(out.payload)) == "[\"a\",\"b\"]"
+        @test ("Content-Type" => "application/json") in out.headers
+        @test_throws "unknown format" @macroexpand @globalconfig RequestConfig("http://x") format = :yaml
+    end
     @testset "format package not loaded" begin
         # In a process with neither JSON.jl nor XML.jl, each format says what to load
         script = """

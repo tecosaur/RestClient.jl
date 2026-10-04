@@ -42,7 +42,7 @@ const MultipartBinary = Union{AbstractVector{UInt8}, IO}
 function writepayload(io::IO, ::MultipartFormat, data)
     function writepart(fieldname::String, val)
         fmt = dataformat(typeof(val))
-        fmt isa RawFormat && !(val isa MultipartBinary) && (val = string(val))
+        fmt isa UnspecifiedFormat && (fmt = RawFormat(); val = string(val))
         mime = payloadmime(fmt, typeof(val))
         print(io, "--", MULTIPART_BOUNDARY, "\r\n",
               "Content-Disposition: form-data; name=\"", fieldname, '"')
@@ -56,7 +56,8 @@ function writepayload(io::IO, ::MultipartFormat, data)
         val = getproperty(data, name)
         # Percent-encode what would break the quoted name (RFC 7578 §4.2)
         fieldname = replace(form_key(typeof(data), name), '"' => "%22", '\r' => "%0D", '\n' => "%0A")
-        issplit = val isa MultiValue && !(val isa MultipartBinary) && dataformat(typeof(val)) isa RawFormat
+        issplit = val isa MultiValue && !(val isa MultipartBinary) &&
+            dataformat(typeof(val)) isa Union{RawFormat, UnspecifiedFormat}
         for part in (if issplit val else (val,) end)
             isnothing(part) || writepart(fieldname, part)
         end

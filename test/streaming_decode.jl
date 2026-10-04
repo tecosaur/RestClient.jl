@@ -51,6 +51,7 @@ function run()
 @testset "format composition" begin
     @test dataformat(Stream{Tok, :NDJSON}) isa StreamFormat{:NDJSON}
     @test dataformat(Stream{SSEvent{Tok}, :SSE}) isa StreamFormat{:SSE}
+    @test dataformat(Stream{String}) == StreamFormat{:SSE}(RestClient.RawFormat())   # unspecified: raw
     @test mimetype(typeof(dataformat(Stream{Tok, :SSE}))) == "text/event-stream"
     @test mimetype(typeof(dataformat(Stream{Tok, :NDJSON}))) == "application/x-ndjson"
     @test framingtype(Stream{Tok, :NDJSON}) === :NDJSON

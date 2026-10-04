@@ -131,9 +131,17 @@ RestClient.cachelifetime
 
 * Content formatting
 
+Each type a request sends or receives has a format: its own, from [[@ref][~@jsondef~]],
+[[@ref][~@xmldef~]], [[@ref][~@formdef~]] or a ~dataformat~ method, or else its API's, which
+is raw text or bytes unless [[@ref][~@globalconfig~]]'s =format= option says otherwise (e.g.
+=format = :json= for an API whose plain values, like a ~Vector{String}~, are JSON). A single
+endpoint can still differ: in a JSON API, a =text/plain= one declares
+~RestClient.dataformat(::ThatEndpoint, ::Type{String}) = RawFormat()~.
+
 #+begin_src @docs
 RestClient.AbstractFormat
 RestClient.RawFormat
+RestClient.UnspecifiedFormat
 RestClient.JSONFormat
 RestClient.XMLFormat
 RestClient.FormFormat

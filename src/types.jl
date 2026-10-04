@@ -77,6 +77,15 @@ received as-is, numbers as their decimal text. Other types need a format of thei
 struct RawFormat <: AbstractFormat end
 
 """
+    UnspecifiedFormat <: AbstractFormat
+
+The format of a type that declares none, given by the default `dataformat(::Type)`.
+An endpoint takes it as its API's format (see [`@globalconfig`](@ref)), which is
+[`RawFormat`](@ref) unless declared otherwise.
+"""
+struct UnspecifiedFormat <: AbstractFormat end
+
+"""
     JSONFormat <: AbstractFormat
 
 Singleton type for JSON request/response formats, read and written with JSON.jl

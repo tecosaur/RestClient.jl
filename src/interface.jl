@@ -20,6 +20,7 @@ See also: [`@globalconfig`](@ref), [`RequestConfig`](@ref).
 function globalconfig end
 
 globalauthdefault(::Val) = (NoAuth(), :off)
+globalformatdefault(::Val) = RawFormat()
 
 """
     urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
@@ -200,15 +201,24 @@ end
 Return the expected format that `T` is represented by in requests to and
 responses from `endpoint`.
 
-Using the default `dataformat(::Type)` method, the format is [`RawFormat`](@ref).
+A type without a format of its own has [`UnspecifiedFormat`](@ref), which for an
+endpoint becomes its API's format: [`RawFormat`](@ref), unless declared otherwise
+with `@globalconfig … format = …` (see [`@globalconfig`](@ref)). Bytes and `IO`
+are always `RawFormat`, as is any type whose own `dataformat` method says so.
 
 A `dataformat(::Type)` method is automatically defined when invoking [`@jsondef`](@ref).
 """
-dataformat(@nospecialize(::Type)) = RawFormat()
+dataformat(@nospecialize(::Type)) = UnspecifiedFormat()
 
-dataformat(@nospecialize(::AbstractEndpoint), T::Type) = dataformat(T)
+function dataformat(endpoint::AbstractEndpoint, ::Type{T}) where {T}
+    T <: Stream && return StreamFormat{framingtype(T)}(dataformat(endpoint, elementpayload(eltype(T))))
+    fmt = dataformat(T)
+    if fmt isa UnspecifiedFormat globalformatdefault(Val(parentmodule(typeof(endpoint)))) else fmt end
+end
 
-dataformat(::Type{Vector{T}}) where T = dataformat(T)
+dataformat(::Type{<:AbstractVector{UInt8}}) = RawFormat()
+dataformat(::Type{<:IO}) = RawFormat()
+dataformat(::Type{<:AbstractVector{T}}) where T = dataformat(T)
 dataformat(::Type{<:Dict{<:Any, T}}) where T = dataformat(T)
 
 """
@@ -238,8 +248,9 @@ interpretresponse(data::AbstractVector{UInt8}, ::RawFormat, ::Type{T}) where {T 
 
 interpretresponse(::AbstractVector{UInt8}, ::RawFormat, ::Type{T}) where {T} =
     throw(ArgumentError("Cannot interpret a raw (text/bytes) response as a $T. \
-                         Declare its format with a `RestClient.dataformat(::Type{$T})` \
-                         method (e.g. via @jsondef), or define `interpretresponse` for it."))
+                         Declare the API's format (e.g. `@globalconfig … format = :json`), \
+                         or $T's with a `RestClient.dataformat(::Type{$T})` method (e.g. via \
+                         @jsondef), or define `interpretresponse` for it."))
 
 """
     writepayload(dest::IO, fmt::AbstractFormat, data)
@@ -253,8 +264,9 @@ writepayload(dest::IO, ::RawFormat, data::Number) = print(dest, data)
 
 writepayload(::IO, ::RawFormat, data::T) where {T} =
     throw(ArgumentError("Cannot send a $T as a raw (text/bytes) payload. \
-                         Declare its format with a `RestClient.dataformat(::Type{$T})` \
-                         method (e.g. via @jsondef), or define `writepayload` for it."))
+                         Declare the API's format (e.g. `@globalconfig … format = :json`), \
+                         or $T's with a `RestClient.dataformat(::Type{$T})` method (e.g. via \
+                         @jsondef), or define `writepayload` for it."))
 
 const FORMAT_PACKAGES = (JSONFormat = :JSON, XMLFormat = :XML)
 
