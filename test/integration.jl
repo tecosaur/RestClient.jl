@@ -76,6 +76,9 @@ module IntegrationClient
     @endpoint forbidden() -> "forbidden" -> Item
     @endpoint forbidden_limited() -> "forbidden/limited" -> Item
     @endpoint always429() -> "always429" -> Item
+    @endpoint unavailable() -> "unavailable" -> Item
+    @endpoint flaky(status::Int) -> "flaky/{status}" -> Item
+    @endpoint flaky_post(status::Int; item::Item) -> item -> "flaky/{status}" -> Item
     @endpoint long_limited() -> "ratelimited/long" -> Item
     @endpoint upload_limited(; item::Item) -> item -> "echo/limited" -> Echoed
     @endpoint upload_stream(; data::IO) -> data -> "echo/limited" -> Echoed
@@ -472,12 +475,32 @@ end
             @test state.requests == 2
         end
     end
+    # A 503 is retried when the server says when to come back, as with a 429
+    @testset "503 with Retry-After retried" begin
+        with_server() do baseurl, state
+            @test IC.unavailable(cfg(baseurl)).id == 1
+            @test state.requests == 2
+        end
+    end
+    # A gateway failure is retried with backoff, but only where repeating the request is safe
+    @testset "$status retried when idempotent" for status in (502, 503, 504)
+        with_server() do baseurl, state
+            @test IC.flaky(cfg(baseurl), status).id == 1
+            @test state.requests == 2
+        end
+    end
+    @testset "$status not retried for a POST" for status in (502, 503)
+        with_server() do baseurl, state
+            @test_throws RestClient.ResponseError IC.flaky_post(cfg(baseurl), status; item = IC.Item("x", 1))
+            @test state.requests == 1
+        end
+    end
     @testset "attempts capped" begin
         with_server() do baseurl, state
             err = try IC.always429(cfg(baseurl)) catch e; e end
             @test err isa RestClient.ResponseError
             @test err.response.status == 429
-            @test state.requests == RestClient.RATELIMIT_MAX_ATTEMPTS
+            @test state.requests == RestClient.MAX_ATTEMPTS
         end
     end
     @testset "wait beyond timeout" begin

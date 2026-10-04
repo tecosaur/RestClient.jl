@@ -19,19 +19,22 @@ the resource exists: `true` on success, `false` on 404 or 410.
 # Errors
 
 - [`MalformedRequest`](@ref) if the request fails validation.
-- [`ResponseError`](@ref) if the server responds with an unsuccessful status,
-  including a rate limit that outlasts the retries.
+- [`ResponseError`](@ref) if the server responds with an unsuccessful status. A
+  response asking to be retried later (a 429, or a 403 or 503 with `Retry-After`)
+  is retried a few times first, as is a gateway failure (502, 503 or 504) for a
+  method that is safe to repeat (not POST or PATCH).
 - [`MalformedResponse`](@ref) if a successful response can't be read as the
   endpoint's [`responsetype`](@ref).
 - `ArgumentError` if `kind` is not a supported HTTP method.
 
 See also: [`Request`](@ref).
 """
-function perform(req::Request)
+function perform(req::Request{kind}) where {kind}
     out = outgoing(req)
     # A caller's IO payload can only be resent if it can be rewound
     isretryable = !(out.payload isa IO) || !isnothing(out.payloadstart)
-    incoming = catch_ratelimit(req.config.rategate; isretryable, maxwait = req.config.timeout) do
+    incoming = withretries(req.config.rategate; isretryable, isidempotent = kind ∉ (:post, :patch),
+                           maxwait = req.config.timeout) do
         transmit(req, out)
     end
     deliver(req, incoming)
@@ -48,11 +51,12 @@ String escape sequence to clear the current line in a terminal.
 const ANSI_CLEAR_LINE = "\e[A\e[2K"
 
 """
-    RATELIMIT_MAX_ATTEMPTS
+    MAX_ATTEMPTS
 
-How many times a rate-limited request is attempted before giving up.
+How many times a request asked to retry, or failed at a gateway, is attempted
+before giving up.
 """
-const RATELIMIT_MAX_ATTEMPTS = 5
+const MAX_ATTEMPTS = 5
 
 """
     NO_SECRETS
@@ -199,19 +203,21 @@ function mimeheaders(req::Request, fmt::AbstractFormat, in::Type)
 end
 
 """
-    catch_ratelimit(send::Function, gate::RateGate; isretryable::Bool = true, maxwait::Real = Inf) -> Incoming
+    withretries(send::Function, gate::RateGate; isretryable::Bool = true,
+                isidempotent::Bool = false, maxwait::Real = Inf) -> Incoming
 
-Call `send()`, retrying while the response is rate-limited: a 429, or a 403
-with rate-limit headers (see [`retrydelay`](@ref)).
+Call `send()`, retrying while the response asks to be retried later (a 429, or a
+403 or 503 with `Retry-After` or rate-limit headers, see [`retrydelay`](@ref)), or,
+when `isidempotent`, while a gateway fails (a 502, 503 or 504).
 
-Retries wait the delay the headers ask for, or back off exponentially, up to
-`RATELIMIT_MAX_ATTEMPTS` attempts; a discarded attempt is closed. When not
+Retries wait the delay the headers ask for, or back off exponentially with jitter,
+up to `MAX_ATTEMPTS` attempts; a discarded attempt is closed. When not
 `isretryable`, out of attempts, or asked to wait longer than `maxwait` seconds, the
-rate-limited response is returned as-is.
+last response is returned as-is.
 Calls sharing `gate` share one backoff (see [`RateGate`](@ref)).
 """
-function catch_ratelimit(send::F, gate::RateGate; isretryable::Bool = true,
-                         maxwait::Real = Inf) where {F <: Function}
+function withretries(send::F, gate::RateGate; isretryable::Bool = true,
+                     isidempotent::Bool = false, maxwait::Real = Inf) where {F <: Function}
     attempt = 1
     while true
         while (remaining = (@atomic gate.nextallowed) - time()) > 0
@@ -221,9 +227,10 @@ function catch_ratelimit(send::F, gate::RateGate; isretryable::Bool = true,
         incoming = send()::Incoming
         (; status, headers) = incoming.response
         delay = retrydelay(headers)
-        islimited = status == 429 || (status == 403 && !isnothing(delay))
-        pause = something(delay, 2^(attempt - 1))
-        islimited && isretryable && attempt < RATELIMIT_MAX_ATTEMPTS && pause <= maxwait ||
+        isretry = status == 429 || status ∈ (403, 503) && !isnothing(delay) ||
+            isidempotent && status ∈ (502, 503, 504)
+        pause = something(delay, 2^(attempt - 1) * (0.5 + rand()))
+        isretry && isretryable && attempt < MAX_ATTEMPTS && pause <= maxwait ||
             return incoming
         close(incoming)
         backoff!(gate, pause, deadline)
@@ -240,7 +247,7 @@ function backoff!(gate::RateGate, delay::Real, deadline::Float64)
 end
 
 function alert_sleep(delay::Real)
-    @info S"Rate limited :( asked to wait {emphasis:$delay} seconds, obliging..."
+    @info S"Asked to wait {emphasis:$delay} seconds before retrying, obliging..."
     if isa(stdout, Base.TTY)
         print('\n')
         for waited in 1:delay

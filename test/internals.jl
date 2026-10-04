@@ -194,7 +194,7 @@ end
             ticks[] += 1
             sleep(0.05)
         end
-        waited = @elapsed RestClient.catch_ratelimit(gate) do
+        waited = @elapsed RestClient.withretries(gate) do
             RestClient.Incoming(sample_response(), IOBuffer())
         end
         wait(ticker)

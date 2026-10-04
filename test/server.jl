@@ -21,6 +21,8 @@ mutable struct ServerState
     ratelimit_hits::Int      # times /ratelimited returned 429
     revalidations::Int       # conditional requests seen at /cacheable and /revalidate
     forbidden_hits::Int      # times /forbidden/limited returned 403
+    unavailable_hits::Int    # times /unavailable returned 503
+    flaky_hits::Int          # times /flaky/{status} returned its status
     echo_limited_hits::Int   # times /echo/limited returned 429
     rotations::Int           # distinct versions served by /rotating
     queries::Int             # QUERY requests served by /query
@@ -28,7 +30,7 @@ mutable struct ServerState
     @atomic throttle_429s::Int
     @atomic throttle_first::Float64  # time() of first hit, 0.0 until set
 end
-ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0, 0.0)
+ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0)
 
 json_response(body::AbstractString) =
     HTTP.Response(200, ["Content-Type" => "application/json"], body)
@@ -111,6 +113,16 @@ function build_router(state::ServerState)
     end)
     # A plain 403 (not a rate limit), and one carrying exhausted rate-limit headers once.
     HTTP.register!(router, "GET", "/forbidden", _ -> HTTP.Response(403, "no"))
+    HTTP.register!(router, "GET", "/unavailable", function (req)
+        state.unavailable_hits < 1 || return json_response(item_json("ok", 1))
+        state.unavailable_hits += 1
+        HTTP.Response(503, ["Retry-After" => "0"], "down for a moment")
+    end)
+    HTTP.register!(router, "*", "/flaky/{status}", function (req)
+        state.flaky_hits < 1 || return json_response(item_json("ok", 1))
+        state.flaky_hits += 1
+        HTTP.Response(parse(Int, HTTP.getparams(req)["status"]), "flaky")
+    end)
     HTTP.register!(router, "GET", "/forbidden/limited", function (req)
         state.forbidden_hits < 1 || return json_response(item_json("ok", 1))
         state.forbidden_hits += 1
