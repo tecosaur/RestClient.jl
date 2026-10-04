@@ -327,9 +327,16 @@ contents(r::R) where {T, R <: SingleResponse{T}} = typedfield(r, T)
 """
     contents(response::ListResponse{T}) -> Vector{T}
 
-Return the items of the response.
+Return the items of the response: its `Vector{T}` field, or failing that its
+`Union{Vector{T}, Nothing}` field, with `nothing` as no items.
 """
-contents(r::R) where {T, R <: ListResponse{T}} = typedfield(r, Vector{T})
+function contents(r::R) where {T, R <: ListResponse{T}}
+    if isempty(fieldslots(R, Vector{T})) && !isempty(fieldslots(R, Union{Vector{T}, Nothing}))
+        @something(typedfield(r, Union{Vector{T}, Nothing}), T[])
+    else
+        typedfield(r, Vector{T})
+    end
+end
 
 function typedfield(r::R, ::Type{F}) where {R, F}
     slots = fieldslots(R, F)

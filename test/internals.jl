@@ -145,9 +145,6 @@ struct BrokenBody <: IO end
 Base.mark(::BrokenBody) = 0
 Base.eof(::BrokenBody) = false
 Base.readavailable(::BrokenBody) = throw(ArgumentError("unreadable"))
-struct PagedContent <: SingleResponse{ListContent}
-    inner::ListContent
-end
 struct OptionalListContent <: ListResponse{String}
     total::Int
     items::Union{Vector{String}, Nothing}
@@ -895,6 +892,11 @@ end
         @test @inferred(RestClient.contents(OneContent("n", 3))) === 3
         @test @inferred(RestClient.contents(ListContent(1, ["x"]))) == ["x"]
         @test_throws ArgumentError RestClient.contents(TwoContents(1, 2))
+        # An optional list counts when there's no plain one, absent as empty
+        @test @inferred(RestClient.contents(OptionalListContent(1, ["x"]))) == ["x"]
+        @test @inferred(RestClient.contents(OptionalListContent(0, nothing))) == String[]
+        @test RestClient.contents(BothListContents(["a"], ["b"])) == ["a"]
+        @test_throws "No field of type" RestClient.contents(NoListContent(0))
     end
     @testset "List as a table" begin
         rows = RestClient.List{Row, PagedListEP}(
