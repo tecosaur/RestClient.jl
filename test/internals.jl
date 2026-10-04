@@ -682,7 +682,7 @@ end
     @test RestClient.urlpath(ImportAPIClient.ThingEndpoint()) == "thing"
     @test RestClient.isstreamend(ImportAPIClient.ThingEndpoint(), nothing)
     @test RestClient.authheaders(ImportAPIClient.PinAuth(), "k") == ("X-Pin" => "k")
-    @test [:List, :nextpage] ⊆ names(ImportAPIClient)
+    @test [:List, :nextpage, :eachpage] ⊆ names(ImportAPIClient)
 end
 
 @testset "requests" begin

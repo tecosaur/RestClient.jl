@@ -9,7 +9,7 @@ using StyledStrings: @styled_str as @S_str
 
 export @endpoint, @globalconfig, @jsondef, @xmldef, @formdef, @multipartdef
 export RequestConfig, Request, perform, AbstractEndpoint, SingleResponse, ListResponse
-export List, nextpage, Stream, SSEvent
+export List, nextpage, eachpage, Stream, SSEvent
 export RawFormat, JSONFormat, XMLFormat, FormFormat, MultipartFormat, MultipartFile
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth
 export MalformedRequest, ResponseError, MalformedResponse
@@ -38,7 +38,7 @@ macro importapi()
 end
 
 macro reexport()
-    :(export List, nextpage)
+    :(export List, nextpage, eachpage)
 end
 
 function __init__()

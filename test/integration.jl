@@ -229,6 +229,18 @@ const AC = AuthClient
             @test isnothing(nextpage(page3))     # more=false at page 3
         end
     end
+    @testset "lazy iteration" begin
+        with_server() do baseurl, state
+            page1 = IC.listing(cfg(baseurl), page = 1)
+            for page in eachpage(page1), item in page
+                @test item.name == "p1"
+                break
+            end
+            @test state.requests == 1            # no page fetched ahead
+            @test [item.name for page in eachpage(page1) for item in page] == ["p1", "p2", "p3"]
+            @test state.requests == 3            # each later page fetched once
+        end
+    end
 end
 
 @testset "requests" begin

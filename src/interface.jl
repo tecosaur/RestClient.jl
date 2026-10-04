@@ -496,3 +496,27 @@ end
 function remainingpages(@nospecialize ::AbstractEndpoint)
     nothing
 end
+
+"""
+    eachpage(list::List)
+
+Iterate over `list` and the pages after it (see [`nextpage`](@ref)), fetching each
+only when it is reached.
+
+# Examples
+
+```julia
+for page in eachpage(users()), user in page
+    println(user.name)
+end
+```
+"""
+eachpage(list::List) = Pages(list)
+
+struct Pages{L <: List}
+    first::L
+end
+
+Base.IteratorSize(::Type{<:Pages}) = Base.SizeUnknown()
+Base.iterate(pages::Pages) = (pages.first, pages.first)
+Base.iterate(::Pages, page) = let next = nextpage(page); isnothing(next) ? nothing : (next, next) end

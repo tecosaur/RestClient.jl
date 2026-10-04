@@ -115,6 +115,7 @@ RestClient.metadata
 
 #+begin_src @docs
 RestClient.nextpage
+RestClient.eachpage
 RestClient.thispagenumber
 RestClient.remainingpages
 #+end_src
