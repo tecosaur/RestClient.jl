@@ -705,7 +705,7 @@ end
         for _ in 1:2
             @test RestClient.headers(req) == ["X-A" => "1", "Authorization" => "Bearer k"]
             @test RestClient.parameters(req) == ["a" => "1"]
-            @test RestClient.mimeheaders(req, Nothing) == ["X-A" => "1", "Authorization" => "Bearer k"]
+            @test RestClient.mimeheaders(req, RestClient.UnspecifiedFormat(), Nothing) == ["X-A" => "1", "Authorization" => "Bearer k"]
         end
         @test SHARED_HEADERS == ["X-A" => "1"]
         @test SHARED_PARAMS == ["a" => "1"]
@@ -767,10 +767,12 @@ end
         @test written("text") == "text"
         @test written(7) == "7"
         @test_throws ArgumentError written(:symbol)
-        @test RestClient.payloadmime(raw, String) == "text/plain; charset=utf-8"
-        @test RestClient.payloadmime(raw, Vector{UInt8}) == "application/octet-stream"
+        # Unlabelled, a raw payload is labelled as the text or bytes it is
+        labels(T) = RestClient.mimeheaders(Request{:post}(RequestConfig("http://x"), PlainEP()), RawFormat(), T)
+        @test ("Content-Type" => "text/plain; charset=utf-8") in labels(String)
+        @test ("Content-Type" => "application/octet-stream") in labels(Vector{UInt8})
         # A raw response sets no Accept header (libcurl sends `*/*`).
-        @test isempty(RestClient.mimeheaders(Request{:get}(RequestConfig("http://x"), PlainEP()), Nothing))
+        @test isempty(RestClient.mimeheaders(Request{:get}(RequestConfig("http://x"), PlainEP()), RestClient.UnspecifiedFormat(), Nothing))
     end
     @testset "parametric form" begin
         form = GenericForm(value = 1)
@@ -811,6 +813,36 @@ end
         @test String(copy(out.payload)) == "[\"a\",\"b\"]"
         @test ("Content-Type" => "application/json") in out.headers
         @test_throws "unknown format" @macroexpand @globalconfig RequestConfig("http://x") format = :yaml
+    end
+    @testset "media types" begin
+        @eval module LabelClient
+            using RestClient, JSON
+            abstract type GitHubAPI <: AbstractEndpoint end
+            RestClient.mimetype(::GitHubAPI, ::JSONFormat, ::Type) = MIME("application/vnd.github+json")
+            @jsondef struct Repo; name::String; end
+            @jsondef struct RepoPatch; name::Union{String, Nothing} = nothing; end
+            @endpoint struct RepoEndpoint <: GitHubAPI
+                "repo" -> Repo
+            end
+            @endpoint struct AssetEndpoint <: GitHubAPI
+                "asset" -> Vector{UInt8}
+            end
+            @endpoint struct PatchEndpoint <: GitHubAPI
+                patch -> :patch("repo") -> Repo
+                patch::RepoPatch
+            end
+            RestClient.mimetype(::PatchEndpoint, ::JSONFormat, ::Type{RepoPatch}) = "application/merge-patch+json"
+        end
+        LC, cfg = LabelClient, RequestConfig("http://x")
+        sent(kind, ep) = Dict(RestClient.outgoing(Request{kind}(cfg, ep)).headers)
+        @test sent(:get, LC.RepoEndpoint())["Accept"] == "application/vnd.github+json"   # the API's JSON label
+        @test !haskey(sent(:get, LC.AssetEndpoint()), "Accept")                          # bytes keep none
+        patched = sent(:patch, LC.PatchEndpoint(LC.RepoPatch(name = "x")))
+        @test patched["Content-Type"] == "application/merge-patch+json"                 # one type's label
+        @test patched["Accept"] == "application/vnd.github+json"
+        @test RestClient.mimetype(RawFormat(), String) === nothing
+        ci = only(code_typed(RestClient.mimetype, Tuple{LC.RepoEndpoint, JSONFormat, Type{LC.Repo}}))[1]
+        @test count(s -> !Meta.isexpr(s, :code_coverage_effect), ci.code) == 1
     end
     @testset "documented names are public" begin
         api = read(joinpath(@__DIR__, "..", "docs", "src", "api.org"), String)

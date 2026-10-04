@@ -56,7 +56,7 @@ jsonwrite(x) = sprint(io -> RestClient.writepayload(io, RestClient.dataformat(ty
 
 @testset "backend" begin
     @test RestClient.dataformat(JC.Item) == RestClient.JSONFormat()
-    @test RestClient.mimetype(RestClient.JSONFormat) == "application/json"
+    @test RestClient.mimetype(RestClient.JSONFormat(), JC.Item) == "application/json"
 end
 
 @testset "parse" begin

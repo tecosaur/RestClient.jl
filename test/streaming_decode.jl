@@ -52,8 +52,8 @@ function run()
     @test dataformat(Stream{Tok, :NDJSON}) isa StreamFormat{:NDJSON}
     @test dataformat(Stream{SSEvent{Tok}, :SSE}) isa StreamFormat{:SSE}
     @test dataformat(Stream{String}) == StreamFormat{:SSE}(RestClient.RawFormat())   # unspecified: raw
-    @test mimetype(typeof(dataformat(Stream{Tok, :SSE}))) == "text/event-stream"
-    @test mimetype(typeof(dataformat(Stream{Tok, :NDJSON}))) == "application/x-ndjson"
+    @test mimetype(dataformat(Stream{Tok, :SSE}), Stream{Tok, :SSE}) == "text/event-stream"
+    @test mimetype(dataformat(Stream{Tok, :NDJSON}), Stream{Tok, :NDJSON}) == "application/x-ndjson"
     @test framingtype(Stream{Tok, :NDJSON}) === :NDJSON
     @test eltype(Stream{Tok, :SSE}) === Tok
     @test Base.IteratorSize(Stream{Tok, :SSE}) === Base.SizeUnknown()

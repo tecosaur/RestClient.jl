@@ -21,12 +21,12 @@ a MIME part, encoded with the field type's own [`dataformat`](@ref).
 """
 struct MultipartFormat <: AbstractFormat end
 
-mimetype(::Type{FormFormat}) = "application/x-www-form-urlencoded"
+mimetype(::FormFormat, ::Type) = "application/x-www-form-urlencoded"
 
 # Set to a random string in `__init__`
 MULTIPART_BOUNDARY::String = ""
 MULTIPART_MIME::String = ""
-mimetype(::Type{MultipartFormat}) = MULTIPART_MIME
+mimetype(::MultipartFormat, ::Type) = MULTIPART_MIME
 
 # RFC 3986 percent-encoding (via `encode_uri_component`) is universally
 # accepted; we don't bother with the legacy `+`-for-space substitution.
@@ -73,7 +73,7 @@ const MultipartBinary = Union{AbstractVector{UInt8}, IO}
 function writepayload(io::IO, ::MultipartFormat, data)
     function writepart(disposition::String, mime, fmt::AbstractFormat, val)
         print(io, "--", MULTIPART_BOUNDARY, "\r\nContent-Disposition: form-data; ", disposition)
-        isnothing(mime) || print(io, "\r\nContent-Type: ", mime)
+        isnothing(mime) || print(io, "\r\nContent-Type: ", string(mime))
         print(io, "\r\n\r\n")
         writepayload(io, fmt, val)
         print(io, "\r\n")
@@ -94,7 +94,8 @@ function writepayload(io::IO, ::MultipartFormat, data)
             else
                 fmt = dataformat(typeof(part))
                 fmt isa UnspecifiedFormat && (fmt = RawFormat(); part = string(part))
-                writepart("name=\"$fieldname\"", payloadmime(fmt, typeof(part)), fmt, part)
+                mime = @something(mimetype(fmt, typeof(part)), Some(defaultlabel(fmt, typeof(part))))
+                writepart("name=\"$fieldname\"", mime, fmt, part)
             end
         end
     end

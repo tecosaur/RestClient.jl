@@ -90,9 +90,9 @@ written concurrently, read it with calls that lock against the writer (`readunti
 """
 function readframe(::IO, _, ::StreamFormat) end
 
-# A stream's MIME is its framing's wire type, falling back to the element format's.
-# A framing with a wire MIME adds a `mimetype(::Type{<:StreamFormat{:framing}})`.
-mimetype(::Type{<:StreamFormat{F, E}}) where {F, E} = mimetype(E)
+# A stream's label is its framing's wire type, falling back to its elements'. A
+# framing with a wire type adds a `mimetype(::StreamFormat{:framing}, ::Type)`.
+mimetype(fmt::StreamFormat, ::Type{S}) where {S} = mimetype(fmt.element, elementpayload(eltype(S)))
 
 
 # Disposition
@@ -367,7 +367,7 @@ function readframe(bs::IO, state::SSEState, ::StreamFormat{:SSE})
     nothing
 end
 
-mimetype(::Type{<:StreamFormat{:SSE}}) = "text/event-stream"
+mimetype(::StreamFormat{:SSE}, ::Type) = "text/event-stream"
 
 # Make `Stream{T}` (framing unspecified) default to :SSE.
 framingtype(::Type{Stream{T}}) where {T} = :SSE
@@ -397,4 +397,4 @@ function readframe(bs::IO, _, ::StreamFormat{:NDJSON})
     nothing
 end
 
-mimetype(::Type{<:StreamFormat{:NDJSON}}) = "application/x-ndjson"
+mimetype(::StreamFormat{:NDJSON}, ::Type) = "application/x-ndjson"

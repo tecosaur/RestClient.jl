@@ -46,8 +46,8 @@ The default implementation returns an empty list.
 
 !!! note "Default Content-Type"
 
-    When no `Content-Type` header is provided and `mimetype` is defined for
-    the format, the `Content-Type` header is set to the value from `mimetype`.
+    When no `Content-Type` (or `Accept`) header is provided, it is set from the
+    payload's (or result's) [`mimetype`](@ref).
 """
 function headers(::AbstractEndpoint)
     Pair{String, String}[]
@@ -222,11 +222,27 @@ dataformat(::Type{<:AbstractVector{T}}) where T = dataformat(T)
 dataformat(::Type{<:Dict{<:Any, T}}) where T = dataformat(T)
 
 """
-    mimetype(::Type{<:AbstractFormat}) -> Union{String, Nothing}
+    mimetype(fmt::AbstractFormat, ::Type{T}) -> Union{String, MIME, Nothing}
+    mimetype(endpoint::AbstractEndpoint, fmt::AbstractFormat, ::Type{T}) -> Union{String, MIME, Nothing}
 
-Return the MIME type for the given format, if known.
+The media type a `T` in `fmt` is labelled with, or `nothing` for none: the
+`Content-Type` of a payload, and the `Accept` of a result. An endpoint labels a
+type as its format does, unless a method for it (or its supertype) says
+otherwise, such as for an API's vendor type:
+
+```julia
+RestClient.mimetype(::GitHubAPI, ::JSONFormat, ::Type) = MIME("application/vnd.github+json")
+```
+
+[`RawFormat`](@ref) has no label: a raw payload is sent as `text/plain` text or
+`application/octet-stream` bytes, and a raw result accepts anything.
 """
-mimetype(::Type) = nothing
+mimetype(::AbstractFormat, ::Type) = nothing
+mimetype(::AbstractEndpoint, fmt::AbstractFormat, ::Type{T}) where {T} = mimetype(fmt, T)
+
+defaultlabel(::RawFormat, ::Type{<:Union{AbstractString, Number}}) = "text/plain; charset=utf-8"
+defaultlabel(::RawFormat, ::Type) = "application/octet-stream"
+defaultlabel(::AbstractFormat, ::Type) = nothing
 
 """
     interpretresponse(data::AbstractVector{UInt8}, fmt::AbstractFormat, ::Type{T}) -> value::T
@@ -277,10 +293,6 @@ interpretresponse(::AbstractVector{UInt8}, fmt::Union{JSONFormat, XMLFormat}, ::
 writepayload(::Any, fmt::Union{JSONFormat, XMLFormat}, data::T) where {T} =
     throw(ArgumentError("Cannot send a $T as $(nameof(typeof(fmt))) without its package loaded: \
                          add `using $(FORMAT_PACKAGES[nameof(typeof(fmt))])`"))
-
-payloadmime(fmt::AbstractFormat, ::Type) = mimetype(typeof(fmt))
-payloadmime(::RawFormat, ::Type{<:Union{AbstractString, Number}}) = "text/plain; charset=utf-8"
-payloadmime(::RawFormat, ::Type) = "application/octet-stream"
 
 """
     postprocess([response::Downloads.Response], request::Request, data) -> Any

@@ -185,15 +185,15 @@ function url(req::Request)
 end
 
 # `headers(req)` plus the Content-Type/Accept implied by the payload and response formats
-function mimeheaders(req::Request, in::Type)
+function mimeheaders(req::Request, fmt::AbstractFormat, in::Type)
     hdrs = headers(req)
     out = responsetype(req.endpoint)
-    inmime = if in !== Nothing payloadmime(dataformat(req.endpoint, in), in) end
-    outmime = if out !== Nothing mimetype(typeof(dataformat(req.endpoint, out))) end
+    inmime = if in !== Nothing @something(mimetype(req.endpoint, fmt, in), Some(defaultlabel(fmt, in))) end
+    outmime = if out !== Nothing mimetype(req.endpoint, dataformat(req.endpoint, out), out) end
     isset(name) = any(h -> lowercase(first(h)) == name, hdrs)
     extras = Pair{String, String}[]
-    isnothing(inmime) || isset("content-type") || push!(extras, "Content-Type" => inmime)
-    isnothing(outmime) || isset("accept") || push!(extras, "Accept" => outmime)
+    isnothing(inmime) || isset("content-type") || push!(extras, "Content-Type" => string(inmime))
+    isnothing(outmime) || isset("accept") || push!(extras, "Accept" => string(outmime))
     isempty(extras) && hdrs isa Vector{Pair{String, String}} && return hdrs
     append!(Pair{String, String}[h for h in hdrs], extras)
 end
@@ -407,15 +407,16 @@ function outgoing(req::Request{kind}) where {kind}
     content = payload(req)
     kind === :query && isnothing(content) &&
         throw(MalformedRequest(req, ["a QUERY request needs a payload, as its content is the query (RFC 10008)"]))
+    fmt = dataformat(req.endpoint, typeof(content))
     body = if isnothing(content) || content isa IO
         content
     else
         buf = IOBuffer()
-        writepayload(buf, dataformat(req.endpoint, typeof(content)), content)
+        writepayload(buf, fmt, content)
         take!(buf)
     end
     start = if content isa IO && applicable(position, content) position(content) end
-    Outgoing(uppercase(String(kind)), url(req), mimeheaders(req, typeof(content)),
+    Outgoing(uppercase(String(kind)), url(req), mimeheaders(req, fmt, typeof(content)),
              body, start)
 end
 

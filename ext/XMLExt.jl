@@ -28,7 +28,7 @@ RestClient.writepayload(::IO, ::RestClient.XMLFormat, ::T) where {T} =
     throw(ArgumentError("Cannot send a $T as XML: @xmldef types are only read from responses. \
                          To send one, define `RestClient.writepayload(io::IO, ::RestClient.XMLFormat, data::$T)`."))
 
-RestClient.mimetype(::Type{RestClient.XMLFormat}) = "application/xml"
+RestClient.mimetype(::RestClient.XMLFormat, ::Type) = "application/xml"
 
 # Parsing
 

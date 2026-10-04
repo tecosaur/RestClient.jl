@@ -71,7 +71,7 @@ const XC = XMLClient
 
 @testset "format" begin
     @test RestClient.dataformat(XC.Book) == RestClient.XMLFormat()
-    @test RestClient.mimetype(RestClient.XMLFormat) == "application/xml"
+    @test RestClient.mimetype(RestClient.XMLFormat(), XC.Book) == "application/xml"
 end
 
 @testset "scalars" begin

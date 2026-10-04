@@ -3,7 +3,7 @@
 
 using Base64: base64encode
 
-mimetype(::Type{JSONFormat}) = "application/json"
+mimetype(::JSONFormat, ::Type) = "application/json"
 
 """
     authheaders(scheme::AuthScheme, key) -> Union{Pair{String, String}, Nothing}
