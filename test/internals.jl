@@ -812,6 +812,12 @@ end
         @test ("Content-Type" => "application/json") in out.headers
         @test_throws "unknown format" @macroexpand @globalconfig RequestConfig("http://x") format = :yaml
     end
+    @testset "documented names are public" begin
+        api = read(joinpath(@__DIR__, "..", "docs", "src", "api.org"), String)
+        documented = Symbol.(m.captures[1] for m in eachmatch(r"^(?:RestClient\.)?([@A-Za-z_][\w!]*)$"m, api))
+        @test isempty(filter(n -> isdefined(RestClient, n) && !Base.ispublic(RestClient, n), documented))
+        @test :UnspecifiedFormat in documented
+    end
     @testset "format package not loaded" begin
         # In a process with neither JSON.jl nor XML.jl, each format says what to load
         script = """

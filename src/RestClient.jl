@@ -19,6 +19,8 @@ export MalformedRequest, ResponseError, MalformedResponse
 export Stream, StreamEndpoint, SSEvent, isstreamend
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth, authscheme, authpolicy
 export setfield
+public writepayload, StreamFormat, UnspecifiedFormat, readframe, framestate, framedata, remake,
+    elementpayload, authheaders, authparams, contents, metadata, cachelifetime
 
 include("types.jl")
 include("interface.jl")
