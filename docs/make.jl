@@ -11,7 +11,7 @@ for orgfile in orgfiles
         c -> Org.parse(OrgDoc, c) |>
         o -> sprint(markdown, o) |>
         s -> replace(s, r"\.org]" => ".md]") |>
-        m -> write(mdfile, m)
+        m -> write(mdfile, "```@meta\nCurrentModule = RestClient\n```\n\n" * m)
 end
 
 makedocs(;

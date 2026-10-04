@@ -171,8 +171,8 @@ decoded, so the terminating frame never reaches the consumer. The default is
 end in band needs a method checking the frame's fields:
 
 ```julia
-isstreamend(::ChatEndpoint, fr::SSEvent)     = fr.data == codeunits("[DONE]")  # a data sentinel
-isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"      # a terminal event
+RestClient.isstreamend(::ChatEndpoint, fr::SSEvent)     = fr.data == codeunits("[DONE]")  # a data sentinel
+RestClient.isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"      # a terminal event
 ```
 """
 isstreamend(@nospecialize(::AbstractEndpoint), @nospecialize(frame)) = false

@@ -43,7 +43,7 @@ immutable endpoint, as in a [`nextpage`](@ref) method.
 # Examples
 
 ```julia
-nextpage(e::PagedEndpoint) = setfield(e, :page, e.page + 1)
+RestClient.nextpage(e::PagedEndpoint) = RestClient.setfield(e, :page, e.page + 1)
 ```
 """
 function setfield(x::T, field::Symbol, value) where {T}

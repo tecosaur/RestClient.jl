@@ -7,19 +7,17 @@ using Downloads
 using Base.ScopedValues: ScopedValue, with
 using StyledStrings: @styled_str as @S_str
 
-export AbstractEndpoint, SingleEndpoint, ListEndpoint, Request, RequestConfig,
-    @endpoint, @globalconfig, globalconfig
-export SingleResponse, ListResponse, Single, List, perform, urlpath,
-    parameters, headers, payload, responsetype, dataformat, mimetype,
-    interpretresponse, validate, postprocess, thispagenumber, nextpage,
-    remainingpages
-export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
-export FormFormat, MultipartFormat, MultipartFile, @formdef, @multipartdef
+export @endpoint, @globalconfig, @jsondef, @xmldef, @formdef, @multipartdef
+export RequestConfig, Request, perform, AbstractEndpoint, SingleEndpoint, ListEndpoint
+export SingleResponse, ListResponse, Single, List, nextpage, Stream, StreamEndpoint, SSEvent
+export RawFormat, JSONFormat, XMLFormat, FormFormat, MultipartFormat, MultipartFile
+export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth
 export MalformedRequest, ResponseError, MalformedResponse
-export Stream, StreamEndpoint, SSEvent, isstreamend
-export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth, authscheme, authpolicy
-export setfield
-public writepayload, StreamFormat, UnspecifiedFormat, readframe, framestate, framedata, remake,
+public urlpath, headers, parameters, payload, validate, responsetype, postprocess,
+    dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
+    authscheme, authpolicy, isstreamend, thispagenumber, remainingpages,
+    globalconfig, setfield
+public StreamFormat, UnspecifiedFormat, readframe, framestate, framedata, remake,
     elementpayload, authheaders, authparams, contents, metadata, cachelifetime
 
 include("types.jl")

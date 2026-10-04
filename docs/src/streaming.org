@@ -87,10 +87,10 @@ value or a terminal event, and expect the client to stop there. You declare that
 
 #+begin_src julia
 # An API that feels special might decide to shove event type information into the data
-isstreamend(::ChatEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
+RestClient.isstreamend(::ChatEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
 
 # Another API might have paid more attention to WHATWG and used a dedicated event type
-isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
+RestClient.isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
 #+end_src
 
 The predicate runs on each frame /before/ it is decoded or emitted, so a

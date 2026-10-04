@@ -69,8 +69,8 @@ function run(base)
         @test SsechatEndpoint <: RestClient.StreamEndpoint
         @test GenerateEndpoint <: RestClient.StreamEndpoint
         @test EventsEndpoint <: RestClient.StreamEndpoint
-        @test responsetype(SsechatEndpoint()) === Stream{Tok}
-        @test responsetype(GenerateEndpoint()) === Stream{Tok, :NDJSON}
+        @test RestClient.responsetype(SsechatEndpoint()) === Stream{Tok}
+        @test RestClient.responsetype(GenerateEndpoint()) === Stream{Tok, :NDJSON}
     end
     @testset "SSE" begin
         s = ssechat(cfg)
