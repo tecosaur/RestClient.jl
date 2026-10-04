@@ -17,6 +17,10 @@ module JSONClient
         kind."item_kind"::String
         note."item_note"::Union{String, Nothing} = nothing
     end
+    @jsondef struct Patch
+        name::Union{String, Nothing} = nothing
+        cleared::Union{Nothing, JSON.Null} = nothing
+    end
     @jsondef :noshow struct Quiet
         value::Int
     end
@@ -74,8 +78,12 @@ end
 
 @testset "write" begin
     @test jsonwrite(JC.Item(name = "y", id = 4)) == """{"name":"y","id":4}"""
-    # The remapped key appears on the wire; a nothing-valued field is null.
-    @test jsonwrite(JC.Tagged(kind = "k")) == """{"item_kind":"k","item_note":null}"""
+    # The remapped key appears on the wire; a nothing-valued field is left out
+    @test jsonwrite(JC.Tagged(kind = "k")) == """{"item_kind":"k"}"""
+    @test jsonwrite(JC.Patch()) == "{}"
+    @test jsonwrite(JC.Patch(name = "x")) == """{"name":"x"}"""
+    @test jsonwrite(JC.Patch(cleared = JSON.Null())) == """{"cleared":null}"""   # an explicit null
+    @test jsonparse(JC.Tagged, """{"item_kind":"k","item_note":null}""").note === nothing
     @testset "round-trip" begin
         orig = JC.Item(name = "round", id = 99)
         back = jsonparse(JC.Item, jsonwrite(orig))

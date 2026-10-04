@@ -213,7 +213,10 @@ This macro conveniently combines the following pieces:
 
 Note the `name."json_field"` syntax demonstrated in the examples, that allows
 for declaration of the JSON object key that should be mapped to the field.
-A field typed `Union{…, Nothing}` defaults to `nothing`.
+A field typed `Union{…, Nothing}` defaults to `nothing`. A field that is `nothing`
+is left out of the JSON written, as most APIs read a missing key as "not given";
+to send an explicit `null`, type the field `Union{Nothing, JSON.Null}` and set it
+to `JSON.Null()`.
 
 The optional `kind` argument selects the JSON representation, one of `Struct`
 (the default), `Dict`, `Array`, `Vector`, `Nothing`, and `String`. For `String`,

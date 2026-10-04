@@ -34,7 +34,8 @@ function RestClient._jsondef_expand(source::LineNumberNode, option::Symbol, kind
         append!(body, jsonvalue(T, :(S($(GlobalRef(StructUtils, :make))(fieldtype(S, 1), x))),
                                 :(getfield(x, 1))))
     else
-        push!(body, fielddefaults_method(name, fields))
+        push!(body, fielddefaults_method(name, fields),
+              :($(GlobalRef(JSON, :omit_null))(::Type{<:$T}) = true))
         # Not under `json`, so the names also hold in the default style container `lift`s read in
         renamed = [Expr(:kw, f.name, :((name = $(f.key),))) for f in fields
                    if !isnothing(f.key) && String(f.name) != f.key]
