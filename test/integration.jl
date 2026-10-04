@@ -106,6 +106,17 @@ module IntegrationClient
     @endpoint queryauth(; page::Int = 0) -> "paged?{page}" -> Paged
     RestClient.authscheme(::QueryauthEndpoint) = QueryAuth("api_key")
     RestClient.authpolicy(::QueryauthEndpoint) = :optional
+    @endpoint linked(; variant::String = "plain") -> "linked?{variant}" -> Paged
+    RestClient.authscheme(::LinkedEndpoint) = BearerAuth()
+    RestClient.authpolicy(::LinkedEndpoint) = :optional
+    @endpoint linkedq(; variant::String = "plain") -> "linked?{variant}" -> Paged
+    RestClient.authscheme(::LinkedqEndpoint) = QueryAuth("api_key")
+    RestClient.authpolicy(::LinkedqEndpoint) = :optional
+    @endpoint struct LinkedOwnEndpoint
+        linked_own(; page::Int = 1) -> "linked?{page}" -> Paged
+        page::Int = 1
+    end
+    RestClient.nextpage(e::LinkedOwnEndpoint) = if e.page == 1 LinkedOwnEndpoint(3) end
     @endpoint struct PagedEndpoint
         listing(; page::Int) -> "paged?{page}" -> Paged
         page::Int = 1
@@ -227,6 +238,20 @@ const AC = AuthClient
             page3 = nextpage(page2)
             @test page3[1].name == "p3"
             @test isnothing(nextpage(page3))     # more=false at page 3
+        end
+    end
+    @testset "Link header" begin
+        with_server() do baseurl, _
+            ids(list) = [page[1].id for page in eachpage(list)]
+            pages = collect(eachpage(IC.linked(cfg(baseurl; key = "k"))))
+            @test [page[1].id for page in pages] == [1, 2, 3]
+            @test all(page -> page[1].name == "Bearer k", pages)         # auth still sent
+            @test all(page -> page[1].name == "k", eachpage(IC.linkedq(cfg(baseurl; key = "k"))))
+            @test isnothing(nextpage(IC.linked(cfg(baseurl); variant = "self")))  # links to itself
+            @test isnothing(nextpage(IC.linkedq(cfg(baseurl; key = "k"); variant = "self")))
+            @test ids(IC.linked(cfg(baseurl); variant = "root")) == [1, 2, 3]
+            @test isnothing(nextpage(IC.linked(cfg(baseurl); variant = "away")))   # another host
+            @test ids(IC.linked_own(cfg(baseurl))) == [1, 3]           # the endpoint's own nextpage first
         end
     end
     @testset "lazy iteration" begin

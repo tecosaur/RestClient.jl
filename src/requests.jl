@@ -29,8 +29,9 @@ the resource exists: `true` on success, `false` on 404 or 410.
 
 See also: [`Request`](@ref).
 """
-function perform(req::Request{kind}) where {kind}
-    out = outgoing(req)
+perform(req::Request) = send(req, outgoing(req))
+
+function send(req::Request{kind}, out::Outgoing) where {kind}
     # A caller's IO payload can only be resent if it can be rewound
     isretryable = !(out.payload isa IO) || !isnothing(out.payloadstart)
     incoming = withretries(req.config.rategate; isretryable, isidempotent = kind ∉ (:post, :patch),

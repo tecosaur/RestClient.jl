@@ -904,6 +904,18 @@ end
         ci = only(code_typed(RestClient.mimetype, Tuple{LC.RepoEndpoint, JSONFormat, Type{LC.Repo}}))[1]
         @test count(s -> !Meta.isexpr(s, :code_coverage_effect), ci.code) == 1
     end
+    @testset "Link header" begin
+        next(value) = RestClient.nextlink(RequestConfig("https://x/v1"), ["link" => value])
+        @test next("<https://x/v1/a?p=2>; rel=\"next\", <https://x/v1/a?p=9>; rel=\"last\"") == "https://x/v1/a?p=2"
+        @test next("<https://x/v1/a?p=1>; rel=\"prev first\", </v1/b>; rel=NEXT") == "https://x/v1/b"
+        @test next("<https://x/v1/a?p=2>; title=\"a; rel=next, <x>\", <https://x/v1/a?p=3>; rel=\"next\"") == "https://x/v1/a?p=3"
+        @test isnothing(next("<https://x/v1/a>; title=\"next\"; rel=\"prev\""))
+        @test next("<https://x/v1/c> ; Rel = \"last next\"") == "https://x/v1/c"
+        @test next("<https://x/v1/a;v=2>; rel=next") == "https://x/v1/a;v=2"
+        @test isnothing(next("<https://x/v1/a; rel=\"next\""))
+        @test isnothing(next("<https://elsewhere/v1/a>; rel=\"next\""))    # not under the base URL
+        @test isnothing(RestClient.nextlink(RequestConfig("https://x"), ["etag" => "x"]))
+    end
     @testset "documented names are public" begin
         api = read(joinpath(@__DIR__, "..", "docs", "src", "api.org"), String)
         documented = Symbol.(m.captures[1] for m in eachmatch(r"^(?:RestClient\.)?([@A-Za-z_][\w!]*)$"m, api))
@@ -1008,18 +1020,18 @@ end
     end
     @testset "List as a table" begin
         rows = RestClient.List{Row, PagedListEP}(
-            Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}())
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}(), nothing)
         @test Tables.istable(rows)
         @test Tables.columntable(rows) == (a = [1, 2], b = ["x", "y"])
         @test Tables.schema(rows).names == (:a, :b)
         strings = RestClient.List{String, PagedListEP}(
-            Request{:get}(RequestConfig("http://x"), PagedListEP()), ["x"], Dict{Symbol, Any}())
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), ["x"], Dict{Symbol, Any}(), nothing)
         @test !Tables.istable(strings)                           # String has no columns
         @test isnothing(Tables.schema(strings))                  # unknown, not empty
     end
     @testset "List display" begin
         list = RestClient.List{String, PagedListEP}(
-            Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}())
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}(), nothing)
         bullets(rows; limit = true) = count(startswith("  • "), split(
             sprint(show, MIME("text/plain"), list; context = (:displaysize => (rows, 80), :limit => limit)), '\n'))
         shown = sprint(show, MIME("text/plain"), list; context = (:displaysize => (14, 80), :limit => true))

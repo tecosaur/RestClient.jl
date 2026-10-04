@@ -439,7 +439,9 @@ end
     List{T, E<:AbstractEndpoint}
 
 Holds a list of values of type `T` returned from an API endpoint,
-along with request information and metadata.
+along with request information, metadata, and the URL of the next page when the
+response links to one (`Link: <…>; rel="next"`). A page reached through that link
+keeps the request that started the listing.
 
 See also: [`ListResponse`](@ref), [`nextpage`](@ref).
 """
@@ -447,6 +449,7 @@ struct List{T, E<:AbstractEndpoint}
     request::Request{<:Any, E}
     items::Vector{T}
     meta::Dict{Symbol, Any}
+    nextlink::Union{String, Nothing}
 end
 
 """

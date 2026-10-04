@@ -80,12 +80,13 @@ end
 
 parameters(::RequestConfig, endpoint::AbstractEndpoint) = parameters(endpoint)
 
-function parameters((; config, endpoint)::Request)
-    own = parameters(config, endpoint)
-    authpolicy(endpoint) === :off && return own
-    authinfo = authparams(authscheme(endpoint), config.key)
-    if isnothing(authinfo) own else [collect(own); authinfo] end
+function parameters(req::Request)
+    own, auth = parameters(req.config, req.endpoint), authparam(req)
+    if isnothing(auth) own else [collect(own); auth] end
 end
+
+authparam((; config, endpoint)::Request) =
+    if authpolicy(endpoint) !== :off authparams(authscheme(endpoint), config.key) end
 
 """
     authscheme(endpoint::AbstractEndpoint) -> AuthScheme
@@ -311,11 +312,15 @@ function postprocess(@nospecialize(::Request), data)
     data
 end
 
-postprocess(::Downloads.Response, req::Request, data) =
-    postprocess(req, data)
+function postprocess(response::Downloads.Response, req::Request, data)
+    result = postprocess(req, data)
+    result isa List || return result
+    next = withauthparam(req, nextlink(req.config, response.headers))
+    typeof(result)(result.request, result.items, result.meta, if next != response.url next end)
+end
 
 postprocess(req::Request, data::ListResponse{T}) where {T} =
-    List{T, typeof(req.endpoint)}(req, contents(data), metadata(data))
+    List{T, typeof(req.endpoint)}(req, contents(data), metadata(data), nothing)
 
 postprocess(::Request, data::SingleResponse) = contents(data)
 
@@ -373,10 +378,10 @@ metadata(@nospecialize ::ListResponse) = Dict{Symbol, Any}()
 
 Fetch the next page of results after `response`.
 
-If there are no more pages, or this method is not available for the given
-endpoint, return `nothing`.
-
-The generic `List` implementation returns `nothing`.
+The endpoint's own `nextpage` method gives the next page when it has one;
+failing that, the page the response links to as next
+(`Link: <…>; rel="next"`, RFC 8288) is fetched, if it lies under the API's
+`baseurl`. With neither, `nothing` is returned.
 
 See the extended help for implementation suggestions.
 
@@ -445,14 +450,42 @@ List{User} holding 5 items, page 2:
 """
 function nextpage(list::List)
     nextreq = nextpage(list.request)
-    isnothing(nextreq) && return
-    perform(nextreq)
+    isnothing(nextreq) || return perform(nextreq)
+    isnothing(list.nextlink) && return
+    out = outgoing(list.request)
+    send(list.request, Outgoing(out.method, list.nextlink, out.headers, out.payload, out.payloadstart))
 end
 
-function nextpage(req::Request)
+# The `rel="next"` URL of a `Link` header (RFC 8288), if it lies under `baseurl`
+function nextlink((; baseurl)::RequestConfig, headers)
+    isnextrel(param) = '=' ∈ param && let (key, rels) = split(lowercase(param), '='; limit = 2)
+        strip(key) == "rel" && "next" ∈ split(strip(rels, (' ', '"', ',')))
+    end
+    # A delimiter within a quoted value is text (RFC 8288 §3)
+    masked(value) = replace(value, r"\"[^\"]*\"" => quoted -> replace(quoted, r"[<;]" => ' '))
+    for (name, value) in headers, link in eachsplit(masked(value), '<')
+        name == "link" && '>' ∈ link || continue
+        target, params = split(link, '>'; limit = 2)
+        any(isnextrel, eachsplit(params, ';')) || continue
+        url = if startswith(target, '/') join(first(split(baseurl, '/'), 3), '/') * target else String(target) end
+        return if startswith(url, baseurl * '/') url end
+    end
+end
+
+# `url` with `req`'s query auth, unless the server already included it
+function withauthparam(req::Request, url::String)
+    auth = authparam(req)
+    isnothing(auth) && return url
+    query = if '?' in url last(split(url, '?'; limit = 2)) else "" end
+    any(startswith(url_parameters([first(auth) => ""])), eachsplit(query, '&')) && return url
+    string(url, ifelse('?' in url, '&', '?'), url_parameters([auth]))
+end
+withauthparam(::Request, ::Nothing) = nothing
+
+function nextpage(req::Request{kind}) where {kind}
     nextep = nextpage(req.endpoint)
     isnothing(nextep) && return
-    setfield(req, :endpoint, nextep)
+    Request{kind}(req.config, nextep)
 end
 
 function nextpage(@nospecialize ::AbstractEndpoint)

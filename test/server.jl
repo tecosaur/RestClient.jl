@@ -51,6 +51,18 @@ function build_router(state::ServerState)
         q, limit = queryparam(req, "q"), parse(Int, queryparam(req, "limit", "1"))
         json_array([item_json("$q-$i", i) for i in 1:limit])
     end)
+    # Pages through `Link` headers; each item reports the auth it was sent with
+    HTTP.register!(router, "GET", "/linked", function (req)
+        page, variant = parse(Int, queryparam(req, "page", "1")), queryparam(req, "variant", "plain")
+        next = "/linked?variant=$variant&page=$(page + 1)"
+        link = if page >= 3 ""
+        elseif variant == "root" "<$next>; rel=next"
+        elseif variant == "self" "</linked?variant=self>; rel=next"
+        elseif variant == "away" "<http://elsewhere.invalid$next>; rel=\"next\""
+        else "<http://$(HTTP.header(req, "Host"))$next>; rel=\"next\"" end
+        HTTP.Response(200, ["Content-Type" => "application/json", "Link" => link],
+                      "{\"items\":[$(item_json(HTTP.header(req, "Authorization", queryparam(req, "api_key", "")), page))],\"page\":$page,\"more\":false}")
+    end)
     HTTP.register!(router, "GET", "/paged", function (req)
         page = parse(Int, queryparam(req, "page", "1"))
         json_response("{\"items\":[$(item_json("p$page", page))],\
