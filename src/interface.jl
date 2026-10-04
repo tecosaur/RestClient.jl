@@ -300,11 +300,9 @@ writepayload(::Any, fmt::Union{JSONFormat, XMLFormat}, data::T) where {T} =
 Post-process the data returned by the request.
 
 There are three generic implementations provided:
-- For `SingleEndpoint` requests that return a `SingleResponse`,
-  the `data` is wrapped in a `Single` object.
-- For `ListEndpoint` requests that return a `ListResponse`,
-  the `data` are wrapped in a `List` object.
-- For all other endpoints, the data is returned as-is.
+- A `SingleResponse` gives its `contents`.
+- A `ListResponse` is wrapped in a `List` object.
+- Any other data is returned as-is.
 
 !!! note
     Part of the `AbstractEndpoint` interface.
@@ -316,13 +314,10 @@ end
 postprocess(::Downloads.Response, req::Request, data) =
     postprocess(req, data)
 
-function postprocess(req::Request{kind, E}, data::ListResponse{T}) where {kind, E<:ListEndpoint, T}
-    List{T, E}(req, contents(data), metadata(data))
-end
+postprocess(req::Request, data::ListResponse{T}) where {T} =
+    List{T, typeof(req.endpoint)}(req, contents(data), metadata(data))
 
-function postprocess(req::Request{kind, E}, data::SingleResponse{T}) where {kind, E<:SingleEndpoint, T}
-    Single{T, E}(req, contents(data), metadata(data))
-end
+postprocess(::Request, data::SingleResponse) = contents(data)
 
 
 # Response handling
@@ -364,15 +359,13 @@ Base.@assume_effects :foldable fieldslots(::Type{R}, ::Type{F}) where {R, F} =
     filter(i -> fieldtype(R, i) == F, ntuple(identity, fieldcount(R)))
 
 """
-    metadata(response::SingleResponse) -> Dict{Symbol, Any}
     metadata(response::ListResponse) -> Dict{Symbol, Any}
 
-Return metadata for the given response.
+Return metadata for the given response, kept in its [`List`](@ref).
 
 The default implementation returns an empty dictionary.
 """
 function metadata end
-metadata(@nospecialize ::SingleResponse) = Dict{Symbol, Any}()
 metadata(@nospecialize ::ListResponse) = Dict{Symbol, Any}()
 
 """

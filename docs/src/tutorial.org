@@ -226,10 +226,9 @@ macro, so long as the appropriate [[@ref][~globalconfig~]] method is defined.
 @endpoint draw(deck::Deck, count::Int) -> "deck/{deck.id}/draw?{count}" -> CardsResponse
 #+end_src
 
-A ~DrawEndpoint~ struct will automatically be created, and since ~CardsResponse~ is
-[[@ref][~ListResponse~]], the ~DrawEndpoint~ struct will subtype [[@ref][~ListEndpoint~]]. Due to this
-subtyping, the ~CardsResponse~ will automatically be restructured into a
-~List{Card}~ by the generic list [[@ref][~postprocess~]] method.
+A ~DrawEndpoint~ struct will automatically be created, and since ~CardsResponse~ is a
+[[@ref][~ListResponse~]], it will automatically be restructured into a ~List{Card}~ by the
+generic list [[@ref][~postprocess~]] method.
 
 ** Card return endpoint
 

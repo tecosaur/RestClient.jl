@@ -33,7 +33,7 @@ RestClient.authscheme(::KeyedCacheEP) = QueryAuth("api_key")
 RestClient.authpolicy(::KeyedCacheEP) = :required
 struct PlainEP <: AbstractEndpoint end
 RestClient.urlpath(::PlainEP) = "p"
-struct PagedListEP <: ListEndpoint end
+struct PagedListEP <: AbstractEndpoint end
 RestClient.urlpath(::PagedListEP) = "p"
 struct ValidatedEP <: AbstractEndpoint
     issues::Any
@@ -357,6 +357,8 @@ end
         # An expression URL needs an explicit result type.
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> "a" * x
         @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> "a" * x
+        @test_throws ArgumentError @macroexpand @endpoint f(x::String) -> x -> self.path
+        @test_throws ArgumentError @macroexpand @endpoint f(x::String, p::String) -> x -> p
     end
     @testset "field syntax" begin
         D = FieldSyntax.Derived
@@ -383,6 +385,33 @@ end
         @test read(FieldSyntax.Defaulted, """{"see":2,"ay":1}""") == FieldSyntax.Defaulted(a = 1, c = 2, d = 3)
         @test read(FieldSyntax.Boxed{Int}, """{"value":3}""") == FieldSyntax.Boxed(value = 3)
         @test_throws "required key \"ay\"" read(FieldSyntax.Defaulted, """{"see":2}""")
+    end
+    @testset "results by type" begin
+        # An endpoint's supertype is its own business: what a request returns follows
+        # from the result type alone
+        @eval module ResultClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            @endpoint numbers() -> "n" -> Vector{Int}
+            @endpoint struct ListedEndpoint <: API
+                "l" -> Main.ListContent
+            end
+        end
+        @test supertype(ResultClient.NumbersEndpoint) === AbstractEndpoint
+        req = Request{:get}(RequestConfig("http://x"), ResultClient.ListedEndpoint())
+        @test RestClient.postprocess(req, ListContent(1, ["x"])) isa RestClient.List{String}
+        @test RestClient.postprocess(Request{:get}(RequestConfig("http://x"), PlainEP()),
+                                     OneContent("n", 3)) === 3   # a single response gives its contents
+    end
+    @testset "result type named like a field" begin
+        @eval module FieldNamedResult
+            using RestClient
+            struct license end
+            @endpoint getlicense(key::String; license::Union{String, Nothing}) ->
+                "licenses/{key}?{license}" -> license
+        end
+        @test RestClient.responsetype(FieldNamedResult.GetlicenseEndpoint("mit", nothing)) ===
+            FieldNamedResult.license                                 # after a URL, only a type fits
     end
     @testset "generated names" begin
         @eval module NamedClient
@@ -622,7 +651,7 @@ end
     @test RestClient.urlpath(ImportAPIClient.ThingEndpoint()) == "thing"
     @test RestClient.isstreamend(ImportAPIClient.ThingEndpoint(), nothing)
     @test RestClient.authheaders(ImportAPIClient.PinAuth(), "k") == ("X-Pin" => "k")
-    @test [:Single, :List, :nextpage] ⊆ names(ImportAPIClient)
+    @test [:List, :nextpage] ⊆ names(ImportAPIClient)
 end
 
 @testset "requests" begin

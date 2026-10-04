@@ -6,11 +6,11 @@ emits lines for as long as you care to listen. Waiting for the whole body
 defeats the point: you want each piece as it lands, and you want to start acting
 on it before the next one arrives.
 
-=RestClient= models this with a third response disposition, [[@ref][~Stream~]], alongside
-[[@ref][~Single~]] and [[@ref][~List~]]. A streaming endpoint yields a lazy iterator of decoded
-elements; you iterate it, and each step blocks until the next element has been
-read off the wire and parsed. The disposition is a type, selected through the
-endpoint's output type, exactly as ~Single~ and ~List~ are.
+=RestClient= models this with another response disposition, [[@ref][~Stream~]], alongside
+[[@ref][~List~]]. A streaming endpoint yields a lazy iterator of decoded elements; you
+iterate it, and each step blocks until the next element has been read off the wire
+and parsed. The disposition is a type, selected through the endpoint's output type,
+exactly as ~List~ is.
 
 * How streaming fits together
 
@@ -51,9 +51,9 @@ For a newline-delimited endpoint, name the framing as the second type parameter:
 @endpoint generate(; prompt) -> "api/generate" -> Stream{Token, :NDJSON}
 #+end_src
 
-The =@endpoint= macro recognises ~Stream~ as an output type and gives the generated
-endpoint the [[@ref][~StreamEndpoint~]] supertype, just as a [[@ref][~ListResponse~]] output produces a
-[[@ref][~ListEndpoint~]]. The =Accept= header is set from the framing automatically
+A ~Stream~ result type is all it takes: whatever the endpoint's supertype, its
+requests are read incrementally, just as a [[@ref][~ListResponse~]] result is wrapped
+in a [[@ref][~List~]]. The =Accept= header is set from the framing automatically
 (=text/event-stream= for SSE, =application/x-ndjson= for NDJSON), so you need not
 set it yourself.
 

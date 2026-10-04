@@ -8,8 +8,8 @@ using Base.ScopedValues: ScopedValue, with
 using StyledStrings: @styled_str as @S_str
 
 export @endpoint, @globalconfig, @jsondef, @xmldef, @formdef, @multipartdef
-export RequestConfig, Request, perform, AbstractEndpoint, SingleEndpoint, ListEndpoint
-export SingleResponse, ListResponse, Single, List, nextpage, Stream, StreamEndpoint, SSEvent
+export RequestConfig, Request, perform, AbstractEndpoint, SingleResponse, ListResponse
+export List, nextpage, Stream, SSEvent
 export RawFormat, JSONFormat, XMLFormat, FormFormat, MultipartFormat, MultipartFile
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth
 export MalformedRequest, ResponseError, MalformedResponse
@@ -38,7 +38,7 @@ macro importapi()
 end
 
 macro reexport()
-    :(export Single, List, nextpage)
+    :(export List, nextpage)
 end
 
 function __init__()

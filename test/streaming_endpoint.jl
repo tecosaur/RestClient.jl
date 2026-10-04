@@ -29,6 +29,12 @@ RestClient.isstreamend(::ChatdoneEndpoint, fr::SSEvent) = fr.data == codeunits("
 @endpoint lingering() -> "sse/done/open" -> Stream{Tok}
 RestClient.isstreamend(::LingeringEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
 
+# A stream from an endpoint under an API's own supertype.
+abstract type ChatAPI <: AbstractEndpoint end
+@endpoint struct APIChatEndpoint <: ChatAPI
+    "sse" -> Stream{Tok}
+end
+
 # Custom termination via a terminal event type.
 @endpoint chatstop() -> "sse/stop" -> Stream{Tok}
 RestClient.isstreamend(::ChatstopEndpoint, fr::SSEvent) = fr.event == "stop"
@@ -65,10 +71,7 @@ RestClient.authpolicy(::KeyedchatEndpoint) = :required
 
 function run(base)
     cfg = RequestConfig(base)
-    @testset "supertype inference" begin
-        @test SsechatEndpoint <: RestClient.StreamEndpoint
-        @test GenerateEndpoint <: RestClient.StreamEndpoint
-        @test EventsEndpoint <: RestClient.StreamEndpoint
+    @testset "result type" begin
         @test RestClient.responsetype(SsechatEndpoint()) === Stream{Tok}
         @test RestClient.responsetype(GenerateEndpoint()) === Stream{Tok, :NDJSON}
     end
@@ -76,6 +79,10 @@ function run(base)
         s = ssechat(cfg)
         @test s isa Stream{Tok}
         @test collect(s) == [Tok(n=1), Tok(n=2), Tok(n=3)]
+    end
+    @testset "any supertype" begin
+        @test collect(perform(Request{:get}(cfg, APIChatEndpoint()))) == [Tok(n=1), Tok(n=2), Tok(n=3)]
+        @test perform(Request{:head}(cfg, SsechatEndpoint())) === true   # HEAD is an existence check
     end
     @testset "NDJSON" begin
         @test collect(generate(cfg)) == [Tok(n=1), Tok(n=2), Tok(n=3)]

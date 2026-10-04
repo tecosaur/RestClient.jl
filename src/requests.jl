@@ -12,7 +12,7 @@ Validate and perform the request `req`, and return the result.
 
 The `kind` of the request is its HTTP method, one of: $(join(SUPPORTED_HTTP_METHODS, ", ")).
 The result depends on the endpoint: the response parsed as its
-[`responsetype`](@ref) (a [`Stream`](@ref) for a [`StreamEndpoint`](@ref)),
+[`responsetype`](@ref) (read incrementally, for a [`Stream`](@ref)),
 passed through [`postprocess`](@ref). A `:head` request's result is whether
 the resource exists: `true` on success, `false` on 404 or 410.
 
@@ -459,11 +459,13 @@ end
 
 # Transmission
 
-# Buffered: the whole response is read, through the HTTP cache when it may be stored.
-function transmit(req::Request, out::Outgoing)
+# A `Stream` result is read incrementally (but a HEAD request's never is); otherwise the
+# whole response is read, through the HTTP cache when it may be stored.
+function transmit(req::Request{kind}, out::Outgoing) where {kind}
+    kind !== :head && responsetype(req.endpoint) <: Stream && return open_stream(req, out)
     # RFC 9111 §3, RFC 10008 §2.7: GET, HEAD, and QUERY (keyed on its content) are cacheable
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
-        out.method ∈ ("GET", "HEAD", "QUERY") && !(out.payload isa IO)
+        kind ∈ (:get, :head, :query) && !(out.payload isa IO)
     iscacheable || return http_request(req, out)
     cfile = joinpath(cachedir(), cachekey(out.url, out.method, out.headers, out.payload) * ".http")
     incoming, isstored = http_cached(cfile, req, out)
@@ -542,6 +544,7 @@ end
 # Delivery
 
 function deliver(req::Request, incoming::Incoming)
+    responsetype(req.endpoint) <: Stream && return deliver_stream(req, incoming)
     (; response, body) = incoming
     try
         response.status ∈ 200:299 || throw(ResponseError(req, response, read(body)))

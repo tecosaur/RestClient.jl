@@ -214,6 +214,7 @@ function write_frames(http::HTTP.Stream, frames; contenttype, interval = 0.0, ab
     HTTP.setstatus(http, 200)
     HTTP.setheader(http, "Content-Type" => contenttype)
     HTTP.startwrite(http)
+    http.message.method == "HEAD" && return
     for (i, frame) in enumerate(frames)
         abortafter > 0 && i > abortafter && error("aborting mid-stream")
         write(http, frame)

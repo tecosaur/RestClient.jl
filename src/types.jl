@@ -6,9 +6,9 @@
 
 Abstract supertype for API endpoints.
 
-Usually you will want to subtype either `SingleEndpoint` or `ListEndpoint`,
-which share the same interface as `AbstractEndpoint` but have additional
-semantics.
+What a request to an endpoint returns follows from its [`responsetype`](@ref):
+a [`ListResponse`](@ref) is wrapped in a [`List`](@ref), a [`SingleResponse`](@ref)
+gives its [`contents`](@ref), and a [`Stream`](@ref) is read incrementally.
 
 To share behaviour across an API's endpoints (auth, validation, logging), define
 an abstract subtype for the API and give it the shared methods.
@@ -30,23 +30,6 @@ See also: [`Request`](@ref), [`dataformat`](@ref), [`interpretresponse`](@ref).
 """
 abstract type AbstractEndpoint end
 
-"""
-    SingleEndpoint <: AbstractEndpoint
-
-Abstract supertype for API endpoints that return a single value.
-
-See also: [`AbstractEndpoint`](@ref), [`SingleResponse`](@ref), [`Single`](@ref).
-"""
-abstract type SingleEndpoint <: AbstractEndpoint end
-
-"""
-    ListEndpoint <: AbstractEndpoint
-
-Abstract supertype for API endpoints that return a list of values.
-
-See also: [`AbstractEndpoint`](@ref), [`ListResponse`](@ref), [`List`](@ref).
-"""
-abstract type ListEndpoint <: AbstractEndpoint end
 
 
 # Datatype singletons
@@ -453,30 +436,14 @@ end
 # Generic response forms
 
 """
-    Single{T, E<:SingleEndpoint}
-
-Holds a single value of type `T` returned from an API endpoint,
-along with request information and metadata.
-
-See also: [`SingleEndpoint`](@ref), [`SingleResponse`](@ref).
-"""
-struct Single{T, E<:SingleEndpoint}
-    request::Request{<:Any, E}
-    data::T
-    meta::Dict{Symbol, Any}
-end
-
-Base.getindex(single::Single) = single.data
-
-"""
-    List{T, E<:ListEndpoint}
+    List{T, E<:AbstractEndpoint}
 
 Holds a list of values of type `T` returned from an API endpoint,
 along with request information and metadata.
 
-See also: [`ListEndpoint`](@ref), [`ListResponse`](@ref), [`nextpage`](@ref).
+See also: [`ListResponse`](@ref), [`nextpage`](@ref).
 """
-struct List{T, E<:ListEndpoint}
+struct List{T, E<:AbstractEndpoint}
     request::Request{<:Any, E}
     items::Vector{T}
     meta::Dict{Symbol, Any}
@@ -485,19 +452,18 @@ end
 """
     SingleResponse{T}
 
-Abstract supertype for responses that contain
-a single `T` item and (optionally) metadata.
+Abstract supertype for responses that wrap a single `T` item, such as an
+envelope like `{"data": {...}}`. A request returns the item itself.
 
 # Interface
 
-Subtypes of `SingleResponse` may need to define these two methods:
+Subtypes of `SingleResponse` may need to define:
 
 ```julia
 contents(single::SingleResponse{T}) -> T
-metadata(single::SingleResponse{T}) -> Dict{Symbol, Any}
 ```
 
-Both have generic implementations that are sufficient for simple cases.
+The generic implementation takes the response's one field of type `T`.
 """
 abstract type SingleResponse{T} end
 

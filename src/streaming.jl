@@ -98,20 +98,11 @@ mimetype(fmt::StreamFormat, ::Type{S}) where {S} = mimetype(fmt.element, element
 # Disposition
 
 """
-    StreamEndpoint <: AbstractEndpoint
-
-Supertype for endpoints returning a [`Stream`](@ref). The `@endpoint` macro selects
-it for any `Stream`-typed output; [`perform`](@ref) dispatches on it to the
-streaming request path.
-"""
-abstract type StreamEndpoint <: AbstractEndpoint end
-
-"""
     Stream{T, F}
 
 A lazily consumed stream of elements of type `T`, framed by `F` (`:SSE`, the
-default, or `:NDJSON`). Like [`Single`](@ref) and [`List`](@ref), it is chosen
-through an endpoint's output type.
+default, or `:NDJSON`). Like a [`List`](@ref), it is chosen through an
+endpoint's output type.
 
 Iterating it blocks until the next element has arrived and been decoded. Any task
 may `close` it, which ends iteration without an error (see the manual on
@@ -274,10 +265,8 @@ function open_stream(req::Request, out::Outgoing)
     Incoming(res, bs, transfer, interrupt)
 end
 
-transmit(req::Request{<:Any, <:StreamEndpoint}, out::Outgoing) = open_stream(req, out)
-
 # Rate-limiting acts on the head status only: once frames flow there is nothing to replay.
-function deliver(req::Request{<:Any, <:StreamEndpoint}, incoming::Incoming)
+function deliver_stream(req::Request, incoming::Incoming)
     (; response, body) = incoming
     response.status ∈ 200:299 || throw(ResponseError(req, response, read(body)))
     dtype = responsetype(req.endpoint)
@@ -292,12 +281,6 @@ function deliver(req::Request{<:Any, <:StreamEndpoint}, incoming::Incoming)
         rethrow()
     end
 end
-
-# A HEAD request to a streaming endpoint is an ordinary existence check.
-transmit(req::Request{:head, <:StreamEndpoint}, out::Outgoing) =
-    invoke(transmit, Tuple{Request, Outgoing}, req, out)
-deliver(req::Request{:head, <:StreamEndpoint}, incoming::Incoming) =
-    invoke(deliver, Tuple{Request{:head}, Incoming}, req, incoming)
 
 
 # Server-Sent Events (`:SSE`)

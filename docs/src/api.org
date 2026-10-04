@@ -21,15 +21,12 @@ CollapsedDocStrings = true
 Request
 RequestConfig
 AbstractEndpoint
-SingleEndpoint
-ListEndpoint
 #+end_src
 
 * Response types
 
 #+begin_src @docs
 SingleResponse
-Single
 ListResponse
 List
 #+end_src
@@ -55,7 +52,6 @@ MalformedResponse
 
 #+begin_src @docs
 Stream
-StreamEndpoint
 SSEvent
 isstreamend
 #+end_src
