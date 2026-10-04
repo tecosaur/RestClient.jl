@@ -414,6 +414,19 @@ end
             @test issues == ["bad"]                              # the caller's vector is untouched
             @test_throws MalformedRequest check(true; config = RequestConfig("http://x"))
         end
+        @testset "signing its own requests" begin
+            # A key sent by the endpoint's own `headers`, with no scheme, is a valid setup
+            @eval module SigningClient
+                using RestClient
+                @endpoint :auth signed() -> "s" -> String
+                RestClient.headers(config::RequestConfig, ::SignedEndpoint) = ["X-Signature" => "signed:" * config.key]
+            end
+            req = Request{:get}(RequestConfig("http://x"; key = "k"), SigningClient.SignedEndpoint())
+            @test isnothing(RestClient.check_validation(req))
+            @test ("X-Signature" => "signed:k") in RestClient.headers(req)
+            @test_throws MalformedRequest RestClient.check_validation(
+                Request{:get}(RequestConfig("http://x"), SigningClient.SignedEndpoint()))
+        end
     end
     @testset "path with a query" begin
         req = Request{:get}(RequestConfig("http://x"; key = "k"), QueryPathEP())
