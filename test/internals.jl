@@ -110,6 +110,10 @@ module FieldSyntax
         PositiveJSON(n) = if n > 0 new(n) else throw(ArgumentError("n must be positive")) end
     end
     @endpoint defaulted() -> "defaulted" -> Defaulted
+    @multipartdef struct Upload
+        report::MultipartFile
+        attachments::Vector{MultipartFile} = MultipartFile[]
+    end
     @multipartdef struct CollectionParts
         tags::Vector{Union{String, Nothing}} = String[]
         files::Vector{Vector{UInt8}} = Vector{UInt8}[]
@@ -855,6 +859,24 @@ end
         @test occursin("Content-Type: application/json\r\n\r\n[{", body)
         body = parts(FieldSyntax.CollectionParts())
         @test !occursin("name=\"tags\"", body) && !occursin("name=\"files\"", body)   # empty: no parts
+    end
+    @testset "multipart files" begin
+        parts(form) = sprint(RestClient.writepayload, RestClient.MultipartFormat(), form)
+        filepart(name, file, type, data) =
+            "name=\"$name\"; filename=\"$file\"\r\nContent-Type: $type\r\n\r\n$data\r\n"
+        csv = MultipartFile(b"a,b"; filename = "q3.csv", mimetype = "text/csv")
+        @test occursin(filepart("report", "q3.csv", "text/csv", "a,b"), parts(FieldSyntax.Upload(report = csv)))
+        # By default, a file is named after its field and typed as bytes
+        @test occursin(filepart("report", "report", "application/octet-stream", "notes"),
+                       parts(FieldSyntax.Upload(report = MultipartFile("notes"))))
+        body = parts(FieldSyntax.Upload(report = csv, attachments = [MultipartFile(IOBuffer("x"); filename = "a\"b.txt"),
+                                                                     MultipartFile("y"; filename = "c.txt")]))
+        @test occursin(filepart("attachments", "a%22b.txt", "application/octet-stream", "x"), body)
+        @test occursin(filepart("attachments", "c.txt", "application/octet-stream", "y"), body)
+        @test MultipartFile(b"x"; mimetype = MIME("text/csv")).mimetype == "text/csv"
+        # A line break would end the part's headers early
+        @test_throws ArgumentError MultipartFile(b"x"; mimetype = "text/csv\r\nX-Injected: 1")
+        @test_throws ArgumentError MultipartFile(b"x"; mimetype = MIME("text/csv\nX-Injected: 1"))
     end
 end
 

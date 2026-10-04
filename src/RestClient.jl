@@ -14,7 +14,7 @@ export SingleResponse, ListResponse, Single, List, perform, urlpath,
     interpretresponse, validate, postprocess, thispagenumber, nextpage,
     remainingpages
 export AbstractFormat, RawFormat, JSONFormat, @jsondef, XMLFormat, @xmldef
-export FormFormat, MultipartFormat, @formdef, @multipartdef
+export FormFormat, MultipartFormat, MultipartFile, @formdef, @multipartdef
 export MalformedRequest, ResponseError, MalformedResponse
 export Stream, StreamEndpoint, SSEvent, isstreamend
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth, authscheme, authpolicy

@@ -35,31 +35,67 @@ function writepayload(io::IO, ::FormFormat, data)
                                         for name in propertynames(data))))
 end
 
+"""
+    MultipartFile(data; filename = nothing, mimetype = "application/octet-stream")
+
+A file in a [`@multipartdef`](@ref) payload: `data` (bytes, a string, or an `IO`)
+sent with the given `filename` (by default, its field's name) and `Content-Type`,
+given as a string or a `MIME`.
+
+Throws an `ArgumentError` if `mimetype` contains a line break.
+
+# Example
+```julia
+@multipartdef struct Upload
+    report::MultipartFile
+end
+Upload(report = MultipartFile(read("q3.csv"); filename = "q3.csv", mimetype = "text/csv"))
+```
+"""
+struct MultipartFile{D <: Union{AbstractVector{UInt8}, AbstractString, IO}}
+    data::D
+    filename::Union{String, Nothing}
+    mimetype::String
+end
+
+function MultipartFile(data; filename::Union{AbstractString, Nothing} = nothing,
+                       mimetype::Union{AbstractString, MIME} = "application/octet-stream")
+    mime = string(mimetype)
+    any(∈(('\r', '\n')), mime) &&
+        throw(ArgumentError("A multipart file's mimetype can't contain a line break, got $(repr(mime))"))
+    MultipartFile(data, if !isnothing(filename) String(filename) end, mime)
+end
+
 const MultipartBinary = Union{AbstractVector{UInt8}, IO}
 
-# Binary values are sent as files named after their field, and other values without a
-# format as their text (as in a URL-encoded form), one part per element of a collection
+# Binary values are sent as files (by default named after their field), and other values
+# without a format as their text (as in a URL-encoded form), a part per collection element
 function writepayload(io::IO, ::MultipartFormat, data)
-    function writepart(fieldname::String, val)
-        fmt = dataformat(typeof(val))
-        fmt isa UnspecifiedFormat && (fmt = RawFormat(); val = string(val))
-        mime = payloadmime(fmt, typeof(val))
-        print(io, "--", MULTIPART_BOUNDARY, "\r\n",
-              "Content-Disposition: form-data; name=\"", fieldname, '"')
-        val isa MultipartBinary && print(io, "; filename=\"", fieldname, '"')
+    function writepart(disposition::String, mime, fmt::AbstractFormat, val)
+        print(io, "--", MULTIPART_BOUNDARY, "\r\nContent-Disposition: form-data; ", disposition)
         isnothing(mime) || print(io, "\r\nContent-Type: ", mime)
         print(io, "\r\n\r\n")
         writepayload(io, fmt, val)
         print(io, "\r\n")
     end
+    # Percent-encode what would break a quoted name (RFC 7578 §4.2)
+    quoted(name) = replace(name, '"' => "%22", '\r' => "%0D", '\n' => "%0A")
     for name in propertynames(data)
         val = getproperty(data, name)
-        # Percent-encode what would break the quoted name (RFC 7578 §4.2)
-        fieldname = replace(form_key(typeof(data), name), '"' => "%22", '\r' => "%0D", '\n' => "%0A")
+        fieldname = quoted(form_key(typeof(data), name))
         issplit = val isa MultiValue && !(val isa MultipartBinary) &&
             dataformat(typeof(val)) isa Union{RawFormat, UnspecifiedFormat}
         for part in (if issplit val else (val,) end)
-            isnothing(part) || writepart(fieldname, part)
+            isnothing(part) && continue
+            part isa MultipartBinary && (part = MultipartFile(part))
+            if part isa MultipartFile
+                filename = quoted(something(part.filename, fieldname))
+                writepart("name=\"$fieldname\"; filename=\"$filename\"", part.mimetype, RawFormat(), part.data)
+            else
+                fmt = dataformat(typeof(part))
+                fmt isa UnspecifiedFormat && (fmt = RawFormat(); part = string(part))
+                writepart("name=\"$fieldname\"", payloadmime(fmt, typeof(part)), fmt, part)
+            end
         end
     end
     print(io, "--", MULTIPART_BOUNDARY, "--\r\n")
@@ -101,8 +137,9 @@ end
 
 Define a struct that serialises as [`MultipartFormat`](@ref). Each field is
 encoded with its type's own [`dataformat`](@ref): `@jsondef` fields become
-JSON parts, `Vector{UInt8}` / `IO` fields become octet-stream parts, others
-become text parts. A collection without a format of its own, such as a
+JSON parts, `Vector{UInt8}` / `IO` fields become octet-stream file parts, and
+others become text parts. A [`MultipartFile`](@ref) field sets its file's name and
+`Content-Type`. A collection without a format of its own, such as a
 `Vector{String}` or a `Vector{Vector{UInt8}}`, is sent as one part per element
 under the field's name. As with [`@formdef`](@ref), a field typed
 `Union{…, Nothing}` defaults to `nothing`, and is left out when `nothing`.
