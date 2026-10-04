@@ -45,6 +45,7 @@ module XMLClient
     end
     @xmldef struct Nested
         first_item."group/item[1]/text()"::Union{String, Nothing} = nothing
+        last_item."group/item[last()]/text()"::Union{String, Nothing} = nothing
     end
     @xmldef struct NothingDefaults
         maybe."@m"::Union{Int, Nothing}     # defaults to nothing
@@ -186,9 +187,12 @@ end
     @test occursin("Expected one <item> in <r>", sprint(showerror, err))
 end
 
-@testset "index under a missing parent" begin
+@testset "index with nothing to select" begin
     @test xmlparse(XC.Nested, "<r/>").first_item === nothing
-    @test xmlparse(XC.Nested, "<r><group><item>x</item></group></r>").first_item == "x"
+    @test xmlparse(XC.Nested, "<r/>").last_item === nothing
+    @test xmlparse(XC.Nested, "<r><group/></r>").last_item === nothing
+    nested = xmlparse(XC.Nested, "<r><group><item>x</item><item>y</item></group></r>")
+    @test (nested.first_item, nested.last_item) == ("x", "y")
 end
 
 @testset "xpath errors" begin

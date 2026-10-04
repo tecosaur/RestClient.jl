@@ -122,7 +122,7 @@ macro xpath(spec::String)
                 :(get(childs, $intidx, nothing))
             end
             body = :(let childs = extract_children($body, $(String(path)))
-                         if !isnothing(childs)
+                         if !isnothing(childs) && !isempty(childs)
                              $pick
                          end
                      end)
