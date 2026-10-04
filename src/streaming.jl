@@ -204,7 +204,7 @@ function decode_stream(req::Request, incoming::Incoming{Base.BufferStream, Task}
     catch err
         if cancelled[]; close(items) else close(items, err) end
     finally
-        close(body)
+        close(incoming)
     end
     items
 end
@@ -244,12 +244,12 @@ end
 function open_stream(req::Request, out::Outgoing)
     bs = Base.BufferStream()
     gate = HeadGate(bs)
-    handle = Channel{Downloads.Curl.Easy}(1)
+    handle, interrupt = Channel{Downloads.Curl.Easy}(1), Base.Event()
     # A stream is bounded by silence, not total time
     options = TransferOptions(Watchdog(req.config.timeout), handle)
     transfer = Threads.@spawn try
         result = curlrequest(out.url, options; out.method, out.headers, input = payloadio(out),
-                             output = gate, throw = false)
+                             output = gate, interrupt, throw = false)
         if result isa Downloads.RequestError transfererror(req, result, options.watchdog) else result end
     finally
         close(bs)
@@ -259,7 +259,7 @@ function open_stream(req::Request, out::Outgoing)
     if take!(gate.signal) === :done
         result = fetch(transfer)
         result isa Exception && throw(result)
-        return Incoming(result, bs, transfer)
+        return Incoming(result, bs, transfer, interrupt)
     end
     # The held first write keeps the transfer from freeing the curl handle while its
     # head is read (relying on Downloads internals: its Multi's lock and `get_response_info`)
@@ -269,7 +269,7 @@ function open_stream(req::Request, out::Outgoing)
     finally
         notify(gate.released)
     end
-    Incoming(res, bs, transfer)
+    Incoming(res, bs, transfer, interrupt)
 end
 
 transmit(req::Request{<:Any, <:StreamEndpoint}, out::Outgoing) = open_stream(req, out)

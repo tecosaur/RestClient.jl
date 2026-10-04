@@ -336,17 +336,22 @@ end
     Incoming{B <: IO, T <: Union{Task, Nothing}}
 
 A response head with its body, which for a stream is still arriving over
-`transfer`. Closing it closes the body (and so ends a stream's transfer).
+`transfer`. Closing it closes the body, and ends a stream's transfer at once by
+notifying its `interrupt`.
 """
 struct Incoming{B <: IO, T <: Union{Task, Nothing}}
     response::Downloads.Response
     body::B
     transfer::T
+    interrupt::Union{Base.Event, Nothing}
 end
 
-Incoming(response::Downloads.Response, body::IO) = Incoming(response, body, nothing)
+Incoming(response::Downloads.Response, body::IO) = Incoming(response, body, nothing, nothing)
 
-Base.close(incoming::Incoming) = close(incoming.body)
+function Base.close(incoming::Incoming)
+    close(incoming.body)
+    isnothing(incoming.interrupt) || notify(incoming.interrupt)
+end
 
 """
     MalformedRequest <: Exception

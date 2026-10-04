@@ -195,6 +195,8 @@ const STALL_SECONDS = 10
 
 # Times /sse/limited has answered 429; reset by each `with_stream_server`.
 const STREAM_LIMITED_HITS = Threads.Atomic{Int}(0)
+# Seconds each /silent stream waited, after its last frame, for the client to hang up
+const SILENT_HANGUPS = Channel{Float64}(Inf)
 
 function write_frames(http::HTTP.Stream, frames; contenttype, interval = 0.0, abortafter = 0)
     HTTP.setstatus(http, 200)
@@ -235,6 +237,13 @@ function stream_router(http::HTTP.Stream)
         else
             write_frames(http, sseframes; contenttype = "text/event-stream")
         end
+    elseif startswith(path, "/silent")   # a frame (and [DONE]), then silence until the client hangs up
+        frames = ["data: {\"n\":1}\n\n"]
+        path == "/silent/done" && push!(frames, "data: [DONE]\n\n")
+        write_frames(http, frames; contenttype = "text/event-stream")
+        sent = time()
+        try eof(http.stream) catch err; err isa Base.IOError || rethrow() end   # a reset hangs up too
+        put!(SILENT_HANGUPS, time() - sent)
     elseif path == "/stall"              # a frame, silence, then another
         write_frames(http, ndframes[1:2]; contenttype = "application/x-ndjson", interval = STALL_SECONDS)
     elseif path == "/heartbeat"          # 2-byte heartbeats 3 s apart: under 1 byte/s

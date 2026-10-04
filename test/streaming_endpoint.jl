@@ -36,6 +36,11 @@ RestClient.isstreamend(::ChatstopEndpoint, fr::SSEvent) = fr.event == "stop"
 # Rate-limited once: the POST is retried, payload and all, before streaming.
 @endpoint limitedchat(; prompt::String) -> prompt -> "sse/limited" -> Stream{Tok}
 
+# One frame (and a `[DONE]`), then silence until the client hangs up.
+@endpoint silent() -> "silent" -> Stream{Tok}
+@endpoint silentdone() -> "silent/done" -> Stream{Tok}
+RestClient.isstreamend(::SilentdoneEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
+
 # One frame, then silence (STALL_SECONDS) before the next.
 @endpoint stalling() -> "stall" -> Stream{Tok, :NDJSON}
 
@@ -143,6 +148,17 @@ function run(base)
             break
         end
         @test true
+    end
+    @testset "stopping hangs up" begin
+        # However long the timeout, a stopped stream's connection closes at once
+        hangup() = if timedwait(() -> isready(Main.SILENT_HANGUPS), 5) === :ok take!(Main.SILENT_HANGUPS) else Inf end
+        patient = RequestConfig(base; timeout = 120)
+        s = silent(patient)
+        @test first(s) == Tok(n=1)
+        close(s)
+        @test hangup() < 3
+        @test collect(silentdone(patient)) == [Tok(n=1)]   # stopped by `isstreamend`
+        @test hangup() < 3
     end
 end
 

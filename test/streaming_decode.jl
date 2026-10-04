@@ -37,7 +37,7 @@ end
 
 # The request and response a stream of `ep`'s, with body `bs`, would come from
 streamreq(ep) = Request{:get}(RequestConfig("http://x"), ep)
-incoming(bs, transfer) = Incoming(Response("http", "http://x/s", 200, "HTTP/1.1 200 OK", []), bs, transfer)
+incoming(bs, transfer) = Incoming(Response("http", "http://x/s", 200, "HTTP/1.1 200 OK", []), bs, transfer, Base.Event())
 
 function run_decode(ep, framing::Symbol, ::Type{Elt}, payload; transfer = okxfer(),
                     cancelled = Threads.Atomic{Bool}(false), close_after = true) where {Elt}
