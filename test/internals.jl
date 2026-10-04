@@ -413,6 +413,37 @@ end
         @test RestClient.responsetype(FieldNamedResult.GetlicenseEndpoint("mit", nothing)) ===
             FieldNamedResult.license                                 # after a URL, only a type fits
     end
+    @testset "module supertype" begin
+        @eval module SupertypeClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            abstract type Other <: AbstractEndpoint end
+            @globalconfig RequestConfig("http://x") supertype = API
+            @endpoint ping() -> "p" -> String
+            @endpoint struct StatusEndpoint
+                "s" -> String
+            end
+            @endpoint struct OwnEndpoint <: Other
+                "o" -> String
+            end
+        end
+        @test supertype(SupertypeClient.PingEndpoint) === SupertypeClient.API
+        @test supertype(SupertypeClient.StatusEndpoint) === SupertypeClient.API
+        @test supertype(SupertypeClient.OwnEndpoint) === SupertypeClient.Other    # declared wins
+        @eval module SameBlockClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            begin
+                @globalconfig RequestConfig("http://x") supertype = API
+                @endpoint ping() -> "p" -> String
+            end
+        end
+        @test supertype(SameBlockClient.PingEndpoint) === SameBlockClient.API
+        @test_throws "supertype" @eval module BadSupertypeClient
+            using RestClient
+            @globalconfig RequestConfig("http://x") supertype = Int
+        end
+    end
     @testset "generated names" begin
         @eval module NamedClient
             using RestClient

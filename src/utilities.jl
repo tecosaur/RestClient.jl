@@ -55,10 +55,10 @@ function setfield(x::T, field::Symbol, value) where {T}
 end
 
 """
-    @globalconfig config [auth=scheme | auth=(scheme, policy)] [format=fmt]
+    @globalconfig config [auth=scheme | auth=(scheme, policy)] [format=fmt] [supertype=T]
 
 Define [`globalconfig`](@ref) for the current module as `config`, and optionally
-module-wide authentication and format defaults for its endpoints.
+module-wide authentication, format and supertype defaults for its endpoints.
 
 This avoids having to write the slightly awkward
 `RestClient.globalconfig(::Val{@__MODULE__}) = config` by hand. Similarly, the
@@ -80,6 +80,11 @@ to decode as JSON, in place of [`RawFormat`](@ref). Bytes (`Vector{UInt8}`, `IO`
 stay raw. It may be a format, such as `JSONFormat()`, or the shorthand `:json` or
 `:xml`. A [`dataformat`](@ref) method for an endpoint and type still takes precedence.
 
+The `supertype` clause gives every [`@endpoint`](@ref) in the module that declares
+no supertype of its own this one, an abstract subtype of `AbstractEndpoint` for
+behaviour the API's endpoints share. Since a struct's supertype is fixed when it is
+defined, `@globalconfig` must come before the endpoints it applies to.
+
 See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 
 # Examples
@@ -95,12 +100,14 @@ See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 ```
 """
 macro globalconfig(config, opts::Expr...)
-    scheme, policy, format = :($(@__MODULE__).NoAuth()), QuoteNode(:off), RawFormat()
+    scheme, policy, format, super = :($(@__MODULE__).NoAuth()), QuoteNode(:off), RawFormat(), nothing
     for opt in opts
-        Meta.isexpr(opt, :(=), 2) && first(opt.args) ∈ (:auth, :format) ||
-            throw(ArgumentError("@globalconfig accepts only `auth=...` and `format=...` options, got `$opt`"))
+        Meta.isexpr(opt, :(=), 2) && first(opt.args) ∈ (:auth, :format, :supertype) ||
+            throw(ArgumentError("@globalconfig accepts only `auth=...`, `format=...` and `supertype=...` options, got `$opt`"))
         name, val = opt.args
-        if name === :format
+        if name === :supertype
+            super = val
+        elseif name === :format
             format = if val isa QuoteNode
                 get(FORMAT_SHORTHANDS, val.value) do
                     throw(ArgumentError("unknown format `$val` in @globalconfig; use one of \
@@ -120,6 +127,13 @@ macro globalconfig(config, opts::Expr...)
     # `config` is evaluated per call (so e.g. an `ENV` key isn't baked into the
     # precompile image), but every call shares one rate-limit gate.
     gate = esc(gensym("rategate"))
+    superdef = if isnothing(super) nothing else
+        :(const $(esc(SUPERTYPE_VAR)) = let T = $(esc(super))
+              T isa Type && T <: $AbstractEndpoint ||
+                  throw(ArgumentError("@globalconfig supertype must be a subtype of AbstractEndpoint, got $T"))
+              T
+          end)
+    end
     quote
         const $gate = $RateGate()
         $(@__MODULE__).globalconfig(::Val{$__module__}) =
@@ -128,8 +142,11 @@ macro globalconfig(config, opts::Expr...)
             end
         $(@__MODULE__).globalauthdefault(::Val{$__module__}) = ($(esc(scheme)), $policy)
         $(@__MODULE__).globalformatdefault(::Val{$__module__}) = $format
+        $superdef
     end
 end
+
+const SUPERTYPE_VAR = Symbol("#endpoint_supertype")
 
 const FORMAT_SHORTHANDS = (json = JSONFormat(), xml = XMLFormat())
 
