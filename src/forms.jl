@@ -21,12 +21,21 @@ a MIME part, encoded with the field type's own [`dataformat`](@ref).
 """
 struct MultipartFormat <: AbstractFormat end
 
-mimetype(::FormFormat, ::Type) = "application/x-www-form-urlencoded"
+MULTIPART_KEY::NTuple{2, UInt64} = (0, 0)
+multipartboundary(::Type{T}) where {T} =
+    "----" * string(first(speck128(MULTIPART_KEY, (hash(T), zero(UInt64)))); base = 16)
 
-# Set to a random string in `__init__`
-MULTIPART_BOUNDARY::String = ""
-MULTIPART_MIME::String = ""
-mimetype(::MultipartFormat, ::Type) = MULTIPART_MIME
+function speck128((k, l)::NTuple{2, UInt64}, (x, y)::NTuple{2, UInt64})
+    round(x, y, k) = (x = (bitrotate(x, -8) + y) ⊻ k; (x, bitrotate(y, 3) ⊻ x))
+    for i in zero(UInt64):UInt64(30)
+        x, y = round(x, y, k)
+        l, k = round(l, k, i)
+    end
+    round(x, y, k)
+end
+
+mimetype(::FormFormat, ::Type) = "application/x-www-form-urlencoded"
+mimetype(::MultipartFormat, ::Type{T}) where {T} = "multipart/form-data; boundary=" * multipartboundary(T)
 
 # RFC 3986 percent-encoding (via `encode_uri_component`) is universally
 # accepted; we don't bother with the legacy `+`-for-space substitution.
@@ -71,8 +80,9 @@ const MultipartBinary = Union{AbstractVector{UInt8}, IO}
 # Binary values are sent as files (by default named after their field), and other values
 # without a format as their text (as in a URL-encoded form), a part per collection element
 function writepayload(io::IO, ::MultipartFormat, data)
+    boundary = multipartboundary(typeof(data))
     function writepart(disposition::String, mime, fmt::AbstractFormat, val)
-        print(io, "--", MULTIPART_BOUNDARY, "\r\nContent-Disposition: form-data; ", disposition)
+        print(io, "--", boundary, "\r\nContent-Disposition: form-data; ", disposition)
         isnothing(mime) || print(io, "\r\nContent-Type: ", string(mime))
         print(io, "\r\n\r\n")
         writepayload(io, fmt, val)
@@ -99,7 +109,7 @@ function writepayload(io::IO, ::MultipartFormat, data)
             end
         end
     end
-    print(io, "--", MULTIPART_BOUNDARY, "--\r\n")
+    print(io, "--", boundary, "--\r\n")
 end
 
 """

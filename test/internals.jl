@@ -873,6 +873,16 @@ end
         @test formbody(TaggedForm(tags = ["a", nothing, "b"])) == "tags=a&tags=b&pair=1&pair=2"
         @test formbody(TaggedForm()) == "pair=1&pair=2"
     end
+    @testset "multipart boundaries" begin
+        boundary(T) = match(r"boundary=(\S+)", RestClient.mimetype(RestClient.MultipartFormat(), T)).captures[1]
+        @test boundary(OddNames) != boundary(DatedParts)     # each payload type its own
+        @test boundary(OddNames) == boundary(OddNames)
+        body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), OddNames(a = "v"))
+        @test startswith(body, "--$(boundary(OddNames))\r\n") && endswith(body, "--$(boundary(OddNames))--\r\n")
+        # Speck128/128's published test vector (Beaulieu et al. 2013)
+        @test RestClient.speck128((0x0706050403020100, 0x0f0e0d0c0b0a0908), (0x6c61766975716520, 0x7469206564616d20)) ==
+            (0xa65d985179783265, 0x7860fedf5c570d18)
+    end
     @testset "multipart names" begin
         body = sprint(RestClient.writepayload, RestClient.MultipartFormat(), OddNames(a = "v"))
         @test occursin("name=\"we%22ird\"", body)

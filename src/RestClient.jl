@@ -42,8 +42,7 @@ macro reexport()
 end
 
 function __init__()
-    global MULTIPART_BOUNDARY = "----" * string(rand(UInt64); base = 16)
-    global MULTIPART_MIME = "multipart/form-data; boundary=" * MULTIPART_BOUNDARY
+    global MULTIPART_KEY = (rand(UInt64), rand(UInt64))
     DOWNLOADER[] = Downloads.Downloader()
     DOWNLOADER[].easy_hook = transferhook
     ccall(:jl_generating_output, Cint, ()) == 1 || atexit(cleancache)
