@@ -250,9 +250,9 @@ function open_stream(req::Request, out::Outgoing)
     end
     # Without a body (empty, or a transport failure), the transfer's result is final
     if take!(gate.signal) === :done
-        result = fetch(transfer)
-        result isa Exception && throw(result)
-        return Incoming(result, bs, transfer, interrupt)
+        final = fetch(transfer)::Union{Downloads.Response, Exception}
+        final isa Exception && throw(final)
+        return Incoming(final, bs, transfer, interrupt)
     end
     # The held first write keeps the transfer from freeing the curl handle while its
     # head is read (relying on Downloads internals: its Multi's lock and `get_response_info`)

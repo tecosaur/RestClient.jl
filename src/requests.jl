@@ -249,13 +249,14 @@ end
 
 function alert_sleep(delay::Real)
     @info S"Asked to wait {emphasis:$delay} seconds before retrying, obliging..."
-    if isa(stdout, Base.TTY)
-        print('\n')
+    tty = stdout
+    if tty isa Base.TTY
+        print(tty, '\n')
         for waited in 1:delay
             sleep(1)
-            print(ANSI_CLEAR_LINE, S" Waited {emphasis:$waited} seconds\n")
+            print(tty, ANSI_CLEAR_LINE, S" Waited {emphasis:$waited} seconds\n")
         end
-        print(ANSI_CLEAR_LINE)
+        print(tty, ANSI_CLEAR_LINE)
     else
         sleep(delay)
     end
@@ -566,7 +567,7 @@ function interpret(req::Request, response::Downloads.Response, bytes::AbstractVe
         interpretresponse(bytes, fmt, T)
     catch err
         err isa InterruptException && rethrow()
-        throw(MalformedResponse(req, response, T, collect(bytes), err))
+        throw(MalformedResponse(req, response, T, collect(bytes), err::Exception))
     end
 end
 

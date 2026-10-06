@@ -157,7 +157,7 @@ parsexml(::Type{T}, ::Nothing) where {T} =
 function parsexml(::Type{T}, nodes::Vector{<:AbstractNode}) where {T}
     isempty(nodes) && return parsexml(T, nothing)
     length(nodes) == 1 ||
-        throw(ArgumentError("Expected one <$(tag(first(nodes)))> element for a field of type \
+        throw(ArgumentError("Expected one <$(tag(first(nodes))::String)> element for a field of type \
                              `$T`, but found $(length(nodes)); use a Vector-typed field to take all"))
     parsexml(T, only(nodes))
 end

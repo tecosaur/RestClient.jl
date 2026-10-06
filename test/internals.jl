@@ -399,7 +399,9 @@ end
         end
         @test supertype(ResultClient.NumbersEndpoint) === AbstractEndpoint
         req = Request{:get}(RequestConfig("http://x"), ResultClient.ListedEndpoint())
-        @test RestClient.postprocess(req, ListContent(1, ["x"])) isa RestClient.List{String}
+        listed = RestClient.postprocess(req, ListContent(1, ["x"]))
+        @test listed isa RestClient.List{String}
+        @test isconcretetype(fieldtype(typeof(listed), :request))   # so a next page dispatches statically
         @test RestClient.postprocess(Request{:get}(RequestConfig("http://x"), PlainEP()),
                                      OneContent("n", 3)) === 3   # a single response gives its contents
     end
@@ -1002,7 +1004,7 @@ end
         req = Request{:get}(RequestConfig("https://api.example.com"), FieldSyntax.DefaultedEndpoint())
         res = Response("https", "https://api.example.com/defaulted", 200, "HTTP/1.1 200 OK", [])
         err = try RestClient.deliver(req, RestClient.Incoming(res, IOBuffer("{\"see\":2}"))) catch e; e end
-        @test err isa MalformedResponse{<:Request, ArgumentError}
+        @test err isa MalformedResponse && err.error isa ArgumentError
         @test err.type === FieldSyntax.Defaulted && err.body == codeunits("{\"see\":2}")
         msg = sprint(showerror, err)
         @test all(s -> occursin(s, msg), ("DefaultedEndpoint", "https://api.example.com/defaulted",
@@ -1019,18 +1021,18 @@ end
         @test_throws "No field of type" RestClient.contents(NoListContent(0))
     end
     @testset "List as a table" begin
-        rows = RestClient.List{Row, PagedListEP}(
+        rows = RestClient.List{Row}(
             Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}(), nothing)
         @test Tables.istable(rows)
         @test Tables.columntable(rows) == (a = [1, 2], b = ["x", "y"])
         @test Tables.schema(rows).names == (:a, :b)
-        strings = RestClient.List{String, PagedListEP}(
+        strings = RestClient.List{String}(
             Request{:get}(RequestConfig("http://x"), PagedListEP()), ["x"], Dict{Symbol, Any}(), nothing)
         @test !Tables.istable(strings)                           # String has no columns
         @test isnothing(Tables.schema(strings))                  # unknown, not empty
     end
     @testset "List display" begin
-        list = RestClient.List{String, PagedListEP}(
+        list = RestClient.List{String}(
             Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}(), nothing)
         bullets(rows; limit = true) = count(startswith("  • "), split(
             sprint(show, MIME("text/plain"), list; context = (:displaysize => (rows, 80), :limit => limit)), '\n'))

@@ -316,11 +316,11 @@ A request resolved to what goes on the wire, computed once however often it is
 sent. A caller-supplied `IO` payload is sent as-is (from `payloadstart`, when
 seekable); any other payload is encoded to bytes up front.
 """
-struct Outgoing
+struct Outgoing{P <: Union{Nothing, Vector{UInt8}, IO}}
     method::String
     url::String
     headers::Vector{Pair{String, String}}
-    payload::Union{Nothing, Vector{UInt8}, IO}
+    payload::P
     payloadstart::Union{Int, Nothing}
 end
 
@@ -410,12 +410,12 @@ frame's payload), and `error` is the underlying exception.
 
 See also: [`perform`](@ref), [`interpretresponse`](@ref).
 """
-struct MalformedResponse{R <: Request, E <: Exception} <: Exception
+struct MalformedResponse{R <: Request} <: Exception
     request::R
     response::Downloads.Response
     type::Type
     body::Vector{UInt8}
-    error::E
+    error::Exception
 end
 
 function Base.showerror(io::IO, @nospecialize(ex::MalformedResponse))
@@ -436,21 +436,24 @@ end
 # Generic response forms
 
 """
-    List{T, E<:AbstractEndpoint}
+    List{T, E<:AbstractEndpoint, R<:Request}
 
-Holds a list of values of type `T` returned from an API endpoint,
+Holds a list of values of type `T` returned by an `R` request to an `E` endpoint,
 along with request information, metadata, and the URL of the next page when the
 response links to one (`Link: <…>; rel="next"`). A page reached through that link
 keeps the request that started the listing.
 
 See also: [`ListResponse`](@ref), [`nextpage`](@ref).
 """
-struct List{T, E<:AbstractEndpoint}
-    request::Request{<:Any, E}
+struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}}
+    request::R
     items::Vector{T}
     meta::Dict{Symbol, Any}
     nextlink::Union{String, Nothing}
 end
+
+List{T}(request::Request{<:Any, E}, items, meta, nextlink) where {T, E} =
+    List{T, E, typeof(request)}(request, items, meta, nextlink)
 
 """
     SingleResponse{T}

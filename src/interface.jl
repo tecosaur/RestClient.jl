@@ -320,7 +320,7 @@ function postprocess(response::Downloads.Response, req::Request, data)
 end
 
 postprocess(req::Request, data::ListResponse{T}) where {T} =
-    List{T, typeof(req.endpoint)}(req, contents(data), metadata(data), nothing)
+    List{T}(req, contents(data), metadata(data), nothing)
 
 postprocess(::Request, data::SingleResponse) = contents(data)
 
