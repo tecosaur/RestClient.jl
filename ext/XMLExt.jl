@@ -7,7 +7,10 @@ using RestClient
 import RestClient: @xmldef
 using XML
 
-const AbstractNode = XML.AbstractXMLNode
+# XML 0.4 unescapes text and attribute values as it reads them; 0.3 leaves them as written
+const XML_UNESCAPES = pkgversion(XML) >= v"0.4"
+textvalue(raw::AbstractString) = if XML_UNESCAPES String(raw) else XML.unescape(raw) end
+textvalue(::Nothing) = nothing
 
 function parsexml end
 
@@ -34,7 +37,7 @@ RestClient.mimetype(::RestClient.XMLFormat, ::Type) = "application/xml"
 
 abstract type XMLParseException <: Exception end
 
-struct XMLMultipleChildren{N <: AbstractNode} <: XMLParseException
+struct XMLMultipleChildren{N <: LazyNode} <: XMLParseException
     node::N
     tag::String
 end
@@ -44,22 +47,32 @@ Base.showerror(io::IO, ex::XMLMultipleChildren) =
                Select one with an index (`", ex.tag, "[1]`), or take them all with a \
                Vector-typed field.")
 
-function extract_attr(node::AbstractNode, attr::String)
+function extract_attr(node::LazyNode, attr::String)
     attrs = attributes(node)
-    if !isnothing(attrs) get(attrs, attr, nothing) end
+    if !isnothing(attrs) textvalue(get(attrs, attr, nothing)) end
 end
 
 extract_attr(::Nothing, ::String) = nothing
 
-function extract_text(node::AbstractNode)
-    for child in children(node)
-        isnothing(tag(child)) && return value(child)
-    end
+function extract_text(node::LazyNode)
+    texts = [value(child) for child in children(node) if XML.nodetype(child) == XML.Text]
+    if !isempty(texts) textvalue(join(texts)) end
 end
 
 extract_text(::Nothing) = nothing
 
-function extract_child(node::AbstractNode, ctag::String)
+function printtext(io::IO, node::LazyNode)
+    for child in children(node)
+        kind = XML.nodetype(child)
+        if kind == XML.Text
+            print(io, value(child))
+        elseif kind == XML.Element
+            printtext(io, child)
+        end
+    end
+end
+
+function extract_child(node::LazyNode, ctag::String)
     childs = children(node)
     found = nothing
     for child in childs
@@ -75,7 +88,7 @@ end
 
 extract_child(::Nothing, ::String) = nothing
 
-extract_children(node::AbstractNode, ctag::String) = filter(child -> tag(child) == ctag, children(node))
+extract_children(node::LazyNode, ctag::String) = filter(child -> tag(child) == ctag, children(node))
 
 extract_children(::Nothing, ::String) = nothing
 
@@ -89,7 +102,7 @@ either the extracted value or `nothing` if the path could not be found.
 Supported components:
 - `name` to extract a child node with the given tag name
 - `*` to extract all children
-- `name/text()` to extract the text content of a child node
+- `name/text()` to extract a child node's own text, without that of elements within it
 - `name/@attr` to extract the value of an attribute
 - `name[i]` to extract the i-th child node
 - `name[last()]` to extract the last child node
@@ -141,31 +154,31 @@ macro xpath(spec::String)
 end
 
 parsexml(::Type{Any}, value) = value
-parsexml(::Type{Any}, content::String) = XML.unescape(content)
+parsexml(::Type{Any}, content::String) = content
 parsexml(::Type{Any}, ::Nothing) = nothing
-parsexml(::Type{String}, content::String) = XML.unescape(content)
-parsexml(::Type{Symbol}, content::String) = Symbol(parsexml(String, content))
-parsexml(::Type{T}, content::String) where {T} = parse(T, parsexml(String, content))
-parsexml(::Type{Vector{T}}, nodes::Vector{<:AbstractNode}) where {T} = [parsexml(T, n) for n in nodes]
+parsexml(::Type{String}, content::String) = content
+parsexml(::Type{Symbol}, content::String) = Symbol(content)
+parsexml(::Type{T}, content::String) where {T} = parse(T, content)
+parsexml(::Type{Vector{T}}, nodes::Vector{<:LazyNode}) where {T} = [parsexml(T, n) for n in nodes]
 parsexml(::Type{Vector{T}}, ::Nothing) where {T} = T[]
-parsexml(::Type{T}, node::AbstractNode) where {T <: Union{AbstractString, Number}} =
-    parsexml(T, something(extract_text(node), ""))
+parsexml(::Type{T}, node::LazyNode) where {T <: Union{AbstractString, Number}} =
+    parsexml(T, textvalue(sprint(printtext, node)))
 parsexml(::Type{T}, ::Nothing) where {T} =
     throw(ArgumentError("Required XML field of type `$T` is missing or empty"))
 
 # A single-valued field takes exactly one of the matching children
-function parsexml(::Type{T}, nodes::Vector{<:AbstractNode}) where {T}
+function parsexml(::Type{T}, nodes::Vector{<:LazyNode}) where {T}
     isempty(nodes) && return parsexml(T, nothing)
     length(nodes) == 1 ||
-        throw(ArgumentError("Expected one <$(tag(first(nodes))::String)> element for a field of type \
+        throw(ArgumentError("Expected one <$(tag(first(nodes)))> element for a field of type \
                              `$T`, but found $(length(nodes)); use a Vector-typed field to take all"))
     parsexml(T, only(nodes))
 end
-parsexml(::Type{Any}, nodes::Vector{<:AbstractNode}) = nodes
+parsexml(::Type{Any}, nodes::Vector{<:LazyNode}) = nodes
 
 parsexml(::Type{Union{T, Nothing}}, ::Nothing) where {T} = nothing
 parsexml(::Type{Union{T, Nothing}}, content::String) where {T} = parsexml(T, content)
-function parsexml(::Type{Union{T, Nothing}}, nodes::Vector{<:AbstractNode}) where {T}
+function parsexml(::Type{Union{T, Nothing}}, nodes::Vector{<:LazyNode}) where {T}
     isempty(nodes) && return nothing
     parsexml(T, if T <: Vector nodes else first(nodes) end)
 end
@@ -197,7 +210,7 @@ macro xmldef(struc::Expr)
               end)
         end)
     end
-    push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{S}, node::$AbstractNode) where {S <: $(esc(name))}
+    push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{S}, node::$LazyNode) where {S <: $(esc(name))}
                       S isa UnionAll &&
                           throw(ArgumentError("Cannot parse XML as $S without its type parameters (e.g. $S{Int})"))
                       S($(fieldparsers...))

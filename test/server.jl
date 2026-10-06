@@ -267,7 +267,7 @@ function stream_router(http::HTTP.Stream)
         path == "/silent/done" && push!(frames, "data: [DONE]\n\n")
         write_frames(http, frames; contenttype = "text/event-stream")
         sent = time()
-        try eof(http.stream) catch err; err isa Base.IOError || rethrow() end   # a reset hangs up too
+        try Base.eof(http.stream) catch err; err isa Base.IOError || rethrow() end   # a reset hangs up too
         put!(SILENT_HANGUPS, time() - sent)
     elseif path == "/stall"              # a frame, silence, then another
         write_frames(http, ndframes[1:2]; contenttype = "application/x-ndjson", interval = STALL_SECONDS)

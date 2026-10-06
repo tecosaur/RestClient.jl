@@ -85,6 +85,15 @@ end
     @test book.year == 1937                   # @attr parsed to Int
     @test book.ratio == 0.5                   # @attr parsed to Float64
     @test book.isbn == "978-0"                # optional present
+    escaped = xmlparse(XC.Book, """<book year="1851" ratio="1"><title>Moby &amp; Dick</title></book>""")
+    @test escaped.title == "Moby & Dick"      # text, unescaped once
+    marked = xmlparse(XC.Book, """<book year="1937" ratio="1"><title><i>The</i> Hobbit, <i>or</i> There</title></book>""")
+    @test filter(!isspace, marked.title) == "Hobbit,There"    # every text node; XML 0.3 trims each
+    @eval XC @xmldef struct Titled
+        title."title"::String
+    end
+    titled = xmlparse(XC.Titled, """<book><title><i>The</i> Hobbit, <i>or</i> There</title></book>""")
+    @test filter(!isspace, titled.title) == "TheHobbit,orThere"   # an element: all its text
 end
 
 @testset "`nothing` defaults" begin

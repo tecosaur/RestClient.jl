@@ -283,10 +283,14 @@ subset of supported XPath components are:
 - `nodetag` to extract all immediate children with a given tag name
 - `relative/node/paths`
 - `*` to extract all children
-- `text()` to extract the text content of a node
+- `text()` to extract a node's own text, without that of elements within it
 - `@attr` to extract the value of an attribute
 - `nodetag[i]` to extract the `i`-th child of type `nodetag`
 - `nodetag[last()]` to extract the last child of type `nodetag`
+
+A text or number field read from an element takes all the text within it, so
+`<title><i>E. coli</i> Nissle</title>` gives `"E. coli Nissle"` where
+`title/text()` gives `" Nissle"`.
 
 A field whose XPath matches nothing takes its default value. Unlike plain
 `@kwdef`, a default can't refer to other fields. A `Vector` field takes every
@@ -302,7 +306,7 @@ other field requires exactly one.
 ```julia
 @xmldef struct DocumentStatus
     exists."status/@exists"::Bool
-    status."status/text()"::String
+    status."status"::String
     url."status/@url"::Union{String, Nothing} = nothing
     age."status/@age"::Int
 end
