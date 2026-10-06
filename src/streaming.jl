@@ -28,20 +28,24 @@ end
 
 StreamFormat{F}(element::E) where {F, E} = StreamFormat{F, E}(element)
 
+# Foldable, so `framedata` and `remake` compile to plain field access
+Base.@assume_effects :foldable function payloadslot(F::Type)
+    wrapper = F.name.wrapper
+    slot = if wrapper isa UnionAll
+        findfirst(==(wrapper.var), fieldtypes(Base.unwrap_unionall(wrapper)))
+    end
+    isnothing(slot) &&
+        throw(ArgumentError("no payload field in $F; define `framedata` and `remake` for it"))
+    slot
+end
+
 """
     framedata(frame) -> payload
 
 Extract a frame's payload: the field whose type is the frame's type parameter. A
 framing whose payload is located differently can override this.
 """
-@generated function framedata(frame)
-    slot = let T = TypeVar(:T)
-        findfirst(==(T), fieldtypes(frame.name.wrapper{T}))
-    end
-    isnothing(slot) &&
-        return :(throw(ArgumentError("no payload field in $frame; define framedata")))
-    :(getfield(frame, $slot))
-end
+framedata(frame) = getfield(frame, payloadslot(typeof(frame)))
 
 """
     remake(frame, data, ::Type{P} = typeof(data)) -> frame
@@ -50,14 +54,9 @@ Return a copy of `frame` with its payload replaced by `data`, as a frame of payl
 type `P`, preserving the other fields. This is the decode step: `{bytes} → {P}`. The
 payload field is located as in [`framedata`](@ref).
 """
-@generated function remake(frame, data, ::Type{P}) where {P}
-    slot = let T = TypeVar(:T)
-        findfirst(==(T), fieldtypes(frame.name.wrapper{T}))
-    end
-    isnothing(slot) &&
-        return :(throw(ArgumentError("no payload field in $frame; define remake")))
-    args = [if i == slot; :data else :(getfield(frame, $i)) end for i in 1:fieldcount(frame)]
-    :($(frame.name.wrapper){P}($(args...)))
+function remake(frame::F, data, ::Type{P}) where {F, P}
+    slot = payloadslot(F)
+    F.name.wrapper{P}(ntuple(i -> if i == slot data else getfield(frame, i) end, Val(fieldcount(F)))...)
 end
 
 remake(frame, data) = remake(frame, data, typeof(data))

@@ -4,6 +4,9 @@
 using RestClient: SSEvent, NDJSONFrame, StreamFormat, RawFormat, readframe,
     framestate, framedata, remake, elementpayload
 
+struct UnparameterisedFrame; x::Int; end
+struct UnmatchedFrame{T}; x::Int; end
+
 # A bytes-element StreamFormat for the given framing symbol (framing in isolation).
 sfmt(framing::Symbol) = StreamFormat{framing}(RawFormat())
 
@@ -50,6 +53,10 @@ end
         @test framedata(ev) == "body"
         @test remake(ev, 9) == SSEvent("e", 9, "7")
     end
+    # A frame without a field typed by its parameter must define its own methods
+    @test_throws "no payload field" framedata(UnparameterisedFrame(1))
+    @test_throws "no payload field" remake(UnparameterisedFrame(1), "x")
+    @test_throws "no payload field" framedata(UnmatchedFrame{Int}(1))
     @test elementpayload(SSEvent{Int}) === Int
     @test elementpayload(NDJSONFrame{Int}) === Int
     @test elementpayload(Float64) === Float64
