@@ -23,7 +23,7 @@ XMLExt = "XML"
 
 [compat]
 Base64 = "1"
-BaseDirs = "1.0"
+BaseDirs = "1.4"
 Dates = "1.6"
 Downloads = "1.6"
 JSON = "1"

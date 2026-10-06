@@ -81,7 +81,7 @@ end
 
 # Caching requests to an endpoint
 
-cachedir() = BaseDirs.User.cache(BaseDirs.Project("RestClient"))
+cachedir() = BaseDirs.User.cache(BaseDirs.App("RestClient"))
 
 function cachekey(url::String, method::String, headers::Vector{Pair{String, String}},
                   payload::Union{Vector{UInt8}, Nothing})
