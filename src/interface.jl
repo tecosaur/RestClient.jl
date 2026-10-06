@@ -399,7 +399,7 @@ When implementing this method, a good approach to follow is:
 2. Consider how the request should be modified to fetch the next page,
    and accordingly implement `nextpage` for either the endpoint,
    request, or list.
-3. Create a modified endpoint or request using `RestClient.setfield`
+3. Construct the modified endpoint or request
 4. When implementing the `List`-based method, call [`perform`](@ref) with the modified request
 
 For example, [randomuser.me](https://randomuser.me/) has a paginated API, and so you could
@@ -433,7 +433,7 @@ end
 RestClient.thispagenumber(users::UsersEndpoint) = users.page
 
 RestClient.nextpage(users::UsersEndpoint) =
-    RestClient.setfield(users, :page, users.page + 1)
+    UsersEndpoint(users.page + 1, users.results, users.seed)
 ```
 
 This can then be used like so:

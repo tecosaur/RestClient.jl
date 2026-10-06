@@ -16,7 +16,7 @@ export MalformedRequest, ResponseError, MalformedResponse
 public urlpath, headers, parameters, payload, validate, responsetype, postprocess,
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, thispagenumber, remainingpages,
-    globalconfig, setfield
+    globalconfig
 public StreamFormat, UnspecifiedFormat, readframe, framestate, framedata, remake,
     elementpayload, authheaders, authparams, contents, metadata, cachelifetime
 

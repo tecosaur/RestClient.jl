@@ -30,31 +30,6 @@ function authparams(::AuthScheme, ::Union{String, Nothing}) end
 authparams(a::QueryAuth, key::String) = a.name => key
 
 """
-    setfield(x::T, field::Symbol, value) -> T
-
-Return a copy of `x` with `field` set to `value` (converted to the field's type),
-leaving `x` itself unchanged. Useful for deriving the next request from an
-immutable endpoint, as in a [`nextpage`](@ref) method.
-
-# Errors
-
-`ArgumentError` if `T` has no field named `field`.
-
-# Examples
-
-```julia
-RestClient.nextpage(e::PagedEndpoint) = RestClient.setfield(e, :page, e.page + 1)
-```
-"""
-function setfield(x::T, field::Symbol, value) where {T}
-    fvals = ((getfield(x, f) for f in fieldnames(T))...,)
-    fidx = findfirst(==(field), fieldnames(T))
-    isnothing(fidx) && throw(ArgumentError("Field $field not found in $T"))
-    fvals = Base.setindex(fvals, convert(fieldtype(T, field), value), fidx)
-    T(fvals...)
-end
-
-"""
     @globalconfig config [auth=scheme | auth=(scheme, policy)] [format=fmt] [supertype=T]
 
 Define [`globalconfig`](@ref) for the current module as `config`, and optionally

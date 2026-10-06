@@ -123,7 +123,7 @@ module IntegrationClient
     end
     RestClient.thispagenumber(e::PagedEndpoint) = e.page
     RestClient.nextpage(e::PagedEndpoint) =
-        if e.page < 3 RestClient.setfield(e, :page, e.page + 1) end
+        if e.page < 3 PagedEndpoint(e.page + 1) end
 end
 
 const IC = IntegrationClient
