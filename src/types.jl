@@ -439,9 +439,10 @@ end
     List{T, E<:AbstractEndpoint, R<:Request}
 
 Holds a list of values of type `T` returned by an `R` request to an `E` endpoint,
-along with request information, metadata, and the URL of the next page when the
-response links to one (`Link: <…>; rel="next"`). A page reached through that link
-keeps the request that started the listing.
+along with request information, metadata, the URL of the next page when the
+response links to one (`Link: <…>; rel="next"`), and the page's number. A page
+reached through that link keeps the request that started the listing, and is
+numbered one on from the page that linked to it.
 
 See also: [`ListResponse`](@ref), [`nextpage`](@ref).
 """
@@ -450,10 +451,12 @@ struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}}
     items::Vector{T}
     meta::Dict{Symbol, Any}
     nextlink::Union{String, Nothing}
+    page::Int
 end
 
-List{T}(request::Request{<:Any, E}, items, meta, nextlink) where {T, E} =
-    List{T, E, typeof(request)}(request, items, meta, nextlink)
+List{T}(request::Request{<:Any, E}, items, meta, nextlink = nothing,
+        page = something(thispagenumber(request), 1)) where {T, E} =
+    List{T, E, typeof(request)}(request, items, meta, nextlink, page)
 
 """
     SingleResponse{T}

@@ -401,6 +401,7 @@ end
         req = Request{:get}(RequestConfig("http://x"), ResultClient.ListedEndpoint())
         listed = RestClient.postprocess(req, ListContent(1, ["x"]))
         @test listed isa RestClient.List{String}
+        @test isnothing(RestClient.thispagenumber(listed))              # not paged
         @test isconcretetype(fieldtype(typeof(listed), :request))   # so a next page dispatches statically
         @test RestClient.postprocess(Request{:get}(RequestConfig("http://x"), PlainEP()),
                                      OneContent("n", 3)) === 3   # a single response gives its contents

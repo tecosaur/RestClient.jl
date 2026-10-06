@@ -316,11 +316,11 @@ function postprocess(response::Downloads.Response, req::Request, data)
     result = postprocess(req, data)
     result isa List || return result
     next = withauthparam(req, nextlink(req.config, response.headers))
-    typeof(result)(result.request, result.items, result.meta, if next != response.url next end)
+    typeof(result)(result.request, result.items, result.meta, if next != response.url next end, result.page)
 end
 
 postprocess(req::Request, data::ListResponse{T}) where {T} =
-    List{T}(req, contents(data), metadata(data), nothing)
+    List{T}(req, contents(data), metadata(data))
 
 postprocess(::Request, data::SingleResponse) = contents(data)
 
@@ -453,7 +453,8 @@ function nextpage(list::List)
     isnothing(nextreq) || return perform(nextreq)
     isnothing(list.nextlink) && return
     out = outgoing(list.request)
-    send(list.request, Outgoing(out.method, list.nextlink, out.headers, out.payload, out.payloadstart))
+    next = send(list.request, Outgoing(out.method, list.nextlink, out.headers, out.payload, out.payloadstart))
+    typeof(next)(next.request, next.items, next.meta, next.nextlink, list.page + 1)
 end
 
 # The `rel="next"` URL of a `Link` header (RFC 8288), if it lies under `baseurl`
@@ -495,12 +496,15 @@ end
 """
     thispagenumber(response::List) -> Union{Int, Nothing}
 
-Return the current page number of `response`, if known.
+Return the current page number of `response`, if it is one of several pages.
 
-The generic `::List` implementation returns `nothing`.
+The generic `::List` implementation counts on from the request's own page number
+(or 1) along any `Link` headers followed, and returns `nothing` for a list that
+is neither numbered by its endpoint nor linked to other pages.
 """
 function thispagenumber(list::List)
-    thispagenumber(list.request)
+    paged = list.page > 1 || !isnothing(list.nextlink) || !isnothing(thispagenumber(list.request))
+    if paged list.page end
 end
 
 function thispagenumber(req::Request)
@@ -516,10 +520,12 @@ end
 
 Return the number of remaining pages after `response`, if known.
 
-The generic `::List` implementation returns `nothing`.
+The generic `::List` implementation takes the request's count, less any pages
+reached through `Link` headers since, or returns `nothing` if the request has none.
 """
 function remainingpages(list::List)
-    remainingpages(list.request)
+    remaining = remainingpages(list.request)
+    if !isnothing(remaining) remaining - (list.page - something(thispagenumber(list.request), 1)) end
 end
 
 function remainingpages(req::Request)

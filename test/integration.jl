@@ -112,6 +112,7 @@ module IntegrationClient
     @endpoint linkedq(; variant::String = "plain") -> "linked?{variant}" -> Paged
     RestClient.authscheme(::LinkedqEndpoint) = QueryAuth("api_key")
     RestClient.authpolicy(::LinkedqEndpoint) = :optional
+    RestClient.remainingpages(::LinkedqEndpoint) = 2
     @endpoint struct LinkedOwnEndpoint
         linked_own(; page::Int = 1) -> "linked?{page}" -> Paged
         page::Int = 1
@@ -247,6 +248,8 @@ const AC = AuthClient
             @test [page[1].id for page in pages] == [1, 2, 3]
             @test all(page -> page[1].name == "Bearer k", pages)         # auth still sent
             @test all(page -> page[1].name == "k", eachpage(IC.linkedq(cfg(baseurl; key = "k"))))
+            @test RestClient.thispagenumber.(pages) == [1, 2, 3]            # counted along the links
+            @test map(RestClient.remainingpages, eachpage(IC.linkedq(cfg(baseurl)))) == [2, 1, 0]
             @test isnothing(nextpage(IC.linked(cfg(baseurl); variant = "self")))  # links to itself
             @test isnothing(nextpage(IC.linkedq(cfg(baseurl; key = "k"); variant = "self")))
             @test ids(IC.linked(cfg(baseurl); variant = "root")) == [1, 2, 3]
