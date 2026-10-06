@@ -52,15 +52,8 @@ end
 extract_attr(::Nothing, ::String) = nothing
 
 function extract_text(node::AbstractNode)
-    textnode = nothing
     for child in children(node)
-        if isnothing(tag(child))
-            textnode = child
-            break
-        end
-    end
-    if !isnothing(textnode)
-        value(textnode)
+        isnothing(tag(child)) && return value(child)
     end
 end
 
@@ -82,15 +75,7 @@ end
 
 extract_child(::Nothing, ::String) = nothing
 
-function extract_children(node::AbstractNode, ctag::String)
-    childs = children(node)
-    found = empty(childs)
-    for child in childs
-        tag(child) == ctag || continue
-        push!(found, child)
-    end
-    found
-end
+extract_children(node::AbstractNode, ctag::String) = filter(child -> tag(child) == ctag, children(node))
 
 extract_children(::Nothing, ::String) = nothing
 
@@ -129,17 +114,18 @@ macro xpath(spec::String)
             body = :(children($body))
         elseif '[' in component && endswith(component, ']')
             path, idx = split(component[1:prevind(component, end)], '[', limit=2)
-            if idx == "last()"
-                body = :(let childs = extract_children($body, $(String(path)))
-                             if !isnothing(childs) last(childs) end
-                         end)
+            pick = if idx == "last()"
+                :(last(childs))
             else
                 intidx = tryparse(Int, idx)
                 isnothing(intidx) && throw(ArgumentError("Unrecognised index form: [$idx]"))
-                body = :(let childs = extract_children($body, $(String(path)))
-                             if !isnothing(childs) get(childs, $intidx, nothing) end
-                         end)
+                :(get(childs, $intidx, nothing))
             end
+            body = :(let childs = extract_children($body, $(String(path)))
+                         if !isnothing(childs)
+                             $pick
+                         end
+                     end)
         else
             # Terminal segment returns the matching child vector (so unwrapped
             # arrays work); intermediate segments return a single child for
