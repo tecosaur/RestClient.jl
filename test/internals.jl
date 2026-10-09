@@ -467,6 +467,22 @@ end
         @test vf(:(length(items))) == :(length(items))          # as do other expressions
         @test_throws ArgumentError vf(:undefinedthing)
         @test_throws ArgumentError vf(:(undefinedthing.x))
+        # Within an expression, fields are values, but not call heads or keyword names
+        @test vf(:(Pair(id, item.name))) == :(Pair(self.id, self.item.name))
+        @test vf(:(f(; id = id, item))) == :(f(; id = self.id, self.item))
+        @test vf(:((id = id,))) == :((id = self.id,))
+        @test vf(:(x -> id)) == :(x -> id)                        # binds its own names
+        @test vf(:(j(x for x in id))) == :(j(x for x in self.id))
+        @test vf(:([x * id for x in item])) == :([x * self.id for x in self.item])
+        @test vf(:([id for id in item if id > 0])) == :([id for id in self.item if id > 0])
+        @test vf(:(id(1))) == :(id(1))
+        @eval module ClashingGlobals
+            clashing = 1
+        end
+        cf(ex) = RestClient.varform(ex; varname = :self, localvars = [:self, :config],
+                                    knownfields = [:clashing, :count], mod = ClashingGlobals)
+        @test_throws "write `self.clashing`" cf(:(f(clashing)))
+        @test cf(:(f(count))) == :(f(self.count))                  # `count` is only a function
     end
     @testset "URL templates" begin
         interp(str; kw...) = RestClient.interp_curlies(str; varname = :self, localvars = Symbol[],

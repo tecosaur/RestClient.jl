@@ -137,7 +137,9 @@ HTTP methods like `:post`, `:put`, and `:patch` include a content payload (also
 referred to as the request body). The payload can be specified with a _payload
 form_ that names a field of the endpoint struct, names a global variable, or is
 an expression evaluated to generate the payload value (with the current
-endpoint available through the anaphoric variable `$ANAPHORIC_VAR`).
+endpoint available through the anaphoric variable `$ANAPHORIC_VAR`). Fields can
+be named directly within the expression too, as in `-> Upload(content) ->`; a
+field sharing its name with a global variable must be written as `$ANAPHORIC_VAR.field`.
 
 Unless otherwise specified, an endpoint that includes a payload is assumed to be
 a `:post` request (`:get` without).
@@ -698,21 +700,47 @@ end
 
 Convert implicit references to a field of a variable `varname` into explicit references.
 
-A field reference is recognised when `exval` is one of `knownfields`. If `exval` is a variable
-but not a member of `knownfields` or a global variable, an `ArgumentError` is thrown.
+A field of `knownfields` is referenced by name, as `exval` itself, the root of a
+dotted path, or a value within an expression (but not a call head, a keyword name,
+or within a construct that binds its own names, such as a `->` function).
+
+Throws an `ArgumentError` if `exval` names something that is not a field, local, or
+global variable, or if a field shares its name with a global variable that is not a
+function or type (write `varname.field` instead).
 """
 function varform(exval; varname::Symbol, localvars::Vector{Symbol}, knownfields::Vector{Symbol}, mod::Module)
     root = exval
     while Meta.isexpr(root, :., 2)
         root = root.args[1]
     end
-    root isa Symbol || return exval
-    if root ∈ knownfields
-        qualify(ex) = if ex === root Expr(:., varname, QuoteNode(ex)) else Expr(:., qualify(ex.args[1]), ex.args[2]) end
-        qualify(exval)
-    elseif root ∈ localvars || isdefined(mod, root)
-        exval
-    else
+    root isa Symbol && root ∉ knownfields && root ∉ localvars && !isdefined(mod, root) &&
         throw(ArgumentError("$exval is not a known field, local variable, or global variable"))
+    function field(name::Symbol)
+        isdefined(mod, name) && !(getglobal(mod, name) isa Union{Function, Type}) &&
+            throw(ArgumentError("`$name` is both a field and a global variable; write `$varname.$name` for the field"))
+        Expr(:., varname, QuoteNode(name))
     end
+    function boundby(ex)
+        ex isa Symbol && return [ex]
+        Meta.isexpr(ex, :(=)) && return boundby(ex.args[1])
+        parts = if Meta.isexpr(ex, :tuple) ex.args elseif Meta.isexpr(ex, :filter) ex.args[2:end] else () end
+        mapreduce(boundby, vcat, parts; init = Symbol[])
+    end
+    function within(ex, bound::Vector{Symbol} = Symbol[])
+        ex isa Symbol && return if ex ∈ knownfields && ex ∉ bound field(ex) else ex end
+        ex isa Expr || return ex
+        if ex.head === :call
+            Expr(:call, ex.args[1], map(a -> within(a, bound), ex.args[2:end])...)
+        elseif ex.head ∈ (:kw, :(=))
+            Expr(ex.head, ex.args[1], within(ex.args[2], bound))
+        elseif ex.head === :generator
+            inner = [bound; mapreduce(boundby, vcat, ex.args[2:end])]
+            Expr(:generator, map(a -> within(a, inner), ex.args)...)
+        elseif ex.head ∈ (:->, :function, :let, :do, :macrocall)
+            ex
+        else
+            Expr(ex.head, map(a -> within(a, bound), ex.args)...)
+        end
+    end
+    within(exval)
 end
