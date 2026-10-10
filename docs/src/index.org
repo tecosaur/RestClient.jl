@@ -76,14 +76,17 @@ See [[file:streaming.md][the streaming manual]] for more information.
 
 ** Extra functionality
 
-+ [[@ref Pagination-interface][Pagination]]
++ [[@ref Pagination-interface][Pagination]], by page number or =Link= header, with lazy
+  iteration over the pages through [[@ref RestClient.eachpage][~eachpage~]]
 + Response [[@ref RestClient.postprocess][post-processing]]
 + [[@ref Caching-interface][Caching]]
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
 + Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
 + [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
 + [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
-+ Rate limiting (by reading the relevant HTTP response headers)
++ Retries, for rate limits (read from the relevant response headers) and gateway failures
++ API-wide defaults for authentication, data format, and endpoint supertype, through
+  [[@ref][~@globalconfig~]]
 
 * Request data flow
 
@@ -95,12 +98,12 @@ request:
          │     ╎                               │
          │     ╎        ╭─▶ responsetype ╾─────┼────────────────┬──▶ dataformat ╾───╮
 Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │                ╰─────────╮         │
-         │              ├─▶ urlpath ╾────╮     │      ┌┄┄┄┄debug┄┄┄┐      │  ╭──────╯
-         │              │                ├──▶ url ╾─┬─━─▶ request ╾━┬─▶ interpret ╾──▶ data
-         ├─╴endpoint╶───┼─▶ parameters ╾─╯          │               │                   │
-         │              │                           │               │             ╭─────╯
-         │              ├─▶ parameters ╾────────────┤               ╰─────────╮   │
-         │              │                           │                      postprocess ╾──▶ result
+         │              ├─▶ urlpath ╾────╮     │      ╓┄┄*debug*┄┄╖       │  ╭──────╯
+         │              │                ├──▶ url ╾─┬─━─▶ request ┊ ╭─▶ interpret ╾──▶ data
+         ├─╴endpoint╶───┼─▶ parameters ╾─╯          │ ┊      ┠────━─┤                   │
+         │              │                           ├─━──▶ cache  ┊ │             ╭─────╯
+         │              ├─▶ headers ╾───────────────┤ ┊           ┊ ╰─────────╮   │
+         │              │                           │ ╙┄┄┄┄┄┄┄┄┄┄┄╜        postprocess ╾──▶ result
          │             *╰─▶ payload ─▶ writepayload╶╯                           │
          │                    ╰─▶ dataformat ╾╯                                 │
          ╰─────────┬────────────────────────────────────────────────────────────╯

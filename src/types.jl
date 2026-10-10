@@ -291,7 +291,7 @@ Request╶─┤     ╰╶╶╶╶╶╶╶╶│                      │    
          │              │                ├──▶ url ╾─┬─━─▶ request ┊ ╭─▶ interpret ╾──▶ data
          ├─╴endpoint╶───┼─▶ parameters ╾─╯          │ ┊      ┠────━─┤                   │
          │              │                           ├─━──▶ cache  ┊ │             ╭─────╯
-         │              ├─▶ parameters ╾────────────┤ ┊           ┊ ╰─────────╮   │
+         │              ├─▶ headers ╾───────────────┤ ┊           ┊ ╰─────────╮   │
          │              │                           │ ╙┄┄┄┄┄┄┄┄┄┄┄╜        postprocess ╾──▶ result
          │             *╰─▶ payload ─▶ writepayload╶╯                           │
          │                    ╰─▶ dataformat ╾╯                                 │
