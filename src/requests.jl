@@ -184,9 +184,15 @@ function querypairs(fields)
 end
 
 function url(req::Request)
-    path, query = urlpath(req.config, req.endpoint)::String, url_parameters(parameters(req))
-    isempty(query) && return string(req.config.baseurl, '/', path)
-    string(req.config.baseurl, '/', path, ifelse('?' in path, '&', '?'), query)
+    path = try
+        chopprefix(String(urlpath(req.config, req.endpoint)), "/")
+    catch err
+        err isa NothingInPath || rethrow()
+        throw(MalformedRequest(req, ["`{$(err.expr)}` in the URL path is `nothing`"]))
+    end
+    base = if isempty(path) req.config.baseurl else string(req.config.baseurl, '/', path) end
+    query = url_parameters(parameters(req))
+    if isempty(query) base else string(base, ifelse('?' in path, '&', '?'), query) end
 end
 
 # `headers(req)` plus the Content-Type/Accept implied by the payload and response formats

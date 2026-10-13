@@ -491,7 +491,7 @@ end
         @test interp("a\\\\b") == "a\\b"                         # escaped backslash
         @test interp("a//b///{x}//c"; ispath = true) ==
             Expr(:call, GlobalRef(Base, :string), "a/b/",
-                 :($(RestClient.encode_uri_component)($string(self.x))), "/c")
+                 :($(RestClient.pathsegment)(self.x, "x")), "/c")
         @test interp("a//b") == "a//b"                           # only paths are collapsed
         @eval module URLClient
             using RestClient
@@ -753,6 +753,25 @@ end
     end
     @testset "base URL with a trailing slash" begin
         @test RestClient.url(Request{:get}(RequestConfig("http://x/api/"), PlainEP())) == "http://x/api/p"
+    end
+    @testset "URL paths" begin
+        @eval module PathClient
+            using RestClient
+            @globalconfig RequestConfig("http://x")
+            struct RootEP <: AbstractEndpoint end
+            RestClient.urlpath(::RootEP) = ""
+            struct SlashEP <: AbstractEndpoint end
+            RestClient.urlpath(::SlashEP) = "/a"
+            struct SubEP <: AbstractEndpoint end
+            RestClient.urlpath(::SubEP) = chopprefix("prefix/s", "prefix/")
+            @endpoint item(id::Union{Int, Nothing}) -> "items/{id}" -> String
+        end
+        urlof(ep; base = "http://x") = RestClient.url(Request{:get}(RequestConfig(base), ep))
+        @test urlof(PathClient.RootEP(); base = "http://x/graphql") == "http://x/graphql"
+        @test urlof(PathClient.SlashEP()) == "http://x/a"
+        @test urlof(PathClient.SubEP()) == "http://x/s"                # any string, as a SubString
+        err = try urlof(PathClient.ItemEndpoint(nothing)) catch e; e end
+        @test err isa MalformedRequest && occursin("{id}", only(err.issues))
     end
     @testset "timeout must be positive" begin
         @test_throws "timeout" RequestConfig("http://x"; timeout = 0)

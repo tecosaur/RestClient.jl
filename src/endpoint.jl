@@ -648,6 +648,13 @@ function split_template(str::String, delim::Char; limit::Int = 0)
     push!(parts, str[start:end])
 end
 
+struct NothingInPath <: Exception
+    expr::String
+end
+
+pathsegment(value, ::String) = encode_uri_component(string(value))
+pathsegment(::Nothing, expr::String) = throw(NothingInPath(expr))
+
 """
     interp_curlies(str::String; filename::String = "unknown", ispath::Bool = false, kwargs...)
 
@@ -679,7 +686,7 @@ function interp_curlies(str::String; filename::String = "unknown", ispath::Bool 
             Meta.isexpr(expr, :braces, 1) ||
                 throw(ArgumentError("Expected single {curly} form in URL, instead saw $expr"))
             exvar = varform(first(expr.args); kwargs...)
-            push!(components, if ispath; :($encode_uri_component($string($exvar))) else exvar end)
+            push!(components, if ispath; :($pathsegment($exvar, $(string(first(expr.args))))) else exvar end)
         else
             print(literal, char)
             idx = nextind(str, idx)
