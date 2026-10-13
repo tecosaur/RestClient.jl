@@ -65,6 +65,13 @@ module XMLClient
         value."@v"::T
         label."@l"::String
     end
+    @xmldef struct Gathered
+        terms."category/@term"::Vector{String}
+        affiliations."info/aff/text()"::Vector{String} = String[]
+    end
+    @xmldef struct Sole
+        affiliation."info/aff/text()"::Union{String, Nothing} = nothing
+    end
     @xmldef struct Bare
         title::String
         count::Union{Int, Nothing} = nothing
@@ -77,6 +84,16 @@ module XMLClient
 end
 
 const XC = XMLClient
+
+@testset "every match" begin
+    # A Vector field takes every match, through repeated steps as well as the last
+    g = xmlparse(XC.Gathered, """<e><category term="a"/><category term="b"/>
+        <info><aff>x</aff></info><info><aff>y</aff><aff>z</aff></info></e>""")
+    @test g.terms == ["a", "b"]
+    @test g.affiliations == ["x", "y", "z"]
+    @test_throws "found several" xmlparse(XC.Sole, """<e><info/><info/></e>""")  # a single value still takes one
+    @test xmlparse(XC.Gathered, """<e><category term="a"/></e>""").affiliations == String[]
+end
 
 @testset "format" begin
     @test RestClient.dataformat(XC.Book) == RestClient.XMLFormat()

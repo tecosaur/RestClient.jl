@@ -297,8 +297,10 @@ A text or number field read from an element takes all the text within it, so
 
 A field whose XPath matches nothing takes its default value. Unlike plain
 `@kwdef`, a default can't refer to other fields. A `Vector` field takes every
-matching element, a `Union{…, Nothing}` field the first of several, and any
-other field requires exactly one.
+match through every step of its path, so `a/@b` gives the `b` of each `a`.
+Other fields need each step before the last to match one element; at the
+last, a `Union{…, Nothing}` field takes the first of several, and any other
+field requires exactly one.
 
 !!! warning "Soft XML dependency"
     This macro is implemented in a package extension, and so

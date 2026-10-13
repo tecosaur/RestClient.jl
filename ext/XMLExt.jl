@@ -108,8 +108,11 @@ Supported components:
 - `name[i]` to extract the i-th child node
 - `name[last()]` to extract the last child node
 """
-macro xpath(spec::String)
-    body = :node
+macro xpath(spec::String, many::Bool = false)
+    body = if many; :([node]) else :node end
+    # With `many`, each step applies to every node so far, as in XPath
+    every(ex) = :([found for n in $body for found in $ex])
+    some(ex) = :([found for n in $body for found in ($ex,) if !isnothing(found)])
     terminated = false
     components = collect(eachsplit(spec, '/'))
     for (i, component) in enumerate(components)
@@ -120,13 +123,14 @@ macro xpath(spec::String)
             throw(ArgumentError("Ungrounded selectors are not supported"))
         elseif component == "."
         elseif component == "text()"
-            body = :(extract_text($body))
+            body = if many some(:(extract_text(n))) else :(extract_text($body)) end
             terminated = true
         elseif startswith(component, '@')
-            body = :(extract_attr($body, $(String(component[2:end]))))
+            attr = String(component[2:end])
+            body = if many some(:(extract_attr(n, $attr))) else :(extract_attr($body, $attr)) end
             terminated = true
         elseif component == "*"
-            body = :(children($body))
+            body = if many every(:(children(n))) else :(children($body)) end
         elseif '[' in component && endswith(component, ']')
             path, idx = split(component[1:prevind(component, end)], '[', limit=2)
             pick = if idx == "last()"
@@ -136,11 +140,14 @@ macro xpath(spec::String)
                 isnothing(intidx) && throw(ArgumentError("Unrecognised index form: [$idx]"))
                 :(get(childs, $intidx, nothing))
             end
-            body = :(let childs = extract_children($body, $(String(path)))
-                         if !isnothing(childs) && !isempty(childs)
-                             $pick
-                         end
-                     end)
+            select(from) = :(let childs = extract_children($from, $(String(path)))
+                                 if !isnothing(childs) && !isempty(childs)
+                                     $pick
+                                 end
+                             end)
+            body = if many some(select(:n)) else select(body) end
+        elseif many
+            body = every(:(extract_children(n, $(String(component)))))
         else
             # Terminal segment returns the matching child vector (so unwrapped
             # arrays work); intermediate segments return a single child for
@@ -162,6 +169,7 @@ parsexml(::Type{String}, content::String) = content
 parsexml(::Type{Symbol}, content::String) = Symbol(content)
 parsexml(::Type{T}, content::String) where {T} = parse(T, content)
 parsexml(::Type{Vector{T}}, nodes::Vector{<:LazyNode}) where {T} = [parsexml(T, n) for n in nodes]
+parsexml(::Type{Vector{T}}, values::Vector{String}) where {T} = [parsexml(T, v) for v in values]
 parsexml(::Type{Vector{T}}, ::Nothing) where {T} = T[]
 parsexml(::Type{T}, node::LazyNode) where {T <: Union{AbstractString, Number}} =
     parsexml(T, textvalue(sprint(printtext, node)))
@@ -194,9 +202,10 @@ macro xmldef(struc::Expr)
     # Create the parse rule
     fieldparsers = Any[]
     for (i, (; key, default)) in enumerate(fields)
-        ex = Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")),
-                  __source__, something(key, String(fields[i].name)))
-        node = :($(esc(ex))(node))
+        one, all = (esc(Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")), __source__,
+                             something(key, String(fields[i].name)), many))
+                    for many in (false, true))
+        node = :(if fieldtype(S, $i) <: AbstractVector; $all(node) else $one(node) end)
         parsefield(from) = :(parsexml(fieldtype(S, $i), $from))
         push!(fieldparsers, if isnothing(default) parsefield(node) else
             :(let found = $node
