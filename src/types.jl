@@ -392,8 +392,9 @@ struct ResponseError{R <: Request} <: Exception
 end
 
 function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
+    reason = replace(ex.response.message, r"^HTTP/\S+\s+\d+\s*" => "")
     print(io, "HTTP ", ex.response.status)
-    isempty(ex.response.message) || print(io, ' ', ex.response.message)
+    isempty(reason) || print(io, ' ', reason)
     print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
     isempty(ex.body) || print(io, "\n  ", bodypreview(ex.body))
 end
@@ -429,7 +430,7 @@ end
 function bodypreview(body::Vector{UInt8})
     shown = map(c -> if isvalid(c) && (isprint(c) || isspace(c)) c else '�' end,
                 String(body[1:min(end, 512)]))
-    rstrip(shown) * ifelse(length(body) > 512, " …", "")
+    replace(rstrip(shown), '\n' => "\n  ") * ifelse(length(body) > 512, " …", "")
 end
 
 

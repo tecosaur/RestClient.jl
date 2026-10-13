@@ -848,6 +848,14 @@ end
         ascii = sprint(showerror, RestClient.ResponseError(req, res, Vector{UInt8}("a"^600)))
         @test endswith(ascii, "\n  " * "a"^512 * " …")                   # no character split
     end
+    @testset "status lines" begin
+        req = Request{:get}(RequestConfig("http://x"), PlainEP())
+        shown(message, body = "") = sprint(showerror, RestClient.ResponseError(
+            req, Response("http", "http://x/p", 404, message, Pair{String, String}[]), Vector{UInt8}(body)))
+        @test startswith(shown("HTTP/2 404"), "HTTP 404 from http://x/p")              # no reason phrase
+        @test startswith(shown("HTTP/1.1 404 Not Found"), "HTTP 404 Not Found from")
+        @test endswith(shown("HTTP/2 404", "{\n  \"a\": 1\n}"), "\n  {\n    \"a\": 1\n  }")  # every line indented
+    end
 end
 
 @testset "formats" begin
