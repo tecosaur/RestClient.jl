@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 
 const HTTP_DATE_FORMAT = dateformat"e, d u Y H:M:S G\MT"
+const USER_AGENT = "RestClient.jl/" * string(pkgversion(@__MODULE__))
 
 # The core API
 
@@ -205,6 +206,7 @@ function mimeheaders(req::Request, fmt::AbstractFormat, in::Type)
     extras = Pair{String, String}[]
     isnothing(inmime) || isset("content-type") || push!(extras, "Content-Type" => string(inmime))
     isnothing(outmime) || isset("accept") || push!(extras, "Accept" => string(outmime))
+    isset("user-agent") || push!(extras, "User-Agent" => USER_AGENT)
     isempty(extras) && hdrs isa Vector{Pair{String, String}} && return hdrs
     append!(Pair{String, String}[h for h in hdrs], extras)
 end

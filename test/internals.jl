@@ -58,6 +58,9 @@ struct PayloadEP <: AbstractEndpoint
 end
 RestClient.urlpath(::PayloadEP) = "p"
 RestClient.payload(ep::PayloadEP) = ep.value
+struct AgentEP <: AbstractEndpoint end
+RestClient.urlpath(::AgentEP) = "a"
+RestClient.headers(::AgentEP) = ["user-agent" => "MyClient/1.0"]
 struct QueryPathEP <: AbstractEndpoint end
 RestClient.urlpath(::QueryPathEP) = "search?q=1"
 RestClient.authscheme(::QueryPathEP) = QueryAuth("api_key")
@@ -803,7 +806,8 @@ end
         for _ in 1:2
             @test RestClient.headers(req) == ["X-A" => "1", "Authorization" => "Bearer k"]
             @test RestClient.parameters(req) == ["a" => "1"]
-            @test RestClient.mimeheaders(req, RestClient.UnspecifiedFormat(), Nothing) == ["X-A" => "1", "Authorization" => "Bearer k"]
+            @test RestClient.mimeheaders(req, RestClient.UnspecifiedFormat(), Nothing) ==
+                ["X-A" => "1", "Authorization" => "Bearer k", "User-Agent" => RestClient.USER_AGENT]
         end
         @test SHARED_HEADERS == ["X-A" => "1"]
         @test SHARED_PARAMS == ["a" => "1"]
@@ -878,7 +882,10 @@ end
         @test ("Content-Type" => "text/plain; charset=utf-8") in labels(String)
         @test ("Content-Type" => "application/octet-stream") in labels(Vector{UInt8})
         # A raw response sets no Accept header (libcurl sends `*/*`).
-        @test isempty(RestClient.mimeheaders(Request{:get}(RequestConfig("http://x"), PlainEP()), RestClient.UnspecifiedFormat(), Nothing))
+        sent(ep) = RestClient.mimeheaders(Request{:get}(RequestConfig("http://x"), ep), RestClient.UnspecifiedFormat(), Nothing)
+        @test !any(h -> first(h) == "Accept", sent(PlainEP()))
+        @test ("User-Agent" => "RestClient.jl/$(pkgversion(RestClient))") in sent(PlainEP())
+        @test count(h -> lowercase(first(h)) == "user-agent", sent(AgentEP())) == 1     # the endpoint's own
     end
     @testset "parametric form" begin
         form = GenericForm(value = 1)
