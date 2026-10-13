@@ -54,6 +54,7 @@ MalformedResponse
 Stream
 SSEvent
 isstreamend
+isopen(::Stream)
 #+end_src
 
 ** Framing extension interface

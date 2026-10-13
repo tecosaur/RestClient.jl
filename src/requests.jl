@@ -393,13 +393,17 @@ const MUNDANE_HEADERS = (
     # CDN headers
     "report-to", "reporting-endpoints", "nel", "via", "cf-cache-status", "cf-ray")
 
-function debug_response(url::String, res::Downloads.Response, buf::IOBuffer;
+function debug_response(url::String, res::Downloads.Response, buf::Union{IOBuffer, Nothing} = nothing;
                         secrets::NamedTuple = NO_SECRETS)
     url = redactsecrets(url, secrets)
-    dumpfile = debugfile("response.http")
-    nb = open(io -> dumpresponse(io, redactsecrets(res, secrets), buf), dumpfile, "w")
     face = ifelse(res.status ∈ 200:299, :success, :warning)
-    msg = S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
+    msg = if isnothing(buf)
+        S"streaming from"
+    else
+        dumpfile = debugfile("response.http")
+        nb = open(io -> dumpresponse(io, redactsecrets(res, secrets), buf), dumpfile, "w")
+        S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
+    end
     headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, res.headers)
     nhiddenheaders = length(res.headers) - length(headers)
     strheaders = join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")

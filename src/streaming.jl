@@ -131,6 +131,14 @@ framingtype(::Type{<:Stream{T, F}}) where {T, F} = F
 # a deliberate cancel from a server truncation (both collapse the transfer alike).
 Base.close(s::Stream) = (s.cancelled[] = true; close(s.items); close(s.body))
 
+"""
+    isopen(s::Stream) -> Bool
+
+Whether `s` may still receive elements: `false` once it has ended or been
+closed, though elements it already received can still be iterated.
+"""
+Base.isopen(s::Stream) = isopen(s.items)
+
 # A finalizer must not wait on a lock, so close inline when both locks are free,
 # and only otherwise from a task (always spawning can crash the JIT at exit).
 function closefinalized(s::Stream)
@@ -240,8 +248,10 @@ function open_stream(req::Request, out::Outgoing)
     handle, interrupt = Channel{Downloads.Curl.Easy}(1), Base.Event()
     # A stream is bounded by silence, not total time
     options = TransferOptions(Watchdog(req.config.timeout), handle)
+    input, secrets = payloadio(out), authsecrets(req)
+    @debug debug_request(out.method, out.url, out.headers, input; secrets) _file=nothing
     transfer = Threads.@spawn try
-        result = curlrequest(out.url, options; out.method, out.headers, input = payloadio(out),
+        result = curlrequest(out.url, options; out.method, out.headers, input,
                              output = gate, interrupt, throw = false)
         if result isa Downloads.RequestError transfererror(req, result, options.watchdog) else result end
     finally
@@ -252,6 +262,7 @@ function open_stream(req::Request, out::Outgoing)
     if take!(gate.signal) === :done
         final = fetch(transfer)::Union{Downloads.Response, Exception}
         final isa Exception && throw(final)
+        @debug debug_response(out.url, final; secrets) _file=nothing
         return Incoming(final, bs, transfer, interrupt)
     end
     # The held first write keeps the transfer from freeing the curl handle while its
@@ -262,6 +273,7 @@ function open_stream(req::Request, out::Outgoing)
     finally
         notify(gate.released)
     end
+    @debug debug_response(out.url, res; secrets) _file=nothing
     Incoming(res, bs, transfer, interrupt)
 end
 

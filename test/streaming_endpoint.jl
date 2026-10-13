@@ -148,6 +148,21 @@ function run(base)
         @test_throws ErrorException rejected(cfg)
         @test !isopen(REJECTED[].items)
     end
+    @testset "open until closed" begin
+        s = silent(cfg)
+        @test first(s) == Tok(n=1)
+        @test isopen(s)
+        close(s)
+        @test !isopen(s)
+        hangup = timedwait(() -> isready(Main.SILENT_HANGUPS), 5)
+        hangup === :ok && take!(Main.SILENT_HANGUPS)
+    end
+    @testset "debug logging" begin
+        logger = Test.TestLogger(min_level = Base.CoreLogging.Debug)
+        Base.CoreLogging.with_logger(() -> collect(ssechat(cfg)), logger)
+        logged = [string(log.message) for log in logger.logs if log._module === RestClient]
+        @test any(contains("GET"), logged) && any(contains("streaming from"), logged)
+    end
     @testset "cancellation" begin
         s = ssechat(cfg)
         for tok in s
