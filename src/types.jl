@@ -445,6 +445,11 @@ response links to one (`Link: <…>; rel="next"`), and the page's number. A page
 reached through that link keeps the request that started the listing, and is
 numbered one on from the page that linked to it.
 
+A `List` iterates and indexes as its items. Its fields are `request`, `items`,
+`meta` (the [`metadata`](@ref) of the response, also given by `metadata(list)`),
+`nextlink` and `page`. With Tables.jl loaded, a `List` of structs is a table,
+one row per item.
+
 See also: [`ListResponse`](@ref), [`nextpage`](@ref).
 """
 struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}}

@@ -365,13 +365,17 @@ Base.@assume_effects :foldable fieldslots(::Type{R}, ::Type{F}) where {R, F} =
 
 """
     metadata(response::ListResponse) -> Dict{Symbol, Any}
+    metadata(list::List) -> Dict{Symbol, Any}
 
-Return metadata for the given response, kept in its [`List`](@ref).
+Return metadata for the given response, kept in its [`List`](@ref) and
+returned again by `metadata(list)`, for instance to read a total count or
+cursor when implementing [`nextpage`](@ref).
 
 The default implementation returns an empty dictionary.
 """
 function metadata end
 metadata(@nospecialize ::ListResponse) = Dict{Symbol, Any}()
+metadata(list::List) = list.meta
 
 """
     nextpage(response::List) -> Union{List, Nothing}

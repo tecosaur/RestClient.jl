@@ -148,6 +148,7 @@ struct BrokenBody <: IO end
 Base.mark(::BrokenBody) = 0
 Base.eof(::BrokenBody) = false
 Base.readavailable(::BrokenBody) = throw(ArgumentError("unreadable"))
+RestClient.metadata(c::ListContent) = Dict{Symbol, Any}(:total => c.total)
 struct OptionalListContent <: ListResponse{String}
     total::Int
     items::Union{Vector{String}, Nothing}
@@ -405,6 +406,7 @@ end
         listed = RestClient.postprocess(req, ListContent(1, ["x"]))
         @test listed isa RestClient.List{String}
         @test isnothing(RestClient.thispagenumber(listed))              # not paged
+        @test RestClient.metadata(listed) == Dict(:total => 1)
         @test isconcretetype(fieldtype(typeof(listed), :request))   # so a next page dispatches statically
         @test RestClient.postprocess(Request{:get}(RequestConfig("http://x"), PlainEP()),
                                      OneContent("n", 3)) === 3   # a single response gives its contents
