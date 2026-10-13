@@ -17,13 +17,30 @@ The result depends on the endpoint: the response parsed as its
 passed through [`postprocess`](@ref). A `:head` request's result is whether
 the resource exists: `true` on success, `false` on 404 or 410.
 
+Redirects are followed, a 303 (See Other) with a GET as it asks. Every request
+identifies itself as `User-Agent: RestClient.jl/<version>` unless the
+endpoint's [`headers`](@ref) give their own.
+
+# Retries and rate limits
+
+RestClient doesn't pace requests ahead of time: it waits when a response asks
+it to. A 429 is retried after the wait its headers give, or failing that after
+an exponential backoff (about 0.5, 1, 2 then 4 seconds, with jitter). A 403 or
+503 is retried only when its headers give a wait: a `Retry-After`, or an
+`X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`. A gateway failure (502,
+503 or 504) is retried after the backoff, for methods safe to repeat (not POST
+or PATCH). A request is attempted at most five times, and endpoints sharing a
+[`@globalconfig`](@ref) wait together.
+
+A wait longer than the request's `timeout` isn't waited; the response is raised
+instead. With the default `timeout = Inf`, a wait can be long (until an hourly
+quota resets, say), so set a `timeout` to bound it.
+
 # Errors
 
 - [`MalformedRequest`](@ref) if the request fails validation.
-- [`ResponseError`](@ref) if the server responds with an unsuccessful status. A
-  response asking to be retried later (a 429, or a 403 or 503 with `Retry-After`)
-  is retried a few times first, as is a gateway failure (502, 503 or 504) for a
-  method that is safe to repeat (not POST or PATCH).
+- [`ResponseError`](@ref) if the server responds with an unsuccessful status,
+  once any retries are spent.
 - [`MalformedResponse`](@ref) if a successful response can't be read as the
   endpoint's [`responsetype`](@ref).
 - `ArgumentError` if `kind` is not a supported HTTP method.

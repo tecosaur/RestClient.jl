@@ -36,6 +36,11 @@ endpoint methods:
 - [`payload`](@ref) (optionally)
 - [`responsetype`](@ref)
 
+`urlpath`, `parameters` and `payload` are defined in their two-argument form,
+taking the request's [`RequestConfig`](@ref) first, so they take precedence over
+any method on a supertype: behaviour shared across an API belongs in a method
+`@endpoint` doesn't generate, such as [`headers`](@ref) or [`validate`](@ref).
+
 In our `@endpoint israining() ...` example, in addition to defining the
 `israining` function and an (implicit) `IsrainingEndpoint` struct, the macro will
 generate the implementations `urlpath(rain::IsrainingEndpoint) = "checkrain/\$(rain.city)"` and
@@ -94,6 +99,16 @@ docstring documents the struct.
 Do the thing to `input`.
 \"\"\"
 @endpoint dothing(input::Foo) -> "thing/{input}" -> Output
+```
+
+## Authentication markers
+
+An `@endpoint` can start with a marker setting its [`authpolicy`](@ref) in place
+of the API's default: `:auth` requires the request's key, `:authoption` sends it
+if one is set, and `:noauth` never sends it.
+
+```julia
+@endpoint :auth whoami() -> "me" -> User
 ```
 
 ## Struct forms
@@ -178,7 +193,12 @@ global variables) by surrounding them with curly braces.
 Parameters with a value of `nothing` are omitted from the query string, a
 collection (a `Vector`, `Tuple`, or `Set`) is sent as one parameter per element
 (`?tag=a&tag=b`), and other values are converted with `string`. A component
-without a value (`?verbose`) is sent as written.
+without a value (`?verbose`) is sent as written. In the path, `nothing` is an
+error rather than omitted.
+
+`string` sends a `Bool` as `true` or `false`, which some APIs read as set
+whatever its value; for those, send `{Int(flag)}`. An API that wants a list as
+one comma-joined parameter (`?tags=a,b`) can be given one with `{join(tags, ',')}`.
 
 For convenience, a parameter by the same name as the field can be referred to by
 the field name alone (e.g. `?{var}` instead of `?var={var}`).
@@ -186,7 +206,8 @@ the field name alone (e.g. `?{var}` instead of `?var={var}`).
 In more complex cases, arbitrary Julia code can be included in the curly braces.
 This code will be evaluated with the endpoint value bound to the anaphoric
 variable `$ANAPHORIC_VAR` as well as `$CONFIG_VAR` for the request
-configuration.
+configuration. Fields can be named directly in the code too, as in payload
+forms.
 
 ```julia
 "page/{if self.new \\"new\\" else \\"fetch\\" end}/{id}"

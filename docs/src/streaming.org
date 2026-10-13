@@ -36,9 +36,13 @@ Name ~Stream{T}~ as the output type and the endpoint streams. The element type i
 an ordinary [[@ref][~@jsondef~]] struct:
 
 #+begin_src julia
+@jsondef struct DeltaText
+    text::Union{String, Nothing} = nothing
+end
+
 @jsondef struct Delta
     type::String
-    text."delta.text"::Union{String, Nothing} = nothing
+    delta::Union{DeltaText, Nothing} = nothing
 end
 
 # SSE is the default framing
@@ -56,6 +60,28 @@ requests are read incrementally, just as a [[@ref][~ListResponse~]] result is wr
 in a [[@ref][~List~]]. The =Accept= header is set from the framing automatically
 (=text/event-stream= for SSE, =application/x-ndjson= for NDJSON), so you need not
 set it yourself.
+
+When one stream carries several kinds of event, make the element type abstract,
+with a ~@jsondef~ subtype for each kind, chosen per event by JSON.jl's
+~@choosetype~. An abstract type has no format of its own, so declare it JSON:
+
+#+begin_src julia
+abstract type Event end
+
+@jsondef struct Message <: Event
+    type::String
+    text::String
+end
+
+@jsondef struct Ping <: Event
+    type::String
+end
+
+JSON.@choosetype Event event -> event.type[] == "message" ? Message : Ping
+RestClient.dataformat(::Type{Event}) = RestClient.JSONFormat()
+
+@endpoint events() -> "events" -> Stream{Event}
+#+end_src
 
 * Consuming a stream
 
@@ -138,8 +164,9 @@ value.
 * Silence and slow consumers
 
 A stream may run for as long as the server keeps it going, but after 20 seconds
-without data it is abandoned, and iterating it raises a =Downloads.RequestError=
-(curl's timeout code, 28). A server can easily be quiet for longer, say while a
+without data it is abandoned with a =Downloads.RequestError= (curl's timeout
+code, 28). That is raised while iterating, or by the call itself when the server
+is silent before its response begins, so handle it around both. A server can easily be quiet for longer, say while a
 model thinks before its first token. For a stream, ~timeout~ sets the longest
 silence allowed, so raise it for such an API:
 
@@ -174,8 +201,8 @@ complete one. A stream you stop iterating and drop is eventually reclaimed by it
 finaliser, but closing it frees the connection straight away.
 
 #+begin_info
-Streams are never cached, as there is no complete body to store. Rate limiting
-still applies, but only to the response status: a 429 is retried before the first
+Streams are never cached, as there is no complete body to store. Retries still
+apply, but only to the response status: a 429 is retried before the first
 element reaches you, as for a buffered request, and once elements flow there is
 nothing to retry.
 #+end_info

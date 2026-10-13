@@ -17,7 +17,7 @@ See the docs' tutorial for a guided example on how to write a client with this p
 * Features
 
 + Minimal Boilerplate :: Defining an API endpoint can take just a single line of code.
-+ Built-in common functionality :: Debugging utilities, URI encoding, caching, and rate limiting.
++ Built-in common functionality :: Debugging utilities, URI encoding, caching, and retrying rate-limited requests.
 + Easy serialisation :: Straightforward interoperability with JSON (via ~JSON.jl~)
   and XML via ~@jsondef~ and ~@xmldef~.
 + Request payloads :: JSON bodies, plus urlencoded and multipart form

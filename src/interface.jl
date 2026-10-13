@@ -300,10 +300,18 @@ writepayload(::Any, fmt::Union{JSONFormat, XMLFormat}, data::T) where {T} =
 
 Post-process the data returned by the request.
 
+`data` is the response body already read as the endpoint's
+[`responsetype`](@ref): reading happens first, and a body that can't be read
+raises a [`MalformedResponse`](@ref) without reaching `postprocess`. An error
+status raises a [`ResponseError`](@ref) before either.
+
 There are three generic implementations provided:
 - A `SingleResponse` gives its `contents`.
 - A `ListResponse` is wrapped in a `List` object.
 - Any other data is returned as-is.
+
+The three-argument form also sees the response, with its headers; its generic
+method calls the two-argument one, then records any next-page `Link` on a `List`.
 
 !!! note
     Part of the `AbstractEndpoint` interface.

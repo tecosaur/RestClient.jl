@@ -11,7 +11,10 @@ a [`ListResponse`](@ref) is wrapped in a [`List`](@ref), a [`SingleResponse`](@r
 gives its [`contents`](@ref), and a [`Stream`](@ref) is read incrementally.
 
 To share behaviour across an API's endpoints (auth, validation, logging), define
-an abstract subtype for the API and give it the shared methods.
+an abstract subtype for the API and give it the shared methods. The methods
+[`@endpoint`](@ref) generates for each endpoint (`urlpath`, `parameters`,
+`payload`) take precedence over a supertype's, so share only the others, such
+as [`headers`](@ref) and [`validate`](@ref).
 
 # Interface
 
@@ -201,7 +204,9 @@ performed or handling authentication. The following additional fields can be
 provided as keyword arguments:
 
 - `key::Union{Nothing, String}`: The secret used to authenticate requests.
-  How it is presented on the wire is declared by endpoints.
+  How it is presented on the wire is declared by endpoints. It is shown as
+  `*****` in the REPL and in errors and debug output, but `repr` and `string`
+  give it in full.
 - `timeout::Float64`: The longest a request may take, in seconds, or for a
   [`Stream`](@ref), the longest it may go without receiving data. Defaults to
   `Inf`. Even so, a request that sends and receives nothing for 20 seconds (or
@@ -209,7 +214,10 @@ provided as keyword arguments:
   `timeout` is set. Either limit raises a `Downloads.RequestError` with curl's
   timeout code (28).
 - `cache::Bool`: Whether to cache the response, using lifetime information from
-  standard HTTP response headers. Defaults to `true`.
+  standard HTTP response headers. Defaults to `true`. Responses are kept on
+  disk in the user's cache directory (on Linux, `~/.cache/julia/restclient/`),
+  so they last between sessions; entries past their lifetime are cleared as
+  Julia exits, and deleting that folder clears the whole cache.
 
 See also: [`@globalconfig`](@ref), [`Request`](@ref).
 

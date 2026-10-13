@@ -57,8 +57,9 @@ stay raw. It may be a format, such as `JSONFormat()`, or the shorthand `:json` o
 
 The `supertype` clause gives every [`@endpoint`](@ref) in the module that declares
 no supertype of its own this one, an abstract subtype of `AbstractEndpoint` for
-behaviour the API's endpoints share. Since a struct's supertype is fixed when it is
-defined, `@globalconfig` must come before the endpoints it applies to.
+behaviour the API's endpoints share (see [`AbstractEndpoint`](@ref) for which
+methods can be shared). Since a struct's supertype is fixed when it is defined,
+`@globalconfig` must come before the endpoints it applies to.
 
 See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 
@@ -204,9 +205,11 @@ This macro conveniently combines the following pieces:
 - `RestClient.dataformat` to declare that this struct is JSON-formatted.
 
 Note the `name."json_field"` syntax demonstrated in the examples, that allows
-for declaration of the JSON object key that should be mapped to the field.
-A field typed `Union{…, Nothing}` defaults to `nothing`. A field that is `nothing`
-is left out of the JSON written, as most APIs read a missing key as "not given";
+for declaration of the JSON object key that should be mapped to the field. The
+key is one name, not a path into nested objects; model those with a nested type.
+Keys of the JSON object that no field names are ignored. A field typed
+`Union{…, Nothing}` defaults to `nothing`. A field that is `nothing` is left out
+of the JSON written, as most APIs read a missing key as "not given";
 to send an explicit `null`, type the field `Union{Nothing, JSON.Null}` and set it
 to `JSON.Null()`.
 
