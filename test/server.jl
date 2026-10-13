@@ -114,6 +114,7 @@ function build_router(state::ServerState)
         json_response(item_json("ok", 1))
     end)
     # Fresh response carries max-age + ETag; a conditional re-request gets 304.
+    HTTP.register!(router, "PUT", "/cacheable", _ -> HTTP.Response(204))
     HTTP.register!(router, "GET", "/cacheable", function (req)
         if HTTP.header(req, "If-None-Match", "") == ETAG
             state.revalidations += 1

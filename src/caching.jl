@@ -83,6 +83,9 @@ end
 
 cachedir() = BaseDirs.User.cache(BaseDirs.App("RestClient"))
 
+# Every cached variant of `url` together, so a change to the resource drops them all
+cachefolder(url::String) = joinpath(cachedir(), string(hash(url), base = 36))
+
 function cachekey(url::String, method::String, headers::Vector{Pair{String, String}},
                   payload::Union{Vector{UInt8}, Nothing})
     h = hash(headers, hash(method, hash(url)))
@@ -307,7 +310,8 @@ Statistically, this will eventually remove all such files.
 function cleancache()
     cdir = cachedir()
     isdir(cdir) || return
-    cachefiles = filter!(endswith(".http"), readdir(cdir, join=true))
+    cachefiles = [joinpath(dir, file) for (dir, _, files) in walkdir(cdir)
+                  for file in files if endswith(file, ".http")]
     isempty(cachefiles) && return
     for i in eachindex(cachefiles)
         j = rand(i:length(cachefiles))
@@ -324,6 +328,10 @@ function cleancache()
             stamp = try readcachestamp(io) finally close(io) end
             if isnothing(stamp) || stamp.retain < now
                 rm(cfile; force = true)
+                emptied = dirname(cfile)
+                # Another process may have just stored a response there
+                emptied != cdir && isempty(readdir(emptied)) &&
+                    try rm(emptied) catch err; err isa Base.IOError || rethrow() end
                 nexpired += 1
             end
         end

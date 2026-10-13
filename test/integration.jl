@@ -69,6 +69,7 @@ module IntegrationClient
     @endpoint limited() -> "ratelimited" -> Item
     @endpoint throttled() -> "throttled" -> Item
     @endpoint cached() -> "cacheable" -> Item
+    @endpoint replace_cached(; item::Item) -> item -> :put("cacheable")
     @endpoint nostore() -> "nostore" -> Item
     @endpoint partial() -> "partial" -> Item
     @endpoint errored() -> "error" -> Item
@@ -129,6 +130,9 @@ end
 
 const IC = IntegrationClient
 cfg(baseurl; kw...) = RestClient.RequestConfig(baseurl; kw...)
+# Caching writes to the real `RestClient.cachedir()` (not injectable), so each
+# test removes what it cached for its URL.
+clean_cache(url) = rm(RestClient.cachefolder(url); recursive = true, force = true)
 
 # A wrapper declaring a module-wide auth policy via @globalconfig, to exercise the
 # macro-expansion resolution (module default, inheritance, and :auth/:noauth markers).
@@ -196,9 +200,7 @@ const AC = AuthClient
             with_server() do baseurl, state
                 IC.ping_cacheable(cfg(baseurl)); IC.ping_cacheable(cfg(baseurl))
                 @test state.requests == 2
-                @test !isfile(joinpath(RestClient.cachedir(),
-                                       RestClient.cachekey("$baseurl/cacheable", "GET",
-                                                           Pair{String, String}[], nothing) * ".http"))
+                @test !isdir(RestClient.cachefolder("$baseurl/cacheable"))
             end
         end
     end
@@ -311,7 +313,6 @@ end
     @testset "QUERY" begin
         with_server() do baseurl, state
             config = cfg(baseurl)
-            outgoing(item) = RestClient.outgoing(RestClient.Request{:query}(config, IC.QueryEndpoint(item)))
             try
                 resp = IC.query(config, item = IC.Item("widgets", 1))
                 @test resp.method == "QUERY"
@@ -324,12 +325,7 @@ end
                     @test state.queries == 2                 # a different query is not
                 end
             finally
-                for item in (IC.Item("widgets", 1), IC.Item("gadgets", 2))
-                    out = outgoing(item)
-                    rm(joinpath(RestClient.cachedir(),
-                                RestClient.cachekey(out.url, out.method, out.headers, out.payload) * ".http");
-                       force = true)
-                end
+                clean_cache("$baseurl/query")
             end
         end
     end
@@ -609,14 +605,6 @@ end
     end
 end
 
-# Caching writes to the real `RestClient.cachedir()` (not injectable), so each
-# test cleans up the exact file it creates via the reconstructed key.
-function clean_cachekey(url, method, headers)
-    cfile = joinpath(RestClient.cachedir(),
-                     RestClient.cachekey(url, method, headers, nothing) * ".http")
-    isfile(cfile) && rm(cfile)
-end
-
 @testset "caching" begin
     @testset "max-age" begin
         with_server() do baseurl, state
@@ -627,8 +615,21 @@ end
                 @test a.id == b.id == 1
                 @test state.requests == 1        # second served from disk
             finally
-                clean_cachekey("$baseurl/cacheable", "GET",
-                               ["Accept" => "application/json"])
+                clean_cache("$baseurl/cacheable")
+            end
+        end
+    end
+    @testset "invalidated by a write" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                IC.cached(config); IC.cached(config)
+                @test state.requests == 1
+                IC.replace_cached(config; item = IC.Item("new", 2))     # RFC 9111 §4.4
+                IC.cached(config)
+                @test state.requests == 3
+            finally
+                clean_cache("$baseurl/cacheable")
             end
         end
     end
@@ -649,7 +650,7 @@ end
                 @test state.revalidations == 1
                 @test state.requests == 2
             finally
-                clean_cachekey("$baseurl/revalidate", "GET", ["Accept" => "application/json"])
+                clean_cache("$baseurl/revalidate")
             end
         end
     end
@@ -661,7 +662,7 @@ end
                 @test IC.rotating(config).id == 2
                 @test IC.rotating(config).id == 3
             finally
-                clean_cachekey("$baseurl/rotating", "GET", ["Accept" => "application/json"])
+                clean_cache("$baseurl/rotating")
             end
         end
     end
@@ -677,7 +678,7 @@ end
                 IC.partial(cfg(baseurl)); IC.partial(cfg(baseurl))
                 @test state.requests == 2
             finally
-                clean_cachekey("$baseurl/partial", "GET", ["Accept" => "application/json"])
+                clean_cache("$baseurl/partial")
             end
         end
     end
