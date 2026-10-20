@@ -87,6 +87,8 @@ See [[file:streaming.md][the streaming manual]] for more information.
 + Retries of rate-limited requests (waiting as the response asks) and gateway failures
 + API-wide defaults for authentication, data format, and endpoint supertype, through
   [[@ref][~@globalconfig~]]
++ Headers and query parameters for a whole API, declared once on its endpoint
+  supertype ([[@ref][~headers~]], [[@ref][~parameters~]])
 
 * Request data flow
 

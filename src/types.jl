@@ -11,10 +11,11 @@ a [`ListResponse`](@ref) is wrapped in a [`List`](@ref), a [`SingleResponse`](@r
 gives its [`contents`](@ref), and a [`Stream`](@ref) is read incrementally.
 
 To share behaviour across an API's endpoints (auth, validation, logging), define
-an abstract subtype for the API and give it the shared methods. The methods
-[`@endpoint`](@ref) generates for each endpoint (`urlpath`, `parameters`,
-`payload`) take precedence over a supertype's, so share only the others, such
-as [`headers`](@ref) and [`validate`](@ref).
+an abstract subtype for the API and give it the shared methods. Headers and
+parameters for the whole API are defined for the type, and add to each
+endpoint's own (see [`headers`](@ref)). Other methods, such as
+[`validate`](@ref), apply unless an endpoint has its own, and those
+[`@endpoint`](@ref) generates (`urlpath`, `parameters`, `payload`) always are.
 
 # Interface
 

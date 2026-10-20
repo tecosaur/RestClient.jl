@@ -38,8 +38,9 @@ endpoint methods:
 
 `urlpath`, `parameters` and `payload` are defined in their two-argument form,
 taking the request's [`RequestConfig`](@ref) first, so they take precedence over
-any method on a supertype: behaviour shared across an API belongs in a method
-`@endpoint` doesn't generate, such as [`headers`](@ref) or [`validate`](@ref).
+any method on a supertype. Parameters every endpoint of an API needs are instead
+defined for the API's type, and are added to those generated (see
+[`parameters`](@ref)).
 
 In our `@endpoint israining() ...` example, in addition to defining the
 `israining` function and an (implicit) `IsrainingEndpoint` struct, the macro will

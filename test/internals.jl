@@ -814,6 +814,37 @@ end
         @test SHARED_HEADERS == ["X-A" => "1"]
         @test SHARED_PARAMS == ["a" => "1"]
     end
+    @testset "tiered headers and parameters" begin
+        @eval module TieredClient
+            using RestClient
+            abstract type API <: AbstractEndpoint end
+            abstract type Search <: API end
+            @globalconfig RequestConfig("http://x") auth = (BearerAuth(), :optional) supertype = API
+            RestClient.headers(::RequestConfig, ::Type{API}) = ["Accept" => "application/vnd.x+json"]
+            RestClient.parameters(::RequestConfig, ::Type{API}) = ("site" => "main",)
+            RestClient.parameters(config::RequestConfig, ::Type{Search}) =
+                if isnothing(config.key); () else ("tier" => "keyed",) end
+            @endpoint ping() -> "p" -> String
+            @endpoint struct FindEndpoint <: Search
+                find(q) -> "f?{q}" -> String
+                q::String
+            end
+            RestClient.headers(::FindEndpoint) = ["X-Find" => "1"]
+            RestClient.headers(::RequestConfig, ::Type{FindEndpoint}) = ["X-Kind" => "find"]
+        end
+        get(endpoint; key = nothing) = Request{:get}(RequestConfig("http://x"; key), endpoint)
+        ping, find = TieredClient.PingEndpoint(), TieredClient.FindEndpoint("a b")
+        @test RestClient.headers(get(ping)) == ["Accept" => "application/vnd.x+json"]
+        @test RestClient.url(get(ping)) == "http://x/p?site=main"
+        @test RestClient.headers(get(find; key = "k")) ==
+            ["X-Find" => "1", "Authorization" => "Bearer k", "X-Kind" => "find",
+             "Accept" => "application/vnd.x+json"]
+        @test RestClient.url(get(find)) == "http://x/f?q=a%20b&site=main"
+        @test RestClient.url(get(find; key = "k")) == "http://x/f?q=a%20b&tier=keyed&site=main"
+        @test RestClient.parameters(RequestConfig("http://x"), Int) === ()
+        @test RestClient.headers(Request{:get}(RequestConfig("http://x"), SharedHeadersEP())) ===
+            SHARED_HEADERS                                       # nothing to add, so not copied
+    end
     @testset "secrets redacted" begin
         breq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), SharedHeadersEP())
         qreq = Request{:get}(RequestConfig("http://x"; key = "s3cr/t"), QueryEP())

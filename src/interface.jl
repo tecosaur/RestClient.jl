@@ -39,10 +39,16 @@ urlpath(::RequestConfig, endpoint::AbstractEndpoint) = urlpath(endpoint)
 
 """
     headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
+    headers(config::RequestConfig, ::Type{T}) -> collection of `Pair{String, String}`
 
-Return headers for the given `endpoint`.
+Return headers for the given `endpoint`, or for every endpoint of type `T`.
 
-The default implementation returns an empty list.
+A request sends the endpoint's own headers, then those for its type and for each
+of its supertypes in turn, so headers for a whole API belong on its supertype.
+Define these for the type itself (`Type{MyAPI}`, not `Type{<:MyAPI}`), or they
+are sent again for each type below it.
+
+The default implementations return an empty list, or `()` for a type.
 
 !!! note "Default Content-Type"
 
@@ -54,22 +60,24 @@ function headers(::AbstractEndpoint)
 end
 
 headers(::RequestConfig, endpoint::AbstractEndpoint) = headers(endpoint)
+headers(::RequestConfig, ::Type) = ()
 
-function headers((; config, endpoint)::Request)
-    own = headers(config, endpoint)
-    authpolicy(endpoint) === :off && return own
-    authinfo = authheaders(authscheme(endpoint), config.key)
-    if isnothing(authinfo) own else [collect(own); authinfo] end
-end
+headers((; config, endpoint)::Request) =
+    tieredattrs(headers, config, endpoint,
+                if authpolicy(endpoint) !== :off authheaders(authscheme(endpoint), config.key) end)
 
 """
     parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
+    parameters(config::RequestConfig, ::Type{T}) -> collection of `Pair{String, String}`
 
-Return URI parameters for the given `endpoint`.
+Return URI parameters for the given `endpoint`, or for every endpoint of type `T`.
 
-These are combined with the endpoint URL to form the full query URL.
+These are combined with the endpoint URL to form the full query URL: the
+endpoint's own parameters, then those for its type and for each of its
+supertypes in turn. As with [`headers`](@ref), parameters for a whole API belong
+on its supertype, defined for the type itself.
 
-The default implementation returns an empty list.
+The default implementations return an empty list, or `()` for a type.
 
 !!! note
     Part of the `AbstractEndpoint` interface.
@@ -79,14 +87,32 @@ function parameters(::AbstractEndpoint)
 end
 
 parameters(::RequestConfig, endpoint::AbstractEndpoint) = parameters(endpoint)
+parameters(::RequestConfig, ::Type) = ()
 
-function parameters(req::Request)
-    own, auth = parameters(req.config, req.endpoint), authparam(req)
-    if isnothing(auth) own else [collect(own); auth] end
-end
+parameters(req::Request) = tieredattrs(parameters, req.config, req.endpoint, authparam(req))
 
 authparam((; config, endpoint)::Request) =
     if authpolicy(endpoint) !== :off authparams(authscheme(endpoint), config.key) end
+
+function tieredattrs(fn::F, config::RequestConfig, endpoint::E, extra) where {F, E}
+    own = fn(config, endpoint)
+    own isa Vector{Pair{String, String}} && isnothing(extra) && !hasgenericattr(fn, config, E) &&
+        return own
+    attrs = collect(Pair{String, String}, own)
+    isnothing(extra) || push!(attrs, extra)
+    addgenericattrs!(attrs, fn, config, E)
+end
+
+# `isa`, not `isempty`, so this resolves at compile time
+hasgenericattr(fn::F, conf::RequestConfig, ::Type{E}) where {F, E} =
+    !(fn(conf, E) isa Tuple{}) || hasgenericattr(fn, conf, supertype(E))
+hasgenericattr(::Function, ::RequestConfig, ::Type{Any}) = false
+
+function addgenericattrs!(attrs::Vector{Pair{String, String}}, fn::F, conf::RequestConfig, ::Type{E}) where {F, E}
+    append!(attrs, fn(conf, E))
+    addgenericattrs!(attrs, fn, conf, supertype(E))
+end
+addgenericattrs!(attrs::Vector{Pair{String, String}}, ::Function, ::RequestConfig, ::Type{Any}) = attrs
 
 """
     authscheme(endpoint::AbstractEndpoint) -> AuthScheme
