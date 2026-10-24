@@ -75,7 +75,7 @@ reduce(merge_delta, chat(messages = msgs)) # you supply merge_delta
 #+end_src
 
 How partial results combine into a final answer is left to you, because it is
-API-specific: Anthropic's incremental deltas differ from OpenAI's, and
+API-specific: each API shapes its incremental deltas differently, and
 =RestClient= would have to pick one to bake in. It represents the typed stream and
 lets you fold it as the API demands.
 
