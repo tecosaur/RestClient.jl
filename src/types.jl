@@ -210,10 +210,10 @@ provided as keyword arguments:
   give it in full.
 - `timeout::Float64`: The longest a request may take, in seconds, or for a
   [`Stream`](@ref), the longest it may go without receiving data. Defaults to
-  `Inf`. Even so, a request that sends and receives nothing for 20 seconds (or
-  `timeout`, if longer) is abandoned, as is a stream silent for 20 seconds when no
-  `timeout` is set. Either limit raises a `Downloads.RequestError` with curl's
-  timeout code (28).
+  `Inf`, no limit, so a stream waits as long as it takes. Even so, a request
+  that sends and receives nothing for 20 seconds (or `timeout`, if longer) is
+  abandoned. Either limit raises a `Downloads.RequestError` with curl's timeout
+  code (28).
 - `cache::Bool`: Whether to cache the response, using lifetime information from
   standard HTTP response headers. Defaults to `true`. Responses are kept on
   disk in the user's cache directory (on Linux, `~/.cache/julia/restclient/`),

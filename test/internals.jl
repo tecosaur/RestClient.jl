@@ -803,12 +803,12 @@ end
         @test_throws ArgumentError perform(Request{:trace}(RequestConfig("http://x"), PlainEP()))
     end
     @testset "idle limit" begin
-        limit(timeout; kw...) = RestClient.Watchdog(timeout; kw...).limit
-        default = RestClient.DEFAULT_IDLE_SECONDS
-        @test limit(Inf) == limit(Inf; atleast = default) == default
-        @test limit(5.0; atleast = default) == default
-        @test limit(60.0; atleast = default) == 60
-        @test limit(0.2) == 0.2
+        @test RestClient.idlelimit(Inf) == RestClient.idlelimit(5.0) == RestClient.DEFAULT_IDLE_SECONDS
+        @test RestClient.idlelimit(60.0) == 60
+        @test RestClient.Watchdog(0.2).limit == 0.2
+        unlimited = RestClient.Watchdog(Inf)
+        unlimited.lastactive -= 1e6
+        @test unlimited(0, 0)
     end
     @testset "watchdog" begin
         dog = RestClient.Watchdog(1.0)

@@ -87,8 +87,9 @@ const NO_SECRETS = (header = nothing, param = nothing)
 """
     DEFAULT_IDLE_SECONDS
 
-How long a transfer may go without sending or receiving data before it is
-abandoned, unless the request's `timeout` asks for longer (Downloads' own default).
+How long a request (not a stream) may go without sending or receiving data
+before it is abandoned, unless its `timeout` asks for longer (Downloads' own
+default).
 """
 const DEFAULT_IDLE_SECONDS = 20
 
@@ -106,10 +107,10 @@ mutable struct Watchdog
     fired::Bool
 end
 
-# The watchdog for a request's `timeout`: at least `atleast`, and the default if unlimited
-Watchdog(timeout::Real; atleast::Real = 0) =
-    Watchdog(if isfinite(timeout) max(Float64(timeout), atleast) else Float64(DEFAULT_IDLE_SECONDS) end,
-             0, time(), false)
+Watchdog(limit::Real) = Watchdog(Float64(limit), 0, time(), false)
+
+# Never less than the total `timeout`, which curl enforces
+idlelimit(timeout::Real) = if isfinite(timeout) max(timeout, DEFAULT_IDLE_SECONDS) else DEFAULT_IDLE_SECONDS end
 
 # Per-transfer settings, applied by `transferhook` (see `curlrequest`).
 struct TransferOptions
@@ -518,8 +519,7 @@ function http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, 
     buf, input = IOBuffer(), payloadio(out)
     @debug debug_request(out.method, out.url, headers, input; secrets = authsecrets(req)) _file=nothing
     (; timeout) = req.config
-    # Never less than the total `timeout`, which curl enforces
-    options = TransferOptions(Watchdog(timeout; atleast = DEFAULT_IDLE_SECONDS), nothing)
+    options = TransferOptions(Watchdog(idlelimit(timeout)), nothing)
     res = curlrequest(out.url, options; out.method, output = buf, input, headers, timeout,
                       throw = false)
     res isa Downloads.RequestError && throw(transfererror(req, res, options.watchdog))
@@ -574,6 +574,7 @@ function transferhook(easy::Downloads.Curl.Easy, info::NamedTuple)
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_NOPROGRESS, false)
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_FOLLOWLOCATION, CURLFOLLOW_OBEYCODE)
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_ACCEPT_ENCODING, "")
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_TCP_KEEPALIVE, 1)
     isnothing(options.handlesink) || put!(options.handlesink, easy)
     nothing
 end

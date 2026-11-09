@@ -176,16 +176,18 @@ value.
 
 * Silence and slow consumers
 
-A stream may run for as long as the server keeps it going, but after 20 seconds
-without data it is abandoned with a =Downloads.RequestError= (curl's timeout
-code, 28). That is raised while iterating, or by the call itself when the server
-is silent before its response begins, so handle it around both. A server can easily be quiet for longer, say while a
-model thinks before its first token. For a stream, ~timeout~ sets the longest
-silence allowed, so raise it for such an API:
+A stream runs for as long as the server keeps it going, and by default waits as
+long as it takes for each frame (TCP keepalive still notices a server that has
+gone). For a stream, ~timeout~ sets the longest silence allowed, which suits an
+API that sends heartbeats, or one you'd rather not wait on indefinitely:
 
 #+begin_src julia
 chat(RequestConfig("https://api.example.com"; timeout = 300); messages = msgs)
 #+end_src
+
+Past it, the stream is abandoned with a =Downloads.RequestError= (curl's timeout
+code, 28). That is raised while iterating, or by the call itself when the server
+is silent before its response begins, so handle it around both.
 
 The body is read off the network as it arrives, however quickly you iterate, so
 a consumer that falls well behind holds the backlog in memory. Iterate promptly,
