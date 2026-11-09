@@ -127,13 +127,14 @@ const DOWNLOADER = Ref{Downloads.Downloader}()
 
 Encode `str` according to RFC3986 Section 2, writing the result to `io`.
 
-This escapes all characters outside of `A-Z`, `a-z`, `0-9`, and `-_.~`.
+This escapes all characters outside of `A-Z`, `a-z`, `0-9`, `-_.~`, and `,`, which
+APIs read as separating the items of a list.
 
 # Examples
 
 ```julia
 julia> encode_uri_component(stdout, "Hello, world!")
-Hello%2C%20world%21
+Hello,%20world%21
 ```
 """
 function encode_uri_component(io::IO, s::AbstractString)
@@ -144,7 +145,7 @@ function encode_uri_component(io::IO, s::AbstractString)
         UInt8('A') <= b <= UInt8('Z') ||
         UInt8('a') <= b <= UInt8('z') ||
         UInt8('0') <= b <= UInt8('9') ||
-        b ∈ UInt8.(('-', '_', '.', '~'))
+        b ∈ UInt8.(('-', '_', '.', '~', ','))
     for b in codeunits(s)
         if issafe(b)
             write(io, b)

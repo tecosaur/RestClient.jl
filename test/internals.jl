@@ -789,7 +789,8 @@ end
         urlof(ep; base = "http://x") = RestClient.url(Request{:get}(RequestConfig(base), ep))
         @test urlof(PathClient.RootEP(); base = "http://x/graphql") == "http://x/graphql"
         @test urlof(PathClient.SlashEP()) == "http://x/a"
-        @test urlof(PathClient.SubEP()) == "http://x/s"                # any string, as a SubString
+        @test urlof(PathClient.SubEP()) == "http://x/s"
+        @test RestClient.encode_uri_component("a,b c/d") == "a,b%20c%2Fd"                # any string, as a SubString
         err = try urlof(PathClient.ItemEndpoint(nothing)) catch e; e end
         @test err isa MalformedRequest && occursin("{id}", only(err.issues))
     end
