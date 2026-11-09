@@ -147,6 +147,10 @@ end
 This makes no difference to the generated code; the explicit struct form can be
 clearer for more complex endpoints.
 
+An endpoint struct can also be copied with some of its fields changed, as
+`ApiEndpoint(endpoint; count = 2)`, such as to give the next page in
+[`nextpage`](@ref).
+
 ## Payload forms
 
 HTTP methods like `:post`, `:put`, and `:patch` include a content payload (also
@@ -307,6 +311,11 @@ macro endpoint(args...)
         push!(body, Expr(:macrocall, GlobalRef(Core, Symbol("@doc")), __source__,
                          "    $(einfo.structname)\n\nThe request made by `$(first(einfo.func.args))`, which see.\n",
                          einfo.structname))
+    end
+    if !isempty(efields)
+        old = gensym("old")
+        push!(body, :($(einfo.structname)($old::$(einfo.structname); $((Expr(:kw, f, :($old.$f)) for f in efields)...)) =
+                      $(GlobalRef(Core, :typeof))($old)($(efields...))))
     end
     # `RestClient.func([config,] self::Struct{params...}) where {params...} = body`
     function methoddef(func::Symbol, body; withconfig::Bool = true)

@@ -113,12 +113,13 @@ module IntegrationClient
     @endpoint linkedq(; variant::String = "plain") -> "linked?{variant}" -> Paged
     RestClient.authscheme(::LinkedqEndpoint) = QueryAuth("api_key")
     RestClient.authpolicy(::LinkedqEndpoint) = :optional
-    RestClient.remainingpages(::LinkedqEndpoint) = 2
+    RestClient.pagecount(response, ::LinkedqEndpoint, ::Paged) =
+        parse(Int, only(value for (name, value) in response.headers if name == "x-total-pages"))
     @endpoint struct LinkedOwnEndpoint
         linked_own(; page::Int = 1) -> "linked?{page}" -> Paged
         page::Int = 1
     end
-    RestClient.nextpage(e::LinkedOwnEndpoint) = if e.page == 1 LinkedOwnEndpoint(3) end
+    RestClient.nextpage(e::LinkedOwnEndpoint, ::Paged) = if e.page == 1 LinkedOwnEndpoint(e; page = 3) end
     @endpoint seenlinked() -> "linked" -> Paged
     const SEEN = Int[]
     RestClient.postprocess(response, ::Request{<:Any, SeenlinkedEndpoint}, page::Paged) =
@@ -131,8 +132,11 @@ module IntegrationClient
         page::Int = 1
     end
     RestClient.thispagenumber(e::PagedEndpoint) = e.page
-    RestClient.nextpage(e::PagedEndpoint) =
-        if e.page < 3 PagedEndpoint(e.page + 1) end
+    RestClient.nextpage(e::PagedEndpoint, page::Paged) = if page.more PagedEndpoint(e; page = e.page + 1) end
+    @endpoint urlpaged() -> "paged" -> Paged
+    RestClient.nextpage(::UrlpagedEndpoint, page::Paged) = if page.more "/paged?page=$(page.page + 1)" end
+    @endpoint offsitepaged() -> "paged" -> Paged
+    RestClient.nextpage(::OffsitepagedEndpoint, ::Paged) = "http://elsewhere.invalid/paged"
 end
 
 const IC = IntegrationClient
@@ -248,6 +252,10 @@ const AC = AuthClient
             page3 = nextpage(page2)
             @test page3[1].name == "p3"
             @test isnothing(nextpage(page3))     # more=false at page 3
+            byurl = collect(eachpage(IC.urlpaged(cfg(baseurl))))
+            @test [page[1].name for page in byurl] == ["p1", "p2", "p3"]
+            @test RestClient.thispagenumber.(byurl) == [1, 2, 3]
+            @test_throws "not under" nextpage(IC.offsitepaged(cfg(baseurl)))
         end
     end
     @testset "Link header" begin

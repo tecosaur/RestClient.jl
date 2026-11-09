@@ -18,7 +18,7 @@ public urlpath, headers, parameters, payload, validate, responsetype, postproces
     authscheme, authpolicy, isstreamend, thispagenumber, remainingpages,
     globalconfig
 public StreamFormat, UnspecifiedFormat, readframe, framestate, elementpayload,
-    authheaders, authparams, contents, metadata, cachelifetime
+    authheaders, authparams, contents, pagecount, cachelifetime
 
 include("types.jl")
 include("interface.jl")
@@ -32,7 +32,7 @@ include("endpoint.jl")
 macro importapi()
     api = (:urlpath, :headers, :parameters, :payload, :validate, :responsetype,
            :dataformat, :mimetype, :interpretresponse, :writepayload, :postprocess,
-           :contents, :metadata, :thispagenumber, :nextpage, :remainingpages,
+           :contents, :thispagenumber, :nextpage, :pagecount,
            :authscheme, :authpolicy, :authheaders, :authparams, :isstreamend, :cachelifetime)
     Expr(:import, Expr(:(:), Expr(:., fullname(@__MODULE__)...), (Expr(:., name) for name in api)...)) |> esc
 end

@@ -148,7 +148,6 @@ struct BrokenBody <: IO end
 Base.mark(::BrokenBody) = 0
 Base.eof(::BrokenBody) = false
 Base.readavailable(::BrokenBody) = throw(ArgumentError("unreadable"))
-RestClient.metadata(c::ListContent) = Dict{Symbol, Any}(:total => c.total)
 struct OptionalListContent <: ListResponse{String}
     total::Int
     items::Union{Vector{String}, Nothing}
@@ -407,7 +406,7 @@ end
         listed = RestClient.restructure(sample_response(), req, ListContent(1, ["x"]))
         @test listed isa RestClient.List{String}
         @test isnothing(RestClient.thispagenumber(listed))              # not paged
-        @test RestClient.metadata(listed) == Dict(:total => 1)
+        @test listed.data.total == 1                                   # the response it came from
         @test isconcretetype(fieldtype(typeof(listed), :request))   # so a next page dispatches statically
         @test RestClient.restructure(sample_response(), Request{:get}(RequestConfig("http://x"), PlainEP()),
                                      OneContent("n", 3)) === 3       # a single response gives its contents
@@ -421,6 +420,21 @@ end
         end
         @test RestClient.responsetype(FieldNamedResult.GetlicenseEndpoint("mit", nothing)) ===
             FieldNamedResult.license                                 # after a URL, only a type fits
+    end
+    @testset "copying an endpoint" begin
+        @eval module CopyClient
+            using RestClient
+            @endpoint search(query::String; page::Int = 1) -> "s?{query}&{page}" -> String
+            @endpoint struct NoFieldsEndpoint
+                "n" -> String
+            end
+        end
+        first = CopyClient.SearchEndpoint("q", 1)
+        second = CopyClient.SearchEndpoint(first; page = 2)
+        @test (second.query, second.page) == ("q", 2)
+        @test CopyClient.SearchEndpoint(first) == first
+        @test_throws MethodError CopyClient.SearchEndpoint(first; other = 1)
+        @test CopyClient.NoFieldsEndpoint() isa CopyClient.NoFieldsEndpoint
     end
     @testset "module supertype" begin
         @eval module SupertypeClient
@@ -1107,18 +1121,18 @@ end
     end
     @testset "List as a table" begin
         rows = RestClient.List{Row}(
-            Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], Dict{Symbol, Any}(), nothing)
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), [Row(1, "x"), Row(2, "y")], nothing, sample_response())
         @test Tables.istable(rows)
         @test Tables.columntable(rows) == (a = [1, 2], b = ["x", "y"])
         @test Tables.schema(rows).names == (:a, :b)
         strings = RestClient.List{String}(
-            Request{:get}(RequestConfig("http://x"), PagedListEP()), ["x"], Dict{Symbol, Any}(), nothing)
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), ["x"], nothing, sample_response())
         @test !Tables.istable(strings)                           # String has no columns
         @test isnothing(Tables.schema(strings))                  # unknown, not empty
     end
     @testset "List display" begin
         list = RestClient.List{String}(
-            Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), Dict{Symbol, Any}(), nothing)
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), nothing, sample_response())
         bullets(rows; limit = true) = count(startswith("  • "), split(
             sprint(show, MIME("text/plain"), list; context = (:displaysize => (rows, 80), :limit => limit)), '\n'))
         shown = sprint(show, MIME("text/plain"), list; context = (:displaysize => (14, 80), :limit => true))

@@ -446,32 +446,30 @@ end
 # Generic response forms
 
 """
-    List{T, E<:AbstractEndpoint, R<:Request}
+    List{T, E<:AbstractEndpoint, R<:Request, D}
 
-Holds a list of values of type `T` returned by an `R` request to an `E` endpoint,
-along with request information, metadata, the URL of the next page when the
-response links to one (`Link: <…>; rel="next"`), and the page's number. A page
-reached through that link keeps the request that started the listing, and is
-numbered one on from the page that linked to it.
+A page of `T` items, from an `R` request to an `E` endpoint whose response was
+read as a `D` (a [`ListResponse`](@ref)).
 
 A `List` iterates and indexes as its items. Its fields are `request`, `items`,
-`meta` (the [`metadata`](@ref) of the response, also given by `metadata(list)`),
-`nextlink` and `page`. With Tables.jl loaded, a `List` of structs is a table,
-one row per item.
+`data` (the response's body as read, such as for a total count), `response`
+(its status and headers), and `page`, its number among the pages
+[`nextpage`](@ref) has fetched. With Tables.jl loaded, a `List` of structs is a
+table, one row per item.
 
-See also: [`ListResponse`](@ref), [`nextpage`](@ref).
+See also: [`ListResponse`](@ref), [`eachpage`](@ref).
 """
-struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}}
+struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}, D}
     request::R
     items::Vector{T}
-    meta::Dict{Symbol, Any}
-    nextlink::Union{String, Nothing}
+    data::D
+    response::Downloads.Response
     page::Int
 end
 
-List{T}(request::Request{<:Any, E}, items, meta, nextlink = nothing,
-        page = something(thispagenumber(request), 1)) where {T, E} =
-    List{T, E, typeof(request)}(request, items, meta, nextlink, page)
+List{T}(request::Request{<:Any, E}, items, data, response::Downloads.Response,
+        page = something(thispagenumber(request.endpoint), 1)) where {T, E} =
+    List{T, E, typeof(request), typeof(data)}(request, items, data, response, page)
 
 """
     SingleResponse{T}
@@ -494,19 +492,19 @@ abstract type SingleResponse{T} end
 """
     ListResponse{T}
 
-Abstract supertype for responses that contain
-a list of `T` items and (optionally) metadata.
+Abstract supertype for responses that contain a list of `T` items, such as a
+page of results with a total count. A request returns a [`List`](@ref) of the
+items, which keeps the response as its `data`.
 
 # Interface
 
-Subtypes of `ListResponse` may need to define these two methods:
+Subtypes of `ListResponse` may need to define:
 
 ```julia
 contents(list::ListResponse{T}) -> Vector{T}
-metadata(list::ListResponse{T}) -> Dict{Symbol, Any}
 ```
 
-Both have generic implementations that are sufficient for simple cases.
+The generic implementation takes the response's field of type `Vector{T}`.
 """
 abstract type ListResponse{T} end
 

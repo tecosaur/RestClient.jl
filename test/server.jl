@@ -60,7 +60,7 @@ function build_router(state::ServerState)
         elseif variant == "self" "</linked?variant=self>; rel=next"
         elseif variant == "away" "<http://elsewhere.invalid$next>; rel=\"next\""
         else "<http://$(HTTP.header(req, "Host"))$next>; rel=\"next\"" end
-        HTTP.Response(200, ["Content-Type" => "application/json", "Link" => link],
+        HTTP.Response(200, ["Content-Type" => "application/json", "Link" => link, "X-Total-Pages" => "3"],
                       "{\"items\":[$(item_json(HTTP.header(req, "Authorization", queryparam(req, "api_key", "")), page))],\"page\":$page,\"more\":false}")
     end)
     HTTP.register!(router, "GET", "/paged", function (req)

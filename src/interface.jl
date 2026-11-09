@@ -332,9 +332,9 @@ raises a [`MalformedResponse`](@ref) without reaching `postprocess`. An error
 status raises a [`ResponseError`](@ref) before either.
 
 The result is then restructured: a [`ListResponse`](@ref) is wrapped in a
-[`List`](@ref), with any next-page `Link` the response gives, and a
-[`SingleResponse`](@ref) gives its [`contents`](@ref). So a method may check or
-unwrap the data, and a `ListResponse` it returns is still paged.
+[`List`](@ref), and a [`SingleResponse`](@ref) gives its [`contents`](@ref). So
+a method may check or unwrap the data, and a `ListResponse` it returns is still
+paged.
 
 The three-argument form also sees the `response`, with its `status` and
 `headers`; by default it calls the two-argument form.
@@ -351,10 +351,8 @@ postprocess(_, req::Request, data) = postprocess(req, data)
 restructure(::Downloads.Response, ::Request, data) = data
 restructure(::Downloads.Response, ::Request, single::SingleResponse) = contents(single)
 
-function restructure(response::Downloads.Response, req::Request, list::ListResponse{T}) where {T}
-    next = withauthparam(req, nextlink(req.config, response.headers))
-    List{T}(req, contents(list), metadata(list), if next != response.url next end)
-end
+restructure(response::Downloads.Response, req::Request, list::ListResponse{T}) where {T} =
+    List{T}(req, contents(list), list, response)
 
 
 # Response handling
@@ -396,105 +394,66 @@ Base.@assume_effects :foldable fieldslots(::Type{R}, ::Type{F}) where {R, F} =
     filter(i -> fieldtype(R, i) == F, ntuple(identity, fieldcount(R)))
 
 """
-    metadata(response::ListResponse) -> Dict{Symbol, Any}
-    metadata(list::List) -> Dict{Symbol, Any}
+    nextpage(list::List) -> Union{List, Nothing}
+    nextpage([response], endpoint::AbstractEndpoint, data) -> Union{AbstractEndpoint, AbstractString, Nothing}
 
-Return metadata for the given response, kept in its [`List`](@ref) and
-returned again by `metadata(list)`, for instance to read a total count or
-cursor when implementing [`nextpage`](@ref).
+Fetch the page after `list`, or return `nothing` if it is the last.
 
-The default implementation returns an empty dictionary.
-"""
-function metadata end
-metadata(@nospecialize ::ListResponse) = Dict{Symbol, Any}()
-metadata(list::List) = list.meta
+An endpoint gives where its next page is with the second form, from the `data`
+of the page before (its [`ListResponse`](@ref), after [`postprocess`](@ref)),
+and in the three-argument form its `response` too: the next page's endpoint, its
+URL, or `nothing` for none. Without such a method, the page the response's
+`Link: <…>; rel="next"` header gives is fetched (RFC 8288). A URL may be
+absolute or start with `/`, and must lie under the API's `baseurl`.
 
-"""
-    nextpage(response::List) -> Union{List, Nothing}
+The `endpoint` is that of the request for the page before, or for a page reached
+by URL, of the first page. Pages are numbered on from the first (see
+[`thispagenumber`](@ref)), and [`pagecount`](@ref) may give their total.
 
-Fetch the next page of results after `response`.
-
-The endpoint's own `nextpage` method gives the next page when it has one;
-failing that, the page the response links to as next
-(`Link: <…>; rel="next"`, RFC 8288) is fetched, if it lies under the API's
-`baseurl`. With neither, `nothing` is returned.
-
-See the extended help for implementation suggestions.
-
-# Extended help
-
-There are two more methods that can be implemented to support pagination:
-
-    nextpage(request::Request) -> Union{Request, Nothing}
-    nextpage(endpoint::AbstractEndpoint) -> Union{AbstractEndpoint, Nothing}
-
-When implementing this method, a good approach to follow is:
-1. Implement [`thispagenumber`](@ref) and [`remainingpages`](@ref).
-   These are both *optional*, but pass through the information to the
-   `List` display method, which is nice to have.
-2. Consider how the request should be modified to fetch the next page,
-   and accordingly implement `nextpage` for either the endpoint,
-   request, or list.
-3. Construct the modified endpoint or request
-4. When implementing the `List`-based method, call [`perform`](@ref) with the modified request
-
-For example, [randomuser.me](https://randomuser.me/) has a paginated API, and so you could
-implement support for it with:
+# Examples
 
 ```julia
-@globalconfig RequestConfig("https://randomuser.me/api/")
+# A page number, until the response says there are no more
+RestClient.thispagenumber(search::SearchEndpoint) = search.page
+RestClient.nextpage(search::SearchEndpoint, results::SearchResults) =
+    if results.has_more SearchEndpoint(search; page = search.page + 1) end
 
-@jsondef struct User
-    gender::String
-    name::@NamedTuple{title::String, first::String, last::String}
-    email::String
-    location::@NamedTuple{country::String, state::String, city::String}
-    # ...and lots more
-end
+# A cursor
+RestClient.nextpage(works::WorksEndpoint, page::WorksPage) =
+    if !isnothing(page.next_cursor) WorksEndpoint(works; cursor = page.next_cursor) end
 
-@jsondef struct UsersResponse <: ListResponse{User}
-    results::Vector{User}
-    info::@NamedTuple{seed::String, page::Int, results::Int, version::String}
-end
-
-@endpoint struct UsersEndpoint
-    users(; page, results, seed) -> "?{page}&{results}&{seed}" -> UsersResponse
-    page::Int = 1
-    results::Union{Int, Nothing} = 5
-    seed::Union{String, Nothing}
-end
-
-# Pagination implementation
-
-RestClient.thispagenumber(users::UsersEndpoint) = users.page
-
-RestClient.nextpage(users::UsersEndpoint) =
-    UsersEndpoint(users.page + 1, users.results, users.seed)
-```
-
-This can then be used like so:
-
-```julia-repl
-julia> userlist = users(seed = "abc")
-List{User} holding 5 items, page 1:
-  [...]
-
-julia> nextpage(userlist)
-List{User} holding 5 items, page 2:
-  [...]
+# The next page's URL, given in the response
+RestClient.nextpage(::ResourcesEndpoint, page::ResourcePage) = page.next
 ```
 """
-function nextpage(list::List)
-    nextreq = nextpage(list.request)
-    isnothing(nextreq) || return perform(nextreq)
-    isnothing(list.nextlink) && return
-    out = outgoing(list.request)
-    next = send(list.request, Outgoing(out.method, list.nextlink, out.headers, out.payload, out.payloadstart))
-    typeof(next)(next.request, next.items, next.meta, next.nextlink, list.page + 1)
+function nextpage(list::List{<:Any, <:Any, <:Request{kind}}) where {kind}
+    (; request, response, page) = list
+    target = nexttarget(list)
+    next = if target isa AbstractEndpoint
+        perform(Request{kind}(request.config, target))
+    elseif !isnothing(target)
+        absolute = @something(underbase(request.config, target), throw(ArgumentError(
+            "The next page of $(nameof(typeof(request.endpoint))), \
+             $(redactsecrets(target, authsecrets(request))), is not under the API's base URL \
+             $(request.config.baseurl); `nextpage` should give a URL under it, or an endpoint")))
+        url = withauthparam(request, absolute)
+        url == response.url && return
+        out = outgoing(request)
+        send(request, Outgoing(out.method, url, out.headers, out.payload, out.payloadstart))
+    end
+    if !isnothing(next) typeof(next)(next.request, next.items, next.data, next.response, page + 1) end
 end
 
-# The `rel="next"` URL of a `Link` header (RFC 8288), if it lies under `baseurl`
-function nextlink((; baseurl)::RequestConfig, headers)
+nextpage(_, endpoint::AbstractEndpoint, data) = nextpage(endpoint, data)
+nextpage(@nospecialize(::AbstractEndpoint), _) = nothing
+
+function nexttarget((; request, response, data)::List)
+    next = nextpage(response, request.endpoint, data)
+    if isnothing(next) nextlink(request.config, response.headers) else next end
+end
+
+# The `rel="next"` URL of a `Link` header (RFC 8288), if it lies under the base URL
+function nextlink(config::RequestConfig, headers)
     isnextrel(param) = '=' ∈ param && let (key, rels) = split(lowercase(param), '='; limit = 2)
         strip(key) == "rel" && "next" ∈ split(strip(rels, (' ', '"', ',')))
     end
@@ -504,9 +463,13 @@ function nextlink((; baseurl)::RequestConfig, headers)
         name == "link" && '>' ∈ link || continue
         target, params = split(link, '>'; limit = 2)
         any(isnextrel, eachsplit(params, ';')) || continue
-        url = if startswith(target, '/') join(first(split(baseurl, '/'), 3), '/') * target else String(target) end
-        return if startswith(url, baseurl * '/') url end
+        return underbase(config, target)
     end
+end
+
+function underbase((; baseurl)::RequestConfig, url::AbstractString)
+    absolute = if startswith(url, '/') join(first(split(baseurl, '/'), 3), '/') * url else String(url) end
+    if startswith(absolute, baseurl * '/') absolute end
 end
 
 # `url` with `req`'s query auth, unless the server already included it
@@ -517,60 +480,44 @@ function withauthparam(req::Request, url::String)
     any(startswith(url_parameters([first(auth) => ""])), eachsplit(query, '&')) && return url
     string(url, ifelse('?' in url, '&', '?'), url_parameters([auth]))
 end
-withauthparam(::Request, ::Nothing) = nothing
-
-function nextpage(req::Request{kind}) where {kind}
-    nextep = nextpage(req.endpoint)
-    isnothing(nextep) && return
-    Request{kind}(req.config, nextep)
-end
-
-function nextpage(@nospecialize ::AbstractEndpoint)
-    nothing
-end
 
 """
-    thispagenumber(response::List) -> Union{Int, Nothing}
+    thispagenumber(list::List) -> Union{Int, Nothing}
+    thispagenumber(endpoint::AbstractEndpoint) -> Union{Int, Nothing}
 
-Return the current page number of `response`, if it is one of several pages.
+Return the number of the page `list` is, if it is one of several: counted on
+from the number the first page's endpoint gives, else 1.
 
-The generic `::List` implementation counts on from the request's own page number
-(or 1) along any `Link` headers followed, and returns `nothing` for a list that
-is neither numbered by its endpoint nor linked to other pages.
+An endpoint that starts partway through a listing, such as by an offset, gives
+its page's number with the second form; by default `nothing`.
 """
 function thispagenumber(list::List)
-    paged = list.page > 1 || !isnothing(list.nextlink) || !isnothing(thispagenumber(list.request))
+    paged = list.page > 1 || !isnothing(thispagenumber(list.request.endpoint)) || !isnothing(nexttarget(list))
     if paged list.page end
 end
 
-function thispagenumber(req::Request)
-    thispagenumber(req.endpoint)
-end
+thispagenumber(@nospecialize ::AbstractEndpoint) = nothing
 
-function thispagenumber(@nospecialize ::AbstractEndpoint)
-    nothing
+"""
+    remainingpages(list::List) -> Union{Int, Nothing}
+
+Return how many pages follow `list`, if [`pagecount`](@ref) gives their total.
+"""
+function remainingpages((; request, response, data, page)::List)
+    total = pagecount(response, request.endpoint, data)
+    if !isnothing(total) max(total - page, 0) end
 end
 
 """
-    remainingpages(response::List) -> Union{Int, Nothing}
+    pagecount([response], endpoint::AbstractEndpoint, data) -> Union{Int, Nothing}
 
-Return the number of remaining pages after `response`, if known.
-
-The generic `::List` implementation takes the request's count, less any pages
-reached through `Link` headers since, or returns `nothing` if the request has none.
+Return the total number of pages in the listing that `data`, read from a
+request to `endpoint`, is a page of, if known: for instance from a count of
+items in `data`, or from the three-argument form's `response` headers. By
+default `nothing`.
 """
-function remainingpages(list::List)
-    remaining = remainingpages(list.request)
-    if !isnothing(remaining) remaining - (list.page - something(thispagenumber(list.request), 1)) end
-end
-
-function remainingpages(req::Request)
-    remainingpages(req.endpoint)
-end
-
-function remainingpages(@nospecialize ::AbstractEndpoint)
-    nothing
-end
+pagecount(_, endpoint::AbstractEndpoint, data) = pagecount(endpoint, data)
+pagecount(@nospecialize(::AbstractEndpoint), _) = nothing
 
 """
     eachpage(list::List)
@@ -594,4 +541,4 @@ end
 
 Base.IteratorSize(::Type{<:Pages}) = Base.SizeUnknown()
 Base.iterate(pages::Pages) = (pages.first, pages.first)
-Base.iterate(::Pages, page) = let next = nextpage(page); isnothing(next) ? nothing : (next, next) end
+Base.iterate(::Pages, page) = let next = nextpage(page); if !isnothing(next); (next, next) end end

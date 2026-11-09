@@ -107,7 +107,6 @@ RestClient.authparams
 RestClient.responsetype
 RestClient.postprocess
 RestClient.contents
-RestClient.metadata
 #+end_src
 
 * Pagination interface
@@ -117,6 +116,7 @@ RestClient.nextpage
 RestClient.eachpage
 RestClient.thispagenumber
 RestClient.remainingpages
+RestClient.pagecount
 #+end_src
 
 * Caching interface
