@@ -572,6 +572,7 @@ function transferhook(easy::Downloads.Curl.Easy, info::NamedTuple)
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_XFERINFODATA, pointer_from_objref(options.watchdog))
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_NOPROGRESS, false)
     Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_FOLLOWLOCATION, CURLFOLLOW_OBEYCODE)
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_ACCEPT_ENCODING, "")
     isnothing(options.handlesink) || put!(options.handlesink, easy)
     nothing
 end

@@ -127,6 +127,7 @@ module IntegrationClient
     @endpoint checkedlinked() -> "linked" -> Paged
     RestClient.postprocess(::Request{<:Any, CheckedlinkedEndpoint}, page::Paged) =
         if page.more error("unexpected") else page end
+    @endpoint gzipped() -> "gzipped" -> Item
     @endpoint struct PagedEndpoint
         listing(; page::Int) -> "paged?{page}" -> Paged
         page::Int = 1
@@ -294,6 +295,14 @@ end
 @testset "requests" begin
     # Reserved characters must round-trip: the server reflects the decoded value,
     # so a match proves the client percent-encoded them.
+    @testset "compressed responses" begin
+        with_server() do baseurl, state
+            clean_cache("$baseurl/gzipped")
+            @test IC.gzipped(cfg(baseurl)).name == "unzipped"
+            @test IC.gzipped(cfg(baseurl)).name == "unzipped"
+            @test state.requests == 1
+        end
+    end
     @testset "query encoding" begin
         with_server() do baseurl, _
             for q in ("a b", "x&y=z", "100%", "café", "a/b?c")

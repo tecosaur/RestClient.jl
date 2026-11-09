@@ -38,6 +38,8 @@ json_object(pairs::Pair...) = json_response(JSON.json(Dict(pairs)))
 json_array(elements::Vector{<:AbstractString}) =
     json_response('[' * join(elements, ',') * ']')
 item_json(name::AbstractString, id::Integer) = JSON.json((; name, id))
+const GZIPPED_ITEM = UInt8[31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 171, 86, 202, 75, 204, 77, 85, 178, 82, 42,
+    205, 171, 202, 44, 40, 72, 77, 81, 210, 81, 202, 76, 81, 178, 50, 172, 5, 0, 128, 185, 40, 14, 26, 0, 0, 0]
 
 queryparam(req, key, default = "") = get(HTTP.queryparams(HTTP.URI(req.target)), key, default)
 
@@ -71,6 +73,14 @@ function build_router(state::ServerState)
     # Reflects the decoded `?q=` back, so a test can prove the client encoded it.
     HTTP.register!(router, "GET", "/reflect",
                    req -> json_object("name" => queryparam(req, "q"), "id" => 0))
+    HTTP.register!(router, "GET", "/gzipped", function (req)
+        headers = ["Content-Type" => "application/json", "Cache-Control" => "max-age=60"]
+        if occursin("gzip", HTTP.header(req, "Accept-Encoding", ""))
+            HTTP.Response(200, [headers; "Content-Encoding" => "gzip"], GZIPPED_ITEM)
+        else
+            HTTP.Response(200, headers, item_json("plain", 1))
+        end
+    end)
     HTTP.register!(router, "GET", "/headers",
                    req -> json_object("accept" => HTTP.header(req, "Accept", ""),
                                       "authorization" => HTTP.header(req, "Authorization", "")))
