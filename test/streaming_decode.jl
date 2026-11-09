@@ -21,6 +21,11 @@ struct DoneEP <: AbstractEndpoint end                   # ends on a `[DONE]` dat
 struct StopEP <: AbstractEndpoint end                   # ends on a terminal event type
 RestClient.isstreamend(::DoneEP, fr::SSEvent) = fr.data == codeunits("[DONE]")
 RestClient.isstreamend(::StopEP, fr::SSEvent) = fr.event == "stop"
+struct DecodedEndEP <: AbstractEndpoint end
+struct SkipEP <: AbstractEndpoint end
+RestClient.isstreamend(::DecodedEndEP, tok::Tok) = tok.n >= 2
+RestClient.isstreamskip(::SkipEP, fr::SSEvent) = fr.event == "ping"
+RestClient.isstreamskip(::SkipEP, fr::SSEvent{Tok}) = fr.data.n == 2
 
 # A completed transfer Task standing in for `Downloads.request`'s outcome.
 okxfer() = (t = Threads.@spawn nothing; wait(t); t)
@@ -88,6 +93,14 @@ end
     # terminal `event: stop`
     stop = run_decode(StopEP(), :SSE, Tok, "data: {\"n\":1}\n\nevent: stop\ndata: x\n\n")
     @test collect(stop.items) == [Tok(n=1)]
+    decoded = run_decode(DecodedEndEP(), :SSE, Tok, "data: {\"n\":1}\n\ndata: {\"n\":2}\n\n"; close_after = false)
+    @test collect(decoded.items) == [Tok(n=1)]
+    @test decoded.cancelled[]
+end
+
+@testset "skip predicate" begin
+    sse = "event: ping\ndata: not json\n\ndata: {\"n\":1}\n\ndata: {\"n\":2}\n\ndata: {\"n\":3}\n\n"
+    @test [fr.data.n for fr in run_decode(SkipEP(), :SSE, SSEvent{Tok}, sse).items] == [1, 3]
 end
 
 @testset "truncation" begin

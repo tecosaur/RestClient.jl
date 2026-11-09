@@ -153,17 +153,37 @@ end
 """
     isstreamend(endpoint::AbstractEndpoint, frame) -> Bool
 
-Whether `frame` ends the stream from `endpoint`. It sees each frame before it is
-decoded, so the terminating frame never reaches the consumer. The default is
-`false`, ending a stream only when the connection closes; an API that marks its
-end in band needs a method checking the frame's fields:
+Whether `frame` ends the stream from `endpoint`, without reaching the consumer.
+The default is `false`, ending a stream only when the connection closes; an API
+that marks its end in band needs a method checking the frame.
+
+Each frame is checked twice: before decoding, with its payload still bytes (as
+an `SSEvent{Vector{UInt8}}`), and after, as the stream's element (an
+`SSEvent{T}`, or a `T`). A method sees whichever its type matches, so one that
+reads a decoded field types the payload:
 
 ```julia
-RestClient.isstreamend(::ChatEndpoint, fr::SSEvent)     = fr.data == codeunits("[DONE]")  # a data sentinel
-RestClient.isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"      # a terminal event
+RestClient.isstreamend(::ChatEndpoint, fr::SSEvent{<:AbstractVector{UInt8}}) = fr.data == codeunits("[DONE]")
+RestClient.isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
+RestClient.isstreamend(changes::ChangesEndpoint, fr::SSEvent{<:Change}) = fr.data.time >= changes.until
 ```
 """
 isstreamend(@nospecialize(::AbstractEndpoint), @nospecialize(frame)) = false
+
+"""
+    isstreamskip(endpoint::AbstractEndpoint, frame) -> Bool
+
+Whether `frame` is left out of the stream from `endpoint`, such as a keep-alive
+or monitoring event. Like [`isstreamend`](@ref), it is checked before and after
+decoding, so a frame that wouldn't decode can be skipped by its raw form. The
+default is `false`.
+
+```julia
+RestClient.isstreamskip(::FeedEndpoint, fr::SSEvent) = fr.event == "heartbeat"
+RestClient.isstreamskip(::ChangesEndpoint, fr::SSEvent{<:LogEntry}) = true
+```
+"""
+isstreamskip(@nospecialize(::AbstractEndpoint), @nospecialize(frame)) = false
 
 # Decode `req`'s streamed body into a channel of `Elt` (the decoded payload, or a whole
 # frame like `SSEvent{P}`). Spawns a framer task; the transfer is read only at EOF to
@@ -178,13 +198,15 @@ function decode_stream(req::Request, incoming::Incoming{Base.BufferStream, Task}
     state = framestate(fmt)
     Threads.@spawn try
         while (frame = readframe(body, state, fmt)) !== nothing
-            if isstreamend(req.endpoint, frame)
-                cancelled[] = true # end the transfer as a deliberate stop
-                break
-            end
+            isstreamend(req.endpoint, frame) && break
+            isstreamskip(req.endpoint, frame) && continue
             data = interpret(req, response, framedata(frame), fmt.element, P)
-            put!(items, if P === Elt data else remake(frame, data, P) end)
+            element = if P === Elt data else remake(frame, data, P) end
+            isstreamend(req.endpoint, element) && break
+            isstreamskip(req.endpoint, element) && continue
+            put!(items, element)
         end
+        isnothing(frame) || (cancelled[] = true) # ended in band: a deliberate stop
         if cancelled[]
             close(items)
         else

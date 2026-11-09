@@ -119,10 +119,23 @@ RestClient.isstreamend(::ChatEndpoint, fr::SSEvent) = fr.data == codeunits("[DON
 RestClient.isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
 #+end_src
 
-The predicate runs on each frame /before/ it is decoded or emitted, so a
-terminator never reaches your loop. It inspects the undecoded frame through the
-frame's own accessors: ~fr.data~ is the raw payload bytes, ~fr.event~ and ~fr.id~ the
-SSE metadata.
+Each frame is checked twice: before it is decoded, with ~fr.data~ still the raw
+payload bytes, and after, as the stream's element. A method sees whichever its
+type matches, so the two above see both and stop at the raw frame, before it is
+decoded. One that reads a decoded field types its payload:
+
+#+begin_src julia
+RestClient.isstreamend(changes::ChangesEndpoint, fr::SSEvent{<:Change}) = fr.data.time >= changes.until
+#+end_src
+
+Either way, the frame that ends a stream never reaches your loop. Frames to
+leave out, such as keep-alives or an API's monitoring events, are declared the
+same way with [[@ref][~isstreamskip~]], and one skipped as a raw frame is never
+decoded:
+
+#+begin_src julia
+RestClient.isstreamskip(::FeedEndpoint, fr::SSEvent) = fr.event == "heartbeat"
+#+end_src
 
 #+begin_warning
 The endpoint type a method dispatches on must match the one =@endpoint= generated.
