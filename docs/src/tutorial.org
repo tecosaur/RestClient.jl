@@ -227,8 +227,7 @@ macro, so long as the appropriate [[@ref][~globalconfig~]] method is defined.
 #+end_src
 
 A ~DrawEndpoint~ struct will automatically be created, and since ~CardsResponse~ is a
-[[@ref][~ListResponse~]], it will automatically be restructured into a ~List{Card}~ by the
-generic list [[@ref][~postprocess~]] method.
+[[@ref][~ListResponse~]], it will automatically be restructured into a ~List{Card}~.
 
 ** Card return endpoint
 

@@ -25,7 +25,7 @@ headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{Stri
 parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 responsetype(endpoint::AbstractEndpoint) -> Type
 validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Union{Nothing, Bool, AbstractString, AbstractVector{<:AbstractString}}
-postprocess([response::Downloads.Response], request::Request, data) -> Any
+postprocess([response], request::Request, data) -> Any
 ```
 
 All of these functions but [`urlpath`](@ref) have default implementations.

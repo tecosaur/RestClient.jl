@@ -119,6 +119,13 @@ module IntegrationClient
         page::Int = 1
     end
     RestClient.nextpage(e::LinkedOwnEndpoint) = if e.page == 1 LinkedOwnEndpoint(3) end
+    @endpoint seenlinked() -> "linked" -> Paged
+    const SEEN = Int[]
+    RestClient.postprocess(response, ::Request{<:Any, SeenlinkedEndpoint}, page::Paged) =
+        (push!(SEEN, response.status); page)
+    @endpoint checkedlinked() -> "linked" -> Paged
+    RestClient.postprocess(::Request{<:Any, CheckedlinkedEndpoint}, page::Paged) =
+        if page.more error("unexpected") else page end
     @endpoint struct PagedEndpoint
         listing(; page::Int) -> "paged?{page}" -> Paged
         page::Int = 1
@@ -257,6 +264,9 @@ const AC = AuthClient
             @test ids(IC.linked(cfg(baseurl); variant = "root")) == [1, 2, 3]
             @test isnothing(nextpage(IC.linked(cfg(baseurl); variant = "away")))   # another host
             @test ids(IC.linked_own(cfg(baseurl))) == [1, 3]           # the endpoint's own nextpage first
+            @test ids(IC.seenlinked(cfg(baseurl))) == [1, 2, 3]        # postprocess leaves paging intact
+            @test IC.SEEN == [200, 200, 200]
+            @test ids(IC.checkedlinked(cfg(baseurl))) == [1, 2, 3]
         end
     end
     @testset "lazy iteration" begin

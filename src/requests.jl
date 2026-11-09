@@ -589,7 +589,7 @@ function deliver(req::Request, incoming::Incoming)
         data = if dtype !== Nothing
             interpret(req, response, read(body), dataformat(req.endpoint, dtype), dtype)
         end
-        postprocess(response, req, data)
+        restructure(response, req, postprocess(response, req, data))
     finally
         close(incoming)
     end

@@ -322,22 +322,22 @@ writepayload(::Any, fmt::Union{JSONFormat, XMLFormat}, data::T) where {T} =
                          add `using $(FORMAT_PACKAGES[nameof(typeof(fmt))])`"))
 
 """
-    postprocess([response::Downloads.Response], request::Request, data) -> Any
+    postprocess([response], request::Request, data) -> Any
 
-Post-process the data returned by the request.
+Post-process the data returned by the request, by default returning it as-is.
 
 `data` is the response body already read as the endpoint's
 [`responsetype`](@ref): reading happens first, and a body that can't be read
 raises a [`MalformedResponse`](@ref) without reaching `postprocess`. An error
 status raises a [`ResponseError`](@ref) before either.
 
-There are three generic implementations provided:
-- A `SingleResponse` gives its `contents`.
-- A `ListResponse` is wrapped in a `List` object.
-- Any other data is returned as-is.
+The result is then restructured: a [`ListResponse`](@ref) is wrapped in a
+[`List`](@ref), with any next-page `Link` the response gives, and a
+[`SingleResponse`](@ref) gives its [`contents`](@ref). So a method may check or
+unwrap the data, and a `ListResponse` it returns is still paged.
 
-The three-argument form also sees the response, with its headers; its generic
-method calls the two-argument one, then records any next-page `Link` on a `List`.
+The three-argument form also sees the `response`, with its `status` and
+`headers`; by default it calls the two-argument form.
 
 !!! note
     Part of the `AbstractEndpoint` interface.
@@ -346,17 +346,15 @@ function postprocess(@nospecialize(::Request), data)
     data
 end
 
-function postprocess(response::Downloads.Response, req::Request, data)
-    result = postprocess(req, data)
-    result isa List || return result
+postprocess(_, req::Request, data) = postprocess(req, data)
+
+restructure(::Downloads.Response, ::Request, data) = data
+restructure(::Downloads.Response, ::Request, single::SingleResponse) = contents(single)
+
+function restructure(response::Downloads.Response, req::Request, list::ListResponse{T}) where {T}
     next = withauthparam(req, nextlink(req.config, response.headers))
-    typeof(result)(result.request, result.items, result.meta, if next != response.url next end, result.page)
+    List{T}(req, contents(list), metadata(list), if next != response.url next end)
 end
-
-postprocess(req::Request, data::ListResponse{T}) where {T} =
-    List{T}(req, contents(data), metadata(data))
-
-postprocess(::Request, data::SingleResponse) = contents(data)
 
 
 # Response handling

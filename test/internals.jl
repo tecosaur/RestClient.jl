@@ -403,13 +403,14 @@ end
         end
         @test supertype(ResultClient.NumbersEndpoint) === AbstractEndpoint
         req = Request{:get}(RequestConfig("http://x"), ResultClient.ListedEndpoint())
-        listed = RestClient.postprocess(req, ListContent(1, ["x"]))
+        @test RestClient.postprocess(req, ListContent(1, ["x"])) isa ListContent
+        listed = RestClient.restructure(sample_response(), req, ListContent(1, ["x"]))
         @test listed isa RestClient.List{String}
         @test isnothing(RestClient.thispagenumber(listed))              # not paged
         @test RestClient.metadata(listed) == Dict(:total => 1)
         @test isconcretetype(fieldtype(typeof(listed), :request))   # so a next page dispatches statically
-        @test RestClient.postprocess(Request{:get}(RequestConfig("http://x"), PlainEP()),
-                                     OneContent("n", 3)) === 3   # a single response gives its contents
+        @test RestClient.restructure(sample_response(), Request{:get}(RequestConfig("http://x"), PlainEP()),
+                                     OneContent("n", 3)) === 3       # a single response gives its contents
     end
     @testset "result type named like a field" begin
         @eval module FieldNamedResult
