@@ -44,18 +44,18 @@ end
 @testset "frame types" begin
     @test framedata(NDJSONFrame([1,2])) == [1,2]
     @test framedata(SSEvent("e", [1], "7")) == [1]
-    @test remake(SSEvent("e", UInt8[1], "7"), "x") == SSEvent("e", "x", "7")
-    @test remake(NDJSONFrame(UInt8[1]), "x") == NDJSONFrame("x")
+    @test remake(SSEvent("e", UInt8[1], "7"), "x", String) == SSEvent("e", "x", "7")
+    @test remake(NDJSONFrame(UInt8[1]), "x", String) == NDJSONFrame("x")
     # framedata/remake locate the payload by its type-parameter field, so remake
     # re-types it and disambiguates even when a metadata field shares the type.
-    @test remake(SSEvent("e", UInt8[1], "7"), 42) isa SSEvent{Int}
+    @test remake(SSEvent("e", UInt8[1], "7"), 42, Int) isa SSEvent{Int}
     let ev = SSEvent{Union{String,Nothing}}("e", "body", "7")   # all three fields same type
         @test framedata(ev) == "body"
-        @test remake(ev, 9) == SSEvent("e", 9, "7")
+        @test remake(ev, 9, Int) == SSEvent("e", 9, "7")
     end
-    # A frame without a field typed by its parameter must define its own methods
+    # A frame type must keep its payload in a field typed by its parameter
     @test_throws "no payload field" framedata(UnparameterisedFrame(1))
-    @test_throws "no payload field" remake(UnparameterisedFrame(1), "x")
+    @test_throws "no payload field" remake(UnparameterisedFrame(1), "x", String)
     @test_throws "no payload field" framedata(UnmatchedFrame{Int}(1))
     @test elementpayload(SSEvent{Int}) === Int
     @test elementpayload(NDJSONFrame{Int}) === Int

@@ -35,31 +35,18 @@ Base.@assume_effects :foldable function payloadslot(F::Type)
         findfirst(==(wrapper.var), fieldtypes(Base.unwrap_unionall(wrapper)))
     end
     isnothing(slot) &&
-        throw(ArgumentError("no payload field in $F; define `framedata` and `remake` for it"))
+        throw(ArgumentError("no payload field in $F: a frame type keeps its payload in a field \
+                             typed by its parameter, like `data::T` in `SSEvent{T}`"))
     slot
 end
 
-"""
-    framedata(frame) -> payload
-
-Extract a frame's payload: the field whose type is the frame's type parameter. A
-framing whose payload is located differently can override this.
-"""
 framedata(frame) = getfield(frame, payloadslot(typeof(frame)))
 
-"""
-    remake(frame, data, ::Type{P} = typeof(data)) -> frame
-
-Return a copy of `frame` with its payload replaced by `data`, as a frame of payload
-type `P`, preserving the other fields. This is the decode step: `{bytes} → {P}`. The
-payload field is located as in [`framedata`](@ref).
-"""
+# `frame` with its payload replaced by `data`, as a frame of payload type `P`
 function remake(frame::F, data, ::Type{P}) where {F, P}
     slot = payloadslot(F)
     F.name.wrapper{P}(ntuple(i -> if i == slot data else getfield(frame, i) end, Val(fieldcount(F)))...)
 end
-
-remake(frame, data) = remake(frame, data, typeof(data))
 
 """
     elementpayload(::Type{Elt}) -> Type
@@ -83,6 +70,8 @@ framestate(::StreamFormat) = nothing
 Read one complete frame from `bs`, with its payload still **undecoded** bytes, or
 return `nothing` at a clean EOF. `state` is
 [`framestate`](@ref)'s value, reused across calls. Dispatched on `fmt`'s framing.
+A frame type keeps its payload in a field typed by its parameter, like `data::T`
+in [`SSEvent{T}`](@ref SSEvent).
 
 The read blocks on `bs`, reassembling a frame split across network reads. As `bs` is
 written concurrently, read it with calls that lock against the writer (`readuntil`,

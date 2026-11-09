@@ -66,8 +66,6 @@ cover the common cases; a client library implementing a new framing defines thes
 RestClient.StreamFormat
 RestClient.readframe
 RestClient.framestate
-RestClient.framedata
-RestClient.remake
 RestClient.elementpayload
 #+end_src
 

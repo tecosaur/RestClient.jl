@@ -17,8 +17,8 @@ public urlpath, headers, parameters, payload, validate, responsetype, postproces
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, thispagenumber, remainingpages,
     globalconfig
-public StreamFormat, UnspecifiedFormat, readframe, framestate, framedata, remake,
-    elementpayload, authheaders, authparams, contents, metadata, cachelifetime
+public StreamFormat, UnspecifiedFormat, readframe, framestate, elementpayload,
+    authheaders, authparams, contents, metadata, cachelifetime
 
 include("types.jl")
 include("interface.jl")
