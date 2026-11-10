@@ -23,18 +23,21 @@ endpoint's [`headers`](@ref) give their own.
 
 # Retries and rate limits
 
-RestClient doesn't pace requests ahead of time: it waits when a response asks
-it to. A 429 is retried after the wait its headers give, or failing that after
-an exponential backoff (about 0.5, 1, 2 then 4 seconds, with jitter). A 403 or
-503 is retried only when its headers give a wait: a `Retry-After`, or an
-`X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`. A gateway failure (502,
-503 or 504) is retried after the backoff, for methods safe to repeat (not POST
-or PATCH). A request is attempted at most five times, and endpoints sharing a
-[`@globalconfig`](@ref) wait together.
+Requests sharing a config are sent no faster than its [`RateLimit`](@ref), and
+wait out any deadline a response sets: one its headers give (a `Retry-After`, or
+an `X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`), or [`nextallowed`](@ref)
+does. Responses served from the cache are not held back.
 
-A wait longer than the request's `timeout` isn't waited; the response is raised
-instead. With the default `timeout = Inf`, a wait can be long (until an hourly
-quota resets, say), so set a `timeout` to bound it.
+A 429 is retried at its deadline, or failing that after an exponential backoff
+(about 0.5, 1, 2 then 4 seconds, with jitter). A 403 or 503 is retried when its
+headers give a deadline, and any other unsuccessful response when `nextallowed`
+does. A gateway failure (502, 503 or 504) is retried after the backoff, for
+methods safe to repeat (not POST or PATCH). A request is attempted at most five
+times.
+
+A wait longer than the request's `timeout` isn't waited: a retry is raised
+instead, and a request is sent anyway. With the default `timeout = Inf`, a wait
+can be long (until an hourly quota resets, say), so set a `timeout` to bound it.
 
 # Errors
 
@@ -52,22 +55,20 @@ perform(req::Request) = send(req, outgoing(req))
 function send(req::Request{kind}, out::Outgoing) where {kind}
     # A caller's IO payload can only be resent if it can be rewound
     isretryable = !(out.payload isa IO) || !isnothing(out.payloadstart)
-    incoming = withretries(req.config.rategate; isretryable, isidempotent = kind ∉ (:post, :patch),
-                           maxwait = req.config.timeout) do
-        transmit(req, out)
+    attempt = 1
+    while true
+        incoming = transmit(req, out)
+        retry = retrydeadline(req, incoming.response, kind ∉ (:post, :patch), attempt)
+        isretryable && attempt < MAX_ATTEMPTS && !isnothing(retry) && retry - time() <= req.config.timeout ||
+            return deliver(req, incoming)
+        close(incoming)
+        hold!(req, retry)
+        attempt += 1
     end
-    deliver(req, incoming)
 end
 
 
 # Generic request functionality
-
-"""
-    ANSI_CLEAR_LINE
-
-String escape sequence to clear the current line in a terminal.
-"""
-const ANSI_CLEAR_LINE = "\e[A\e[2K"
 
 """
     MAX_ATTEMPTS
@@ -230,96 +231,93 @@ function mimeheaders(req::Request, fmt::AbstractFormat, in::Type)
     append!(Pair{String, String}[h for h in hdrs], extras)
 end
 
-"""
-    withretries(send::Function, gate::RateGate; isretryable::Bool = true,
-                isidempotent::Bool = false, maxwait::Real = Inf) -> Incoming
+# When to retry `req` after `response`, its `attempt`th (see `perform`), or `nothing` not to
+function retrydeadline(req::Request, response::Downloads.Response, isidempotent::Bool, attempt::Int)
+    (; status) = response
+    status >= 400 || return
+    (; asked, given) = deadlines(req, response)
+    isretry = asked > -Inf || status == 429 || status ∈ (403, 503) && given > -Inf ||
+        isidempotent && status ∈ (502, 503, 504)
+    isretry || return
+    deadline = max(asked, given)
+    if deadline == -Inf time() + 2^(attempt - 1) * (0.5 + rand()) elseif isfinite(deadline) deadline end
+end
 
-Call `send()`, retrying while the response asks to be retried later (a 429, or a
-403 or 503 with `Retry-After` or rate-limit headers, see [`retrydelay`](@ref)), or,
-when `isidempotent`, while a gateway fails (a 502, 503 or 504).
+# The deadlines `response` sets for requests sharing `req`'s config: the one
+# `nextallowed` asks for, and the one its headers give (each `-Inf` for none)
+deadlines(req::Request, response::Downloads.Response) =
+    (asked = unixtime(something(nextallowed(req.endpoint, response), -Inf)),
+     given = retryafter(response.headers))
 
-Retries wait the delay the headers ask for, or back off exponentially with jitter,
-up to `MAX_ATTEMPTS` attempts; a discarded attempt is closed. When not
-`isretryable`, out of attempts, or asked to wait longer than `maxwait` seconds, the
-last response is returned as-is.
-Calls sharing `gate` share one backoff (see [`RateGate`](@ref)).
 """
-function withretries(send::F, gate::RateGate; isretryable::Bool = true,
-                     isidempotent::Bool = false, maxwait::Real = Inf) where {F <: Function}
-    attempt = 1
-    while true
-        while (remaining = (@atomic gate.nextallowed) - time()) > 0
-            sleep(remaining)
+    throttled(exchange::Function, req::Request) -> Incoming
+
+Run `exchange()`, `req`'s exchange with the network, once its config's
+[`Throttle`](@ref) admits it under the config's [`RateLimit`](@ref), then hold
+the throttle to the deadlines its response sets. It is in flight until
+`exchange` returns: once a stream's response has begun.
+"""
+function throttled(exchange::F, req::Request) where {F <: Function}
+    (; throttle, ratelimit, timeout) = req.config
+    @lock throttle.slots begin
+        while throttle.inflight >= ratelimit.inflight
+            wait(throttle.slots)
         end
-        deadline = @atomic gate.nextallowed
-        incoming = send()::Incoming
-        (; status, headers) = incoming.response
-        delay = retrydelay(headers)
-        isretry = status == 429 || status ∈ (403, 503) && !isnothing(delay) ||
-            isidempotent && status ∈ (502, 503, 504)
-        pause = something(delay, 2^(attempt - 1) * (0.5 + rand()))
-        isretry && isretryable && attempt < MAX_ATTEMPTS && pause <= maxwait ||
-            return incoming
-        close(incoming)
-        backoff!(gate, pause, deadline)
-        attempt += 1
+        throttle.inflight += 1
     end
-end
-
-# Move the gate's deadline, unless another task has done so since `deadline` was read
-# before sending; either way, the next attempt waits out the gate
-function backoff!(gate::RateGate, delay::Real, deadline::Float64)
-    _, claimed = @atomicreplace gate.nextallowed deadline => time() + max(delay, 0.1)
-    claimed && delay > 0 && isinteractive() && @noinline alert_sleep(delay)
-    nothing
-end
-
-function alert_sleep(delay::Real)
-    @info S"Asked to wait {emphasis:$delay} seconds before retrying, obliging..."
-    tty = stdout
-    if tty isa Base.TTY
-        print(tty, '\n')
-        for waited in 1:delay
-            sleep(1)
-            print(tty, ANSI_CLEAR_LINE, S" Waited {emphasis:$waited} seconds\n")
+    incoming = try
+        # Wait (up to `timeout`) for the time the GCRA admits a request, and claim it
+        allowance = (ratelimit.burst - 1) / ratelimit.rate
+        while true
+            now, arrival = time(), @atomic throttle.arrival
+            pause = arrival - allowance - now
+            0 < pause <= timeout && (sleep(pause); continue)
+            @atomicreplace(throttle.arrival, arrival => max(arrival, now) + 1 / ratelimit.rate).success && break
         end
-        print(tty, ANSI_CLEAR_LINE)
-    else
-        sleep(delay)
+        exchange()::Incoming
+    finally
+        @lock throttle.slots (throttle.inflight -= 1; notify(throttle.slots))
     end
+    hold!(req, max(deadlines(req, incoming.response)...))
+    incoming
+end
+
+# Hold requests sharing `req`'s config back until `deadline`, if it's finite
+function hold!(req::Request, deadline::Float64)
+    isfinite(deadline) || return
+    (; throttle, ratelimit, baseurl) = req.config
+    allowance = (ratelimit.burst - 1) / ratelimit.rate
+    before, after = @atomic throttle.arrival max deadline + allowance
+    after - before >= 1 &&
+        @info S"$baseurl asked for a pause of {emphasis:$(round(deadline - time(), digits = 1))} seconds"
 end
 
 """
-    retrydelay(headers::Vector{Pair{String, String}}) -> Union{Int, Nothing}
+    retryafter(headers::Vector{Pair{String, String}}) -> Float64
 
-Examine `headers` to find how many seconds should be waited before retrying a
-rate-limited request, or `nothing` if they carry no rate-limit information.
+Return the time (as a `time()` value) that `headers` ask requests to wait until,
+or `-Inf` if they set none.
 
 Checks (in order):
-- `Retry-After`: which may be a timestamp or seconds delta
-- `X-RateLimit-Remaining`: if not zero, the limit is not exhausted (`nothing`)
-- `X-RateLimit-Reset`: which may be a timestamp, seconds delta, or unix time
+- `Retry-After`: seconds from now, or an HTTP date
+- `X-RateLimit-Remaining`: unless zero, the limit is not exhausted (`-Inf`)
+- `X-RateLimit-Reset`: seconds from now, a Unix time, or an HTTP date
 """
-function retrydelay(headers::Vector{Pair{String, String}})
-    retryafter = secondsuntil(getheader(headers, "retry-after"))
-    isnothing(retryafter) || return retryafter
-    something(tryparse(Int, getheader(headers, "x-ratelimit-remaining")), 0) == 0 || return nothing
-    secondsuntil(getheader(headers, "x-ratelimit-reset"); allowunix = true)
+function retryafter(headers::Vector{Pair{String, String}})
+    function timeof(value::String)
+        seconds = if all(isdigit, value) tryparse(Int, value) end
+        isnothing(seconds) || return unixtime(seconds)
+        date = tryparse(DateTime, value, HTTP_DATE_FORMAT)
+        if isnothing(date); -Inf else datetime2unix(date) end
+    end
+    after = timeof(getheader(headers, "retry-after"))
+    after > -Inf && return after
+    something(tryparse(Float64, getheader(headers, "x-ratelimit-remaining")), Inf) > 0 && return -Inf
+    timeof(getheader(headers, "x-ratelimit-reset"))
 end
 
-# Seconds until the time `value` gives: a delta, an HTTP date, or (`allowunix`) a Unix
-# time, told from a delta by being over a year; `nothing` if it is none of these.
-function secondsuntil(value::String; allowunix::Bool = false)
-    if !isempty(value) && all(isdigit, value)
-        seconds = tryparse(Int, value)
-        isnothing(seconds) && return nothing
-        allowunix && seconds >= 365 * 24 * 60 * 60 || return seconds
-        max(0, seconds - floor(Int, time()))
-    else
-        date = tryparse(DateTime, value, HTTP_DATE_FORMAT)
-        if !isnothing(date) max(0, ceil(Int, datetime2unix(date) - time())) end
-    end
-end
+# A time given in seconds from now or, past a year's worth, as a Unix time, as a Unix time
+unixtime(t::Real) = if t < 365 * 24 * 60 * 60 time() + t else Float64(t) end
 
 # The first header called `name` (received headers are lowercased by Downloads)
 function getheader(headers, name::String, default::String = "")
@@ -495,7 +493,7 @@ end
 # A `Stream` result is read incrementally (but a HEAD request's never is); otherwise the
 # whole response is read, through the HTTP cache when it may be stored.
 function transmit(req::Request{kind}, out::Outgoing) where {kind}
-    kind !== :head && responsetype(req.endpoint) <: Stream && return open_stream(req, out)
+    kind !== :head && responsetype(req.endpoint) <: Stream && return throttled(() -> open_stream(req, out), req)
     # RFC 9111 §3, RFC 10008 §2.7: GET, HEAD, and QUERY (keyed on its content) are cacheable
     iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
         kind ∈ (:get, :head, :query) && !(out.payload isa IO)
@@ -515,18 +513,19 @@ function transmit(req::Request{kind}, out::Outgoing) where {kind}
     incoming
 end
 
-function http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, String}} = out.headers)
-    buf, input = IOBuffer(), payloadio(out)
-    @debug debug_request(out.method, out.url, headers, input; secrets = authsecrets(req)) _file=nothing
-    (; timeout) = req.config
-    options = TransferOptions(Watchdog(idlelimit(timeout)), nothing)
-    res = curlrequest(out.url, options; out.method, output = buf, input, headers, timeout,
-                      throw = false)
-    res isa Downloads.RequestError && throw(transfererror(req, res, options.watchdog))
-    seekstart(buf)
-    @debug debug_response(out.url, res, buf; secrets = authsecrets(req)) _file=nothing
-    Incoming(res, buf)
-end
+http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, String}} = out.headers) =
+    throttled(req) do
+        buf, input = IOBuffer(), payloadio(out)
+        @debug debug_request(out.method, out.url, headers, input; secrets = authsecrets(req)) _file=nothing
+        (; timeout) = req.config
+        options = TransferOptions(Watchdog(idlelimit(timeout)), nothing)
+        res = curlrequest(out.url, options; out.method, output = buf, input, headers, timeout,
+                          throw = false)
+        res isa Downloads.RequestError && throw(transfererror(req, res, options.watchdog))
+        seekstart(buf)
+        @debug debug_response(out.url, res, buf; secrets = authsecrets(req)) _file=nothing
+        Incoming(res, buf)
+    end
 
 
 """

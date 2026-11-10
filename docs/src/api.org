@@ -20,6 +20,7 @@ CollapsedDocStrings = true
 #+begin_src @docs
 Request
 RequestConfig
+RateLimit
 AbstractEndpoint
 #+end_src
 
@@ -118,6 +119,12 @@ RestClient.eachpage
 RestClient.thispagenumber
 RestClient.remainingpages
 RestClient.pagecount
+#+end_src
+
+* Rate limit interface
+
+#+begin_src @docs
+RestClient.nextallowed
 #+end_src
 
 * Caching interface

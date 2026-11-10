@@ -81,6 +81,18 @@ module IntegrationClient
     @endpoint flaky(status::Int) -> "flaky/{status}" -> Item
     @endpoint flaky_post(status::Int; item::Item) -> item -> "flaky/{status}" -> Item
     @endpoint long_limited() -> "ratelimited/long" -> Item
+    @endpoint exhausted() -> "exhausted" -> Item
+    @endpoint concurrent() -> "concurrent" -> Item
+    @endpoint paced() -> "items/1" -> Item
+    RestClient.nextallowed(::PacedEndpoint, _) = 1
+    @endpoint stalled() -> "items/1" -> Item
+    RestClient.nextallowed(::StalledEndpoint, _) = time() + 3600
+    @endpoint hasty() -> "ratelimited" -> Item
+    RestClient.nextallowed(::HastyEndpoint, _) = time() - 10
+    @endpoint teapot() -> "flaky/418" -> Item
+    RestClient.nextallowed(::TeapotEndpoint, r) = if r.status == 418 time() end
+    @endpoint refused() -> "always429" -> Item
+    RestClient.nextallowed(::RefusedEndpoint, r) = if r.status == 429 Inf end
     @endpoint upload_limited(; item::Item) -> item -> "echo/limited" -> Echoed
     @endpoint upload_stream(; data::IO) -> data -> "echo/limited" -> Echoed
     @endpoint upload_bytes(; data::Vector{UInt8}) -> data -> "echo" -> Echoed
@@ -618,9 +630,84 @@ end
             @test time() - start < 2 * THROTTLE_RETRY_AFTER
         end
     end
-    @testset "@globalconfig gate" begin
-        @test RestClient.globalconfig(Val(AuthClient)).rategate ===
-            RestClient.globalconfig(Val(AuthClient)).rategate
+    @testset "@globalconfig throttle" begin
+        @test RestClient.globalconfig(Val(AuthClient)).throttle ===
+            RestClient.globalconfig(Val(AuthClient)).throttle
+        @eval module PacedClient
+            using RestClient
+            @globalconfig RequestConfig("http://paced.test"; ratelimit = RateLimit(3))
+        end
+        @test RestClient.globalconfig(Val(PacedClient)).ratelimit == RateLimit(3)
+    end
+    @testset "paced" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl; ratelimit = RateLimit(5))
+            @test @elapsed(fetch.([Threads.@spawn IC.getitem(config, "1") for _ in 1:4])) >= 0.6
+            burst = cfg(baseurl; ratelimit = RateLimit(5; burst = 4))
+            @test @elapsed(fetch.([Threads.@spawn IC.getitem(burst, "1") for _ in 1:4])) < 0.5
+        end
+    end
+    @testset "cache hits unpaced" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl; ratelimit = RateLimit(1/5))
+            try
+                IC.cached(config)
+                @test @elapsed(IC.cached(config)) < 1
+            finally
+                clean_cache("$baseurl/cacheable")
+            end
+        end
+    end
+    @testset "in flight" begin
+        with_server() do baseurl, state
+            single = cfg(baseurl; ratelimit = RateLimit(inflight = 1))
+            fetch.([Threads.@spawn IC.concurrent(single) for _ in 1:3])
+            @test (@atomic state.peak) == 1
+        end
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            fetch.([Threads.@spawn IC.concurrent(config) for _ in 1:3])
+            @test (@atomic state.peak) > 1
+        end
+    end
+    @testset "exhausted budget holds" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            IC.exhausted(config)
+            @test @elapsed(IC.getitem(config, "1")) >= 0.9
+        end
+    end
+    @testset "nextallowed" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            IC.paced(config)
+            @test @elapsed(IC.paced(config)) >= 0.9
+            @test @elapsed(IC.hasty(config)) >= 0.9
+            @test state.requests == 4
+        end
+        with_server() do baseurl, state
+            config = cfg(baseurl; timeout = 2)
+            IC.stalled(config)
+            @test @elapsed(IC.stalled(config)) < 2
+        end
+        with_server() do baseurl, state
+            @test IC.teapot(cfg(baseurl)).id == 1
+            @test state.requests == 2
+        end
+        with_server() do baseurl, state
+            @test_throws RestClient.ResponseError IC.flaky(cfg(baseurl), 418)
+            @test state.requests == 1
+        end
+        with_server() do baseurl, state
+            err = try IC.refused(cfg(baseurl)) catch e; e end
+            @test err isa RestClient.ResponseError && err.response.status == 429
+            @test state.requests == 1
+        end
+    end
+    @testset "waits logged" begin
+        with_server() do baseurl, state
+            @test_logs (:info, r"asked for a pause of") match_mode = :any IC.limited(cfg(baseurl))
+        end
     end
     @testset "@globalconfig of a name" begin
         @eval module NamedConfigClient

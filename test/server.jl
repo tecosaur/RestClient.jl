@@ -29,8 +29,10 @@ mutable struct ServerState
     # /throttled sees genuinely concurrent hits, so these are atomic
     @atomic throttle_429s::Int
     @atomic throttle_first::Float64  # time() of first hit, 0.0 until set
+    @atomic active::Int              # requests /concurrent is serving now
+    @atomic peak::Int                # the most it served at once
 end
-ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0)
+ServerState() = ServerState(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0, 0)
 
 json_response(body::AbstractString) =
     HTTP.Response(200, ["Content-Type" => "application/json"], body)
@@ -150,6 +152,15 @@ function build_router(state::ServerState)
         state.forbidden_hits < 1 || return json_response(item_json("ok", 1))
         state.forbidden_hits += 1
         HTTP.Response(403, ["X-RateLimit-Remaining" => "0", "X-RateLimit-Reset" => "1"], "{}")
+    end)
+    HTTP.register!(router, "GET", "/exhausted",
+                   _ -> HTTP.Response(200, ["X-RateLimit-Remaining" => "0", "X-RateLimit-Reset" => "1"],
+                                      item_json("last", 1)))
+    HTTP.register!(router, "GET", "/concurrent", function (req)
+        @atomic state.peak max (@atomic state.active += 1)
+        sleep(0.2)
+        @atomic state.active -= 1
+        json_response(item_json("ok", 1))
     end)
     HTTP.register!(router, "GET", "/ratelimited/long",
                    _ -> HTTP.Response(429, ["Retry-After" => "3600"], "{}"))

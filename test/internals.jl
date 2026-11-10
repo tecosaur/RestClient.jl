@@ -8,7 +8,7 @@
 using Dates
 using Downloads: Response
 using Tables
-using RestClient: retrydelay, expirytime, dumpresponse, tryreadresponse, cachesave,
+using RestClient: retryafter, unixtime, expirytime, dumpresponse, tryreadresponse, cachesave,
     opencacheentry, readcachestamp, CACHE_STALE_DURATION, HTTP_DATE_FORMAT
 
 hdr(pairs...) = Pair{String, String}[pairs...]
@@ -167,42 +167,63 @@ end
 # Tests
 
 @testset "rate limits" begin
-    @testset "retry delay" begin
-        @test isnothing(retrydelay(hdr()))
-        @test isnothing(retrydelay(hdr("retry-after" => "soon")))
-        @test isnothing(retrydelay(hdr("x-ratelimit-reset" => "garbage")))
+    @testset "retry after" begin
+        inabout(seconds) = deadline -> abs(deadline - (time() + seconds)) < 2
+        @test retryafter(hdr()) == -Inf
+        @test retryafter(hdr("retry-after" => "soon")) == -Inf
+        @test retryafter(hdr("x-ratelimit-reset" => "garbage")) == -Inf
         @testset "HTTP date" begin
-            @test 115 <= retrydelay(hdr("retry-after" => http_date(now(UTC) + Second(120)))) <= 121
-            @test retrydelay(hdr("retry-after" => http_date(now(UTC) - Hour(1)))) == 0
+            @test retryafter(hdr("retry-after" => http_date(now(UTC) + Second(120)))) |> inabout(120)
+            @test retryafter(hdr("retry-after" => http_date(now(UTC) - Hour(1)))) |> inabout(-3600)
         end
         @testset "remaining gates reset" begin
-            @test isnothing(retrydelay(hdr("x-ratelimit-remaining" => "5", "x-ratelimit-reset" => "60")))
-            @test retrydelay(hdr("x-ratelimit-remaining" => "0", "x-ratelimit-reset" => "45")) == 45
+            @test retryafter(hdr("x-ratelimit-remaining" => "5", "x-ratelimit-reset" => "60")) == -Inf
+            @test retryafter(hdr("x-ratelimit-remaining" => "0", "x-ratelimit-reset" => "45")) |> inabout(45)
+            @test retryafter(hdr("x-ratelimit-remaining" => "599.0", "x-ratelimit-reset" => "45")) == -Inf
+            @test retryafter(hdr("x-ratelimit-remaining" => "0.0", "x-ratelimit-reset" => "45")) |> inabout(45)
+            @test retryafter(hdr("x-ratelimit-reset" => "45")) == -Inf
+            @test retryafter(hdr("x-ratelimit-remaining" => "many", "x-ratelimit-reset" => "45")) == -Inf
         end
         @testset "delta or timestamp" begin
-            @test retrydelay(hdr("x-ratelimit-reset" => "90")) == 90        # small ⇒ delta
-            abstime = trunc(Int, time()) + 100                              # large ⇒ absolute
-            @test 95 <= retrydelay(hdr("x-ratelimit-reset" => string(abstime))) <= 101
+            spent(reset) = hdr("x-ratelimit-remaining" => "0", "x-ratelimit-reset" => reset)
+            @test retryafter(spent("90")) |> inabout(90)
+            @test retryafter(spent(string(trunc(Int, time()) + 100))) |> inabout(100)
         end
         @testset "Retry-After first" begin
-            @test retrydelay(hdr("retry-after" => "10", "x-ratelimit-remaining" => "0",
-                                 "x-ratelimit-reset" => "999")) == 10
+            @test retryafter(hdr("retry-after" => "10", "x-ratelimit-remaining" => "0",
+                                     "x-ratelimit-reset" => "999")) |> inabout(10)
         end
     end
+    @testset "relative or absolute times" begin
+        @test abs(unixtime(60) - (time() + 60)) < 1
+        @test unixtime(1.7e9) == 1.7e9
+        @test unixtime(Inf) == Inf
+        @test unixtime(-Inf) == -Inf
+    end
     @testset "waiting out a deadline" begin
-        gate = RestClient.RateGate()
-        @atomic gate.nextallowed = time() + 1      # as an interrupted backoff leaves it
+        config = RequestConfig("http://x")
+        @atomic config.throttle.arrival = time() + 1
         ticks = Ref(0)
-        ticker = @async while time() < gate.nextallowed
+        ticker = @async while time() < config.throttle.arrival
             ticks[] += 1
             sleep(0.05)
         end
-        waited = @elapsed RestClient.withretries(gate) do
+        waited = @elapsed RestClient.throttled(Request{:get}(config, PlainEP())) do
             RestClient.Incoming(sample_response(), IOBuffer())
         end
         wait(ticker)
         @test waited >= 0.9
         @test ticks[] > 5                          # the wait yields, rather than spinning
+    end
+    @testset "RateLimit" begin
+        @test RateLimit() == RateLimit(Inf; burst = 1, inflight = typemax(Int))
+        @test_throws ArgumentError RateLimit(0)
+        @test_throws ArgumentError RateLimit(1; burst = 0)
+        @test_throws ArgumentError RateLimit(; inflight = 0)
+        @test sprint(show, RateLimit()) == "RateLimit()"
+        @test sprint(show, RateLimit(0.5; burst = 3, inflight = 2)) == "RateLimit(0.5; burst = 3, inflight = 2)"
+        @test sprint(show, RequestConfig("http://x"; ratelimit = RateLimit(3))) ==
+            "RequestConfig(\"http://x\"; ratelimit = RateLimit(3.0), cache = true)"
     end
     @testset "payload resending" begin
         prepare(value) = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), PayloadEP(value)))

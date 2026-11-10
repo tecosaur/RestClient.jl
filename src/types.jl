@@ -178,26 +178,71 @@ end
 # Requests
 
 """
-    RateGate
+    RateLimit(rate::Real = Inf; burst::Integer = 1, inflight::Integer = typemax(Int))
 
-The rate-limit backoff shared by every request with the same config.
+How fast the requests sharing a [`RequestConfig`](@ref) may be sent: on average
+at most `rate` a second, up to `burst` of them at once, with no more than
+`inflight` awaiting a response at a time (a [`Stream`](@ref) until its response
+begins). A request that would exceed the limit waits until it may be sent.
 
-`nextallowed` is the deadline (a `time()` value, `0.0` when open) that requests
-wait out before sending. The first rate-limited request moves it, and any others
-limited at the same time wait for that same deadline rather than adding their own.
+Give a limit published over a window, such as "100 a minute", as its rate,
+`RateLimit(100/60)`. A `burst` of the window's whole count would let up to twice
+that through in some windows.
+
+See also: [`nextallowed`](@ref), for limits a response reports.
+
+# Examples
+
+```julia
+RequestConfig("https://export.arxiv.org/api"; ratelimit = RateLimit(1/3))
+RequestConfig("https://lichess.org/api"; ratelimit = RateLimit(inflight = 1))
+```
 """
-mutable struct RateGate
-    @atomic nextallowed::Float64
+struct RateLimit
+    rate::Float64
+    burst::Int
+    inflight::Int
+    function RateLimit(rate::Real = Inf; burst::Integer = 1, inflight::Integer = typemax(Int))
+        rate > 0 && burst >= 1 && inflight >= 1 ||
+            throw(ArgumentError("A RateLimit needs a positive rate (requests a second), and a burst \
+                                 and inflight of at least 1; got $rate, $burst and $inflight"))
+        new(rate, burst, inflight)
+    end
 end
 
-RateGate() = RateGate(0.0)
+function Base.show(io::IO, (; rate, burst, inflight)::RateLimit)
+    options = String[]
+    burst == 1 || push!(options, "burst = $burst")
+    inflight == typemax(Int) || push!(options, "inflight = $inflight")
+    print(io, "RateLimit(", if isfinite(rate) rate else "" end,
+          if isempty(options) "" else "; " * join(options, ", ") end, ')')
+end
+
+"""
+    Throttle
+
+The pacing state shared by every request with the same config, kept to its
+[`RateLimit`](@ref).
+
+`arrival` is the theoretical arrival time of the generic cell rate algorithm
+(GCRA): a request may be sent from `arrival - (burst - 1) / rate`, and moves it on
+by `1 / rate`. A response's deadline holds requests back by moving it too.
+`inflight` counts the requests awaiting a response, under the `slots` lock.
+"""
+mutable struct Throttle
+    @atomic arrival::Float64
+    inflight::Int
+    const slots::Threads.Condition
+end
+
+Throttle() = Throttle(0.0, 0, Threads.Condition())
 
 """
     RequestConfig
 
 The general configuration for a request to the API, not tied to any specific endpoint.
 
-At a minimum, this holds the base URL of the API, and the rate-limit state its
+At a minimum, this holds the base URL of the API, and the pacing state its
 requests share.
 
 Other fields are optional, but may be useful for changing the way requests are
@@ -208,6 +253,8 @@ provided as keyword arguments:
   How it is presented on the wire is declared by endpoints. It is shown as
   `*****` in the REPL and in errors and debug output, but `repr` and `string`
   give it in full.
+- `ratelimit::RateLimit`: How fast requests may be sent, see [`RateLimit`](@ref).
+  Defaults to no limit, though a response's rate-limit headers are always kept to.
 - `timeout::Float64`: The longest a request may take, in seconds, or for a
   [`Stream`](@ref), the longest it may go without receiving data. Defaults to
   `Inf`, no limit, so a stream waits as long as it takes. Even so, a request
@@ -234,17 +281,18 @@ RequestConfig("https://api.example.com"; key = "*****", cache = true)
 """
 struct RequestConfig
     baseurl::String
-    rategate::RateGate
+    throttle::Throttle
+    ratelimit::RateLimit
     key::Union{Nothing, String}
     timeout::Float64
     cache::Bool
 end
 
 function RequestConfig(baseurl::String; key::Union{Nothing, String} = nothing,
-                       timeout::Real = Inf, cache::Bool = true)
+                       ratelimit::RateLimit = RateLimit(), timeout::Real = Inf, cache::Bool = true)
     timeout > 0 || throw(ArgumentError("A RequestConfig's timeout must be positive (seconds), \
                                         got $timeout; leave it unset for no limit"))
-    RequestConfig(String(rstrip(baseurl, '/')), RateGate(), key, Float64(timeout), cache)
+    RequestConfig(String(rstrip(baseurl, '/')), Throttle(), ratelimit, key, Float64(timeout), cache)
 end
 
 function Base.show(io::IO, rc::RequestConfig)
@@ -258,6 +306,11 @@ function Base.show(io::IO, rc::RequestConfig)
     else
         print(io, "; key = ")
         show(io, rc.key)
+        print(io, ", ")
+    end
+    if rc.ratelimit != RateLimit()
+        print(io, "ratelimit = ")
+        show(io, rc.ratelimit)
         print(io, ", ")
     end
     if rc.timeout != Inf

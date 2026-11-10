@@ -542,3 +542,31 @@ end
 Base.IteratorSize(::Type{<:Pages}) = Base.SizeUnknown()
 Base.iterate(pages::Pages) = (pages.first, pages.first)
 Base.iterate(::Pages, page) = let next = nextpage(page); if !isnothing(next); (next, next) end end
+
+
+# Rate limits
+
+"""
+    nextallowed(endpoint::AbstractEndpoint, response::Downloads.Response) -> Union{Real, Nothing}
+
+Return when the API next allows a request after `response` to a request to
+`endpoint`, in seconds from now or as a Unix time (a `time()` value), or
+`nothing` to set no time. A time worth more than a year of seconds is taken as a
+Unix time.
+
+Each response from the network is given to this, and the requests sharing its
+config wait until the later of this and the time its rate-limit headers set
+(`Retry-After`, or `X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`), so a
+method can only lengthen the wait. An unsuccessful response with a time is
+retried then, and with `Inf` is raised without a retry. By default `nothing`.
+
+See also: [`RateLimit`](@ref), for limits known ahead of time.
+
+# Examples
+
+```julia
+# A full minute's pause after any 429
+RestClient.nextallowed(::LichessEndpoint, response) = if response.status == 429 60 end
+```
+"""
+nextallowed(@nospecialize(::AbstractEndpoint), _) = nothing

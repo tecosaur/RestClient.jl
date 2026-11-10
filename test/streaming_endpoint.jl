@@ -157,6 +157,15 @@ function run(base)
         hangup = timedwait(() -> isready(Main.SILENT_HANGUPS), 5)
         hangup === :ok && take!(Main.SILENT_HANGUPS)
     end
+    @testset "in flight until the response begins" begin
+        single = RequestConfig(base; ratelimit = RateLimit(inflight = 1))
+        s = silent(single)
+        @test first(s) == Tok(n=1)
+        @test collect(ssechat(single)) == [Tok(n=1), Tok(n=2), Tok(n=3)]
+        close(s)
+        hangup = timedwait(() -> isready(Main.SILENT_HANGUPS), 5)
+        hangup === :ok && take!(Main.SILENT_HANGUPS)
+    end
     @testset "debug logging" begin
         logger = Test.TestLogger(min_level = Base.CoreLogging.Debug)
         Base.CoreLogging.with_logger(() -> collect(ssechat(cfg)), logger)
