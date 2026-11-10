@@ -185,8 +185,8 @@ API that sends heartbeats, or one you'd rather not wait on indefinitely:
 chat(RequestConfig("https://api.example.com"; timeout = 300); messages = msgs)
 #+end_src
 
-Past it, the stream is abandoned with a =Downloads.RequestError= (curl's timeout
-code, 28). That is raised while iterating, or by the call itself when the server
+Past it, the stream is abandoned with a [[@ref][~TransportError~]] whose ~reason~ is
+=:silence=. That is raised while iterating, or by the call itself when the server
 is silent before its response begins, so handle it around both.
 
 The body is read off the network as it arrives, however quickly you iterate, so

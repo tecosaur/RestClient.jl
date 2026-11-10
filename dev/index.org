@@ -84,7 +84,8 @@ See [[file:streaming.md][the streaming manual]] for more information.
 + Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
 + [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
 + [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
-+ Retries of rate-limited requests (waiting as the response asks) and gateway failures
++ Pacing to an API's [[@ref][~RateLimit~]], and retries of rate-limited requests (waiting
+  as the response, or [[@ref][~nextallowed~]], asks) and gateway failures
 + API-wide defaults for authentication, data format, and endpoint supertype, through
   [[@ref][~@globalconfig~]]
 + Headers and query parameters for a whole API, declared once on its endpoint
