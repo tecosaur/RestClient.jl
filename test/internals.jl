@@ -214,6 +214,17 @@ end
         @test waited >= 0.9
         @test ticks[] > 5                          # the wait yields, rather than spinning
     end
+    @testset "derived config" begin
+        base = RequestConfig("https://api.example.com"; key = "k", ratelimit = RateLimit(3), timeout = 10)
+        derived = RequestConfig(base; key = "other", timeout = 300)
+        @test (derived.key, derived.timeout) == ("other", 300)
+        @test (derived.baseurl, derived.ratelimit, derived.cache) == (base.baseurl, base.ratelimit, base.cache)
+        @test derived.throttle === base.throttle
+        @test isnothing(RequestConfig(base; key = nothing).key)
+        @test RequestConfig(base; baseurl = "https://uploads.example.com/").baseurl == "https://uploads.example.com"
+        @test_throws ArgumentError RequestConfig(base; timeout = 0)
+        @test RequestConfig("https://api.example.com").throttle !== base.throttle
+    end
     @testset "RateLimit" begin
         @test RateLimit() == RateLimit(Inf; burst = 1, inflight = typemax(Int))
         @test_throws ArgumentError RateLimit(0)

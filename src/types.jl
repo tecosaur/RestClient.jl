@@ -238,7 +238,8 @@ end
 Throttle() = Throttle(0.0, 0, Threads.Condition())
 
 """
-    RequestConfig
+    RequestConfig(baseurl::String; key, ratelimit, timeout, cache)
+    RequestConfig(config::RequestConfig; baseurl, key, ratelimit, timeout, cache)
 
 The general configuration for a request to the API, not tied to any specific endpoint.
 
@@ -266,6 +267,10 @@ provided as keyword arguments:
   so they last between sessions; entries past their lifetime are cleared as
   Julia exits, and deleting that folder clears the whole cache.
 
+The second form derives a config from `config`, with any of its fields
+overridden, such as another key or host. It shares `config`'s pacing, so
+requests through either wait for each other.
+
 See also: [`@globalconfig`](@ref), [`Request`](@ref).
 
 # Examples
@@ -274,8 +279,11 @@ See also: [`@globalconfig`](@ref), [`Request`](@ref).
 julia> RequestConfig("https://api.example.com", timeout = 5, cache = false)
 RequestConfig("https://api.example.com"; timeout = 5.0, cache = false)
 
-julia> RequestConfig("https://api.example.com", key = ENV["API_SECRET_KEY"])
+julia> config = RequestConfig("https://api.example.com", key = ENV["API_SECRET_KEY"])
 RequestConfig("https://api.example.com"; key = "*****", cache = true)
+
+julia> RequestConfig(config, key = nothing, timeout = 300)
+RequestConfig("https://api.example.com"; timeout = 300.0, cache = true)
 ```
 """
 struct RequestConfig
@@ -285,14 +293,20 @@ struct RequestConfig
     key::Union{Nothing, String}
     timeout::Float64
     cache::Bool
+    function RequestConfig(baseurl::AbstractString, throttle::Throttle, ratelimit::RateLimit,
+                           key::Union{Nothing, String}, timeout::Real, cache::Bool)
+        timeout > 0 || throw(ArgumentError("A RequestConfig's timeout must be positive (seconds), \
+                                            got $timeout; leave it unset for no limit"))
+        new(String(rstrip(baseurl, '/')), throttle, ratelimit, key, Float64(timeout), cache)
+    end
 end
 
-function RequestConfig(baseurl::String; key::Union{Nothing, String} = nothing,
-                       ratelimit::RateLimit = RateLimit(), timeout::Real = Inf, cache::Bool = true)
-    timeout > 0 || throw(ArgumentError("A RequestConfig's timeout must be positive (seconds), \
-                                        got $timeout; leave it unset for no limit"))
-    RequestConfig(String(rstrip(baseurl, '/')), Throttle(), ratelimit, key, Float64(timeout), cache)
-end
+RequestConfig(baseurl::String; key = nothing, ratelimit = RateLimit(), timeout = Inf, cache = true) =
+    RequestConfig(baseurl, Throttle(), ratelimit, key, timeout, cache)
+
+RequestConfig(config::RequestConfig; baseurl = config.baseurl, key = config.key,
+              ratelimit = config.ratelimit, timeout = config.timeout, cache = config.cache) =
+    RequestConfig(baseurl, config.throttle, ratelimit, key, timeout, cache)
 
 function Base.show(io::IO, rc::RequestConfig)
     show(io, RequestConfig)
