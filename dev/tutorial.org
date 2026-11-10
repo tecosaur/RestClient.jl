@@ -22,16 +22,16 @@ pkg> generate DeckAPI
     DeckAPI/src/DeckAPI.jl
 #+end_example
 
-Then, we activate the project and add =JSON3= and =RestClient= as
+Then, we activate the project and add =JSON= and =RestClient= as
 dependencies.
 
 #+begin_example
 pkg> activate DeckAPI
 
-(DeckAPI) pkg> add RestClient JSON3
+(DeckAPI) pkg> add RestClient JSON
     Updating `/tmp/DeckAPI/Project.toml`
-  [e1389577] + RestClient v0.1.0
-  [0f8b85d8] + JSON3 v1.14.1
+  [682c06a0] + JSON v1.10.0
+  [e1389577] + RestClient v2.0.0
     Updating `/tmp/DeckAPI/Manifest.toml`
   [...] ...
 #+end_example
@@ -40,7 +40,7 @@ Then we can navigate to =DeckAPI/src/DeckAPI.jl=, get rid of the default
 ~greet() = print("Hello World!")~, and add
 
 #+begin_src julia
-using RestClient, JSON3
+using RestClient, JSON
 #+end_src
 
 Now we're ready to get started implementing the API! To start with, we'll want
@@ -156,7 +156,7 @@ RestClient.parameters(new::NewDeckEndpoint) = ["deck_count" => string(new.count)
 #+end_src
 
 After performing this request, we expect a JSON representation of a ~Deck~ to be
-returned. Since we used [[@ref][~@jsondef~]] to create the type, JSON3 will know how to
+returned. Since we used [[@ref][~@jsondef~]] to create the type, JSON.jl will know how to
 parse it and we need only declare that we expect a ~Deck~ response.
 
 #+begin_src julia
@@ -226,10 +226,8 @@ macro, so long as the appropriate [[@ref][~globalconfig~]] method is defined.
 @endpoint draw(deck::Deck, count::Int) -> "deck/{deck.id}/draw?{count}" -> CardsResponse
 #+end_src
 
-A ~DrawEndpoint~ struct will automatically be created, and since ~CardsResponse~ is
-[[@ref][~ListResponse~]], the ~DrawEndpoint~ struct will subtype [[@ref][~ListEndpoint~]]. Due to this
-subtyping, the ~CardsResponse~ will automatically be restructured into a
-~List{Card}~ by the generic list [[@ref][~postprocess~]] method.
+A ~DrawEndpoint~ struct will automatically be created, and since ~CardsResponse~ is a
+[[@ref][~ListResponse~]], it will automatically be restructured into a ~List{Card}~.
 
 ** Card return endpoint
 
@@ -268,20 +266,22 @@ putback(cardlist::List{Card}) = putback(cardlist.request.endpoint.deck, cardlist
 By starting Julia with the environment variable =JULIA_DEBUG=RestClient=
 set, we will see information on the requests sent and responses received. This
 helps us verify that everything is behaving as expected, and debug any
-failures or unexpected results.
+failures or unexpected results. The latest response is also saved in full, as
+=response.http= in a temporary folder made for the session, along with the
+latest request that sent a payload, as =request.http=.
 
 #+begin_src julia-repl
 julia> deck = DeckAPI.new() # Create a new 'deck' using the API
 ┌ Debug:  GET  https://deckofcardsapi.com/api/deck/new?deck_count=1
 └ @ RestClient
-┌ Debug:  200  80 bytes (saved to /tmp/api-get.dump) from https://deckofcardsapi.com/api/deck/new?deck_count=1
+┌ Debug:  200  80 bytes (saved to /tmp/restclient-debug-hJ3k9w/response.http) from https://deckofcardsapi.com/api/deck/new?deck_count=1
 └ @ RestClient
 DeckAPI.Deck(id="01n3ezer3rly", remaining=52)
 
 julia> cards = DeckAPI.draw(deck, 5)
 ┌ Debug:  GET  https://deckofcardsapi.com/api/deck/01n3ezer3rly/draw?count=5
 └ @ RestClient
-┌ Debug:  200  1.181 KiB (saved to /tmp/api-get.dump) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/draw?count=5
+┌ Debug:  200  1.181 KiB (saved to /tmp/restclient-debug-hJ3k9w/response.http) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/draw?count=5
 └ @ RestClient
 RestClient.List{DeckAPI.Card} holding 5 items:
   • Card(code="AS", value="ACE", suit="SPADES")
@@ -291,23 +291,23 @@ RestClient.List{DeckAPI.Card} holding 5 items:
   • Card(code="5S", value="5", suit="SPADES")
 
 julia> DeckAPI.putback(cards)
-┌ Debug:  GET  https://deckofcardsapi.com/api/deck/01n3ezer3rly/return?cards=AS%2C2S%2C3S%2C4S%2C5S
+┌ Debug:  GET  https://deckofcardsapi.com/api/deck/01n3ezer3rly/return?cards=AS,2S,3S,4S,5S
 └ @ RestClient
-┌ Debug:  200  61 bytes (saved to /tmp/api-get.dump) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/return?cards=AS%2C2S%2C3S%2C4S%2C5S
+┌ Debug:  200  61 bytes (saved to /tmp/restclient-debug-hJ3k9w/response.http) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/return?cards=AS,2S,3S,4S,5S
 └ @ RestClient
 DeckAPI.Deck(id="01n3ezer3rly", remaining=52)
 
 julia> DeckAPI.shuffle(deck)
 ┌ Debug:  GET  https://deckofcardsapi.com/api/deck/01n3ezer3rly/shuffle?remaining=false
 └ @ RestClient
-┌ Debug:  200  79 bytes (saved to /tmp/api-get.dump) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/shuffle?remaining=false
+┌ Debug:  200  79 bytes (saved to /tmp/restclient-debug-hJ3k9w/response.http) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/shuffle?remaining=false
 └ @ RestClient
 DeckAPI.Deck(id="01n3ezer3rly", remaining=52)
 
 julia> cards = DeckAPI.draw(deck, 5)
 ┌ Debug:  GET  https://deckofcardsapi.com/api/deck/01n3ezer3rly/draw?count=5
 └ @ RestClient
-┌ Debug:  200  1.183 KiB (saved to /tmp/api-get.dump) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/draw?count=5
+┌ Debug:  200  1.183 KiB (saved to /tmp/restclient-debug-hJ3k9w/response.http) from https://deckofcardsapi.com/api/deck/01n3ezer3rly/draw?count=5
 └ @ RestClient
 RestClient.List{DeckAPI.Card} holding 5 items:
   • Card(code="3C", value="3", suit="CLUBS")

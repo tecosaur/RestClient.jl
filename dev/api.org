@@ -21,15 +21,12 @@ CollapsedDocStrings = true
 Request
 RequestConfig
 AbstractEndpoint
-SingleEndpoint
-ListEndpoint
 #+end_src
 
 * Response types
 
 #+begin_src @docs
 SingleResponse
-Single
 ListResponse
 List
 #+end_src
@@ -38,23 +35,27 @@ List
 
 A failed [[@ref][~perform~]] raises one of these. A request that does not validate raises
 a [[@ref][~MalformedRequest~]] before anything is sent; an unsuccessful HTTP status raises
-a [[@ref][~ResponseError~]] carrying the server's response body; a request that goes silent
-raises an [[@ref][~IdleTimeout~]]. Any other transport failure (DNS, connection refused, TLS,
-exceeding the total ~timeout~) surfaces as the underlying =Downloads.RequestError=.
+a [[@ref][~ResponseError~]] carrying the server's response body; and a successful response
+that can't be read as the endpoint's result type (malformed JSON, a missing key) raises a
+[[@ref][~MalformedResponse~]] naming the request and holding the body. A transport failure (DNS,
+connection refused, TLS, exceeding the total ~timeout~, or going silent for too long)
+surfaces as a =Downloads.RequestError=, with any auth secrets hidden from its URL; both
+kinds of timeout carry curl's timeout code, 28.
 
 #+begin_src @docs
 ResponseError
 MalformedRequest
-IdleTimeout
+MalformedResponse
 #+end_src
 
 * Streaming
 
 #+begin_src @docs
 Stream
-StreamEndpoint
 SSEvent
 isstreamend
+isstreamskip
+isopen(::Stream)
 #+end_src
 
 ** Framing extension interface
@@ -66,8 +67,6 @@ cover the common cases; a client library implementing a new framing defines thes
 RestClient.StreamFormat
 RestClient.readframe
 RestClient.framestate
-RestClient.framedata
-RestClient.remake
 RestClient.elementpayload
 #+end_src
 
@@ -99,6 +98,8 @@ BasicAuth
 HeaderAuth
 QueryAuth
 NoAuth
+RestClient.authheaders
+RestClient.authparams
 #+end_src
 
 * Response interface
@@ -107,15 +108,16 @@ NoAuth
 RestClient.responsetype
 RestClient.postprocess
 RestClient.contents
-RestClient.metadata
 #+end_src
 
 * Pagination interface
 
 #+begin_src @docs
 RestClient.nextpage
+RestClient.eachpage
 RestClient.thispagenumber
 RestClient.remainingpages
+RestClient.pagecount
 #+end_src
 
 * Caching interface
@@ -126,13 +128,22 @@ RestClient.cachelifetime
 
 * Content formatting
 
+Each type a request sends or receives has a format: its own, from [[@ref][~@jsondef~]],
+[[@ref][~@xmldef~]], [[@ref][~@formdef~]] or a ~dataformat~ method, or else its API's, which
+is raw text or bytes unless [[@ref][~@globalconfig~]]'s =format= option says otherwise (e.g.
+=format = :json= for an API whose plain values, like a ~Vector{String}~, are JSON). A single
+endpoint can still differ: in a JSON API, a =text/plain= one declares
+~RestClient.dataformat(::ThatEndpoint, ::Type{String}) = RawFormat()~.
+
 #+begin_src @docs
 RestClient.AbstractFormat
 RestClient.RawFormat
+RestClient.UnspecifiedFormat
 RestClient.JSONFormat
 RestClient.XMLFormat
 RestClient.FormFormat
 RestClient.MultipartFormat
+RestClient.MultipartFile
 RestClient.dataformat
 RestClient.interpretresponse
 RestClient.writepayload

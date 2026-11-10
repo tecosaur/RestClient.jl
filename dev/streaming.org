@@ -6,11 +6,11 @@ emits lines for as long as you care to listen. Waiting for the whole body
 defeats the point: you want each piece as it lands, and you want to start acting
 on it before the next one arrives.
 
-=RestClient= models this with a third response disposition, [[@ref][~Stream~]], alongside
-[[@ref][~Single~]] and [[@ref][~List~]]. A streaming endpoint yields a lazy iterator of decoded
-elements; you iterate it, and each step blocks until the next element has been
-read off the wire and parsed. The disposition is a type, selected through the
-endpoint's output type, exactly as ~Single~ and ~List~ are.
+=RestClient= models this with another response disposition, [[@ref][~Stream~]], alongside
+[[@ref][~List~]]. A streaming endpoint yields a lazy iterator of decoded elements; you
+iterate it, and each step blocks until the next element has been read off the wire
+and parsed. The disposition is a type, selected through the endpoint's output type,
+exactly as ~List~ is.
 
 * How streaming fits together
 
@@ -18,10 +18,12 @@ A streamed body has two layers, and =RestClient= keeps them separate:
 
 + Framing :: how the byte stream is divided into messages. /Server-Sent Events/
   (=text/event-stream=) separate events with a blank line; /NDJSON/ (newline-delimited
-  JSON) puts one record per line. These are the two framings shipped out of the box.
+  JSON) puts one record per line. =RestClient= supports both.
 + Interpretation :: how each message's payload becomes a typed value. This is the
   same machinery that parses a buffered response. A [[@ref][~@jsondef~]] type is decoded
-  identically whether it arrives whole, in an SSE event, or as an NDJSON line.
+  identically whether it arrives whole, in an SSE event, or as an NDJSON line, and a
+  message that can't be decoded ends the stream with a [[@ref][~MalformedResponse~]]
+  holding its payload.
 
 The framing is a property of the /stream/; the element type is a property of the
 /payload/. They are independent, so the same element type can appear in a
@@ -34,12 +36,16 @@ Name ~Stream{T}~ as the output type and the endpoint streams. The element type i
 an ordinary [[@ref][~@jsondef~]] struct:
 
 #+begin_src julia
-@jsondef struct Delta
-    type::String
-    text."delta.text"::Union{String, Nothing} = nothing
+@jsondef struct DeltaText
+    text::Union{String, Nothing} = nothing
 end
 
-# SSE is the default framing, so the common case costs one word:
+@jsondef struct Delta
+    type::String
+    delta::Union{DeltaText, Nothing} = nothing
+end
+
+# SSE is the default framing
 @endpoint chat(; messages) -> "messages" -> Stream{Delta}
 #+end_src
 
@@ -49,11 +55,33 @@ For a newline-delimited endpoint, name the framing as the second type parameter:
 @endpoint generate(; prompt) -> "api/generate" -> Stream{Token, :NDJSON}
 #+end_src
 
-The =@endpoint= macro recognises ~Stream~ as an output type and gives the generated
-endpoint the [[@ref][~StreamEndpoint~]] supertype, just as a [[@ref][~ListResponse~]] output produces a
-[[@ref][~ListEndpoint~]]. The =Accept= header is set from the framing automatically
+A ~Stream~ result type is all it takes: whatever the endpoint's supertype, its
+requests are read incrementally, just as a [[@ref][~ListResponse~]] result is wrapped
+in a [[@ref][~List~]]. The =Accept= header is set from the framing automatically
 (=text/event-stream= for SSE, =application/x-ndjson= for NDJSON), so you need not
 set it yourself.
+
+When one stream carries several kinds of event, make the element type abstract,
+with a ~@jsondef~ subtype for each kind, chosen per event by JSON.jl's
+~@choosetype~. An abstract type has no format of its own, so declare it JSON:
+
+#+begin_src julia
+abstract type Event end
+
+@jsondef struct Message <: Event
+    type::String
+    text::String
+end
+
+@jsondef struct Ping <: Event
+    type::String
+end
+
+JSON.@choosetype Event event -> event.type[] == "message" ? Message : Ping
+RestClient.dataformat(::Type{Event}) = RestClient.JSONFormat()
+
+@endpoint events() -> "events" -> Stream{Event}
+#+end_src
 
 * Consuming a stream
 
@@ -66,43 +94,53 @@ for delta in chat(messages = msgs)
 end
 #+end_src
 
-Everything that works on an iterator works here. ~collect~ gathers the stream into
-a vector once it completes; ~reduce~ folds it as it arrives:
+It works anywhere an iterator does: ~collect~ gathers the stream into a vector
+once it completes, and ~reduce~ folds it as it arrives:
 
 #+begin_src julia
 collect(chat(messages = msgs))            # Vector{Delta}, once the stream ends
 reduce(merge_delta, chat(messages = msgs)) # you supply merge_delta
 #+end_src
 
-How partial results combine into a final answer is left to you, because it is
-API-specific: each API shapes its incremental deltas differently, and
-=RestClient= would have to pick one to bake in. It represents the typed stream and
-lets you fold it as the API demands.
+Combining the elements into a final answer is up to you, since every API shapes
+its deltas differently.
 
 * Knowing when to stop
 
-By default a stream ends when the connection closes, which is correct for any
-stream and all that the SSE specification itself promises. Many APIs instead mark the
-end /in band/, with a sentinel value or a terminal event, and expect the client to
-stop there. You declare that rule by defining [[@ref][~isstreamend~]] for your endpoint:
+By default a stream ends when the connection closes, which is all the SSE
+specification promises. Many APIs also mark the end /in band/, with a sentinel
+value or a terminal event, and expect the client to stop there. You declare that rule by defining [[@ref][~isstreamend~]] for your endpoint:
 
 #+begin_src julia
 # An API that feels special might decide to shove event type information into the data
-isstreamend(::ChatEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
+RestClient.isstreamend(::ChatEndpoint, fr::SSEvent) = fr.data == codeunits("[DONE]")
 
 # Another API might have paid more attention to WHATWG and used a dedicated event type
-isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
+RestClient.isstreamend(::MessagesEndpoint, fr::SSEvent) = fr.event == "message_stop"
 #+end_src
 
-The predicate runs on each frame /before/ it is decoded or emitted, so a
-terminator never reaches your loop. It inspects the undecoded frame through the
-frame's own accessors: ~fr.data~ is the raw payload bytes, ~fr.event~ and ~fr.id~ the
-SSE metadata.
+Each frame is checked twice: before it is decoded, with ~fr.data~ still the raw
+payload bytes, and after, as the stream's element. A method sees whichever its
+type matches, so the two above see both and stop at the raw frame, before it is
+decoded. One that reads a decoded field types its payload:
+
+#+begin_src julia
+RestClient.isstreamend(changes::ChangesEndpoint, fr::SSEvent{<:Change}) = fr.data.time >= changes.until
+#+end_src
+
+Either way, the frame that ends a stream never reaches your loop. Frames to
+leave out, such as keep-alives or an API's monitoring events, are declared the
+same way with [[@ref][~isstreamskip~]], and one skipped as a raw frame is never
+decoded:
+
+#+begin_src julia
+RestClient.isstreamskip(::FeedEndpoint, fr::SSEvent) = fr.event == "heartbeat"
+#+end_src
 
 #+begin_warning
 The endpoint type a method dispatches on must match the one =@endpoint= generated.
-The function form ~chat(...)~ creates a struct named ~ChatEndpoint~ (that is,
-~titlecase(funcname) * "Endpoint"~), so the ~isstreamend~ method must be written on
+The function form ~chat(...)~ creates a struct named ~ChatEndpoint~ (the function
+name, capitalised, with =Endpoint= appended), so the ~isstreamend~ method must be written on
 ~ChatEndpoint~, as above. If you want a name you control, use the explicit struct
 form ~@endpoint struct MessagesEndpoint ... end~ and dispatch on that.
 #+end_warning
@@ -136,6 +174,25 @@ that wants to resume reads ~ev.id~ and supplies it on a fresh request. ~SSEvent~
 SSE-specific: NDJSON elements have no event metadata and stay the bare decoded
 value.
 
+* Silence and slow consumers
+
+A stream runs for as long as the server keeps it going, and by default waits as
+long as it takes for each frame (TCP keepalive still notices a server that has
+gone). For a stream, ~timeout~ sets the longest silence allowed, which suits an
+API that sends heartbeats, or one you'd rather not wait on indefinitely:
+
+#+begin_src julia
+chat(RequestConfig("https://api.example.com"; timeout = 300); messages = msgs)
+#+end_src
+
+Past it, the stream is abandoned with a =Downloads.RequestError= (curl's timeout
+code, 28). That is raised while iterating, or by the call itself when the server
+is silent before its response begins, so handle it around both.
+
+The body is read off the network as it arrives, however quickly you iterate, so
+a consumer that falls well behind holds the backlog in memory. Iterate promptly,
+and ~close~ a stream you no longer need.
+
 * Cancellation
 
 A ~Stream~ holds an open connection and a couple of background tasks, so it must be
@@ -151,17 +208,16 @@ for delta in stream
 end
 #+end_src
 
-Closing a stream ends a blocked iteration /cleanly/, the way ~break~ would, not by
-raising. You write no ~try~/~catch~ for the cancellation case. A genuine mid-stream
-failure is different: a server that drops the connection partway, or a payload
-that fails to parse, surfaces as a thrown exception when you next iterate, so a
-truncated stream is never silently mistaken for a complete one. A stream you
-simply stop iterating and drop is reclaimed by its finaliser, though closing it
-explicitly is better.
+Closing a stream ends a blocked iteration the way ~break~ would, without raising,
+so cancelling needs no ~try~/~catch~. A failure is another matter: a server that
+drops the connection partway, or a payload that fails to parse, raises an
+exception when you next iterate, so a truncated stream is never mistaken for a
+complete one. A stream you stop iterating and drop is eventually reclaimed by its
+finaliser, but closing it frees the connection straight away.
 
 #+begin_info
-Streaming bypasses the response cache (a stream has no settled body to store),
-and the rate limiter acts only on the initial response status. Once frames
-are flowing there is nothing to retry, so a rate-limit response is handled before
-the first element is ever exposed, exactly as for a buffered request.
+Streams are never cached, as there is no complete body to store. Retries still
+apply, but only to the response status: a 429 is retried before the first
+element reaches you, as for a buffered request, and once elements flow there is
+nothing to retry.
 #+end_info
