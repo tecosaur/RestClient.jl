@@ -329,7 +329,8 @@ Post-process the data returned by the request, by default returning it as-is.
 `data` is the response body already read as the endpoint's
 [`responsetype`](@ref): reading happens first, and a body that can't be read
 raises a [`MalformedResponse`](@ref) without reaching `postprocess`. An error
-status raises a [`ResponseError`](@ref) before either.
+status raises a [`ResponseError`](@ref) before either. To raise an error an API
+reports inside a successful response, throw it here.
 
 The result is then restructured: a [`ListResponse`](@ref) is wrapped in a
 [`List`](@ref), and a [`SingleResponse`](@ref) gives its [`contents`](@ref). So

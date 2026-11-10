@@ -568,6 +568,17 @@ holds the status and headers, and `body` holds the raw response body, which APIs
 routinely use to explain *why* a request failed.
 
 See also: [`perform`](@ref), [`Request`](@ref).
+
+# Examples
+
+```julia
+try
+    search(query = "...")
+catch err
+    err isa ResponseError{<:Request{<:Any, <:MyAPIEndpoint}} || rethrow()
+    throw(RestClient.interpretresponse(err.body, JSONFormat(), MyAPIError))
+end
+```
 """
 struct ResponseError{R <: Request} <: Exception
     request::R
