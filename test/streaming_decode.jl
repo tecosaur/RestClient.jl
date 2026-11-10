@@ -9,7 +9,7 @@ using RestClient: @jsondef, AbstractEndpoint, SSEvent, Stream, StreamFormat, Req
 import RestClient
 using JSON
 using Test
-using Downloads: RequestError, Response
+using RestClient: Response, Headers, TransportError
 
 @jsondef struct Tok
     n::Int
@@ -29,7 +29,7 @@ RestClient.isstreamskip(::SkipEP, fr::SSEvent{Tok}) = fr.data.n == 2
 
 # A completed transfer Task standing in for `Downloads.request`'s outcome.
 okxfer() = (t = Threads.@spawn nothing; wait(t); t)
-errxfer() = (t = Threads.@spawn RequestError("u", 18, "truncated", Response("http", "u", 18, "", [])); wait(t); t)
+errxfer() = (t = Threads.@spawn TransportError(streamreq(PlainEP()), "http://x/s", :dropped, "truncated"); wait(t); t)
 
 # Feed `payload` into a BufferStream, optionally leaving it open (no close) so the
 # framer blocks — used by the cancellation tests.
@@ -42,7 +42,7 @@ end
 
 # The request and response a stream of `ep`'s, with body `bs`, would come from
 streamreq(ep) = Request{:get}(RequestConfig("http://x"), ep)
-incoming(bs, transfer) = Incoming(Response("http", "http://x/s", 200, "HTTP/1.1 200 OK", []), bs, transfer, Base.Event())
+incoming(bs, transfer) = Incoming(Response("http://x/s", 200, "HTTP/1.1 200 OK", Headers([])), bs, transfer, Base.Event())
 
 function run_decode(ep, framing::Symbol, ::Type{Elt}, payload; transfer = okxfer(),
                     cancelled = Threads.Atomic{Bool}(false), close_after = true) where {Elt}
@@ -110,7 +110,7 @@ end
     # Errored transfer → consumer's loop throws after the buffered items
     trunc = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\n"; transfer = errxfer())
     got = Tok[]
-    @test_throws RequestError for t in trunc.items; push!(got, t); end
+    @test_throws TransportError for t in trunc.items; push!(got, t); end
     @test got == [Tok(n=1)]
 end
 
@@ -128,7 +128,7 @@ end
 @testset "cancellation" begin
     @testset "while reading" begin
         # Items buffered, stream left open so the framer parks in readframe; then cancel
-        # with the transfer reporting a RequestError (as a real cancel collapse would).
+        # with the transfer reporting a TransportError (as a real cancel collapse would).
         cancelled = Threads.Atomic{Bool}(false)
         r = run_decode(PlainEP(), :NDJSON, Tok, "{\"n\":1}\n{\"n\":2}\n";
                        transfer = errxfer(), cancelled = cancelled, close_after = false)
@@ -141,7 +141,7 @@ end
     end
     @testset "while parked in put!" begin
         # buffer=1 with no consumer: the framer decodes one item, parks in put! on the
-        # full channel, then we cancel with the transfer reporting a RequestError.
+        # full channel, then we cancel with the transfer reporting a TransportError.
         cancelled = Threads.Atomic{Bool}(false)
         bs = Base.BufferStream()
         write(bs, collect(codeunits("{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n")))

@@ -232,7 +232,7 @@ function mimeheaders(req::Request, fmt::AbstractFormat, in::Type)
 end
 
 # When to retry `req` after `response`, its `attempt`th (see `perform`), or `nothing` not to
-function retrydeadline(req::Request, response::Downloads.Response, isidempotent::Bool, attempt::Int)
+function retrydeadline(req::Request, response::Response, isidempotent::Bool, attempt::Int)
     (; status) = response
     status >= 400 || return
     (; asked, given) = deadlines(req, response)
@@ -245,7 +245,7 @@ end
 
 # The deadlines `response` sets for requests sharing `req`'s config: the one
 # `nextallowed` asks for, and the one its headers give (each `-Inf` for none)
-deadlines(req::Request, response::Downloads.Response) =
+deadlines(req::Request, response::Response) =
     (asked = unixtime(something(nextallowed(req.endpoint, response), -Inf)),
      given = retryafter(response.headers))
 
@@ -293,7 +293,7 @@ function hold!(req::Request, deadline::Float64)
 end
 
 """
-    retryafter(headers::Vector{Pair{String, String}}) -> Float64
+    retryafter(headers::Headers) -> Float64
 
 Return the time (as a `time()` value) that `headers` ask requests to wait until,
 or `-Inf` if they set none.
@@ -303,31 +303,23 @@ Checks (in order):
 - `X-RateLimit-Remaining`: unless zero, the limit is not exhausted (`-Inf`)
 - `X-RateLimit-Reset`: seconds from now, a Unix time, or an HTTP date
 """
-function retryafter(headers::Vector{Pair{String, String}})
+function retryafter(headers::Headers)
     function timeof(value::String)
         seconds = if all(isdigit, value) tryparse(Int, value) end
         isnothing(seconds) || return unixtime(seconds)
         date = tryparse(DateTime, value, HTTP_DATE_FORMAT)
         if isnothing(date); -Inf else datetime2unix(date) end
     end
-    after = timeof(getheader(headers, "retry-after"))
+    after = timeof(get(headers, "retry-after", ""))
     after > -Inf && return after
-    something(tryparse(Float64, getheader(headers, "x-ratelimit-remaining")), Inf) > 0 && return -Inf
-    timeof(getheader(headers, "x-ratelimit-reset"))
+    something(tryparse(Float64, get(headers, "x-ratelimit-remaining", "")), Inf) > 0 && return -Inf
+    timeof(get(headers, "x-ratelimit-reset", ""))
 end
 
 # A time given in seconds from now or, past a year's worth, as a Unix time, as a Unix time
 unixtime(t::Real) = if t < 365 * 24 * 60 * 60 time() + t else Float64(t) end
 
-# The first header called `name` (received headers are lowercased by Downloads)
-function getheader(headers, name::String, default::String = "")
-    for (key, val) in headers
-        key == name && return val
-    end
-    default
-end
 
-
 # Utility functions
 
 # Where `req`'s auth scheme puts its key: the names of the header and query parameter
@@ -348,22 +340,27 @@ function redactsecrets(url::AbstractString, secrets::NamedTuple)
     replace(url, Regex("([?&]\\Q$name\\E=)[^&#]*") => s"\1*****")
 end
 
-redactsecrets(res::Downloads.Response, secrets::NamedTuple) =
-    Downloads.Response(res.proto, redactsecrets(res.url, secrets), res.status, res.message, res.headers)
+redactsecrets(res::Response, secrets::NamedTuple) =
+    Response(redactsecrets(res.url, secrets), res.status, res.message, res.headers)
 
-# A transport failure's error as callers see it: `req`'s auth secrets removed from its
-# URLs, and an abort by `watchdog` reported as curl reports its own timeouts
-function transfererror(req::Request, err::Downloads.RequestError, watchdog::Watchdog)
-    secrets = authsecrets(req)
-    code, reason = if watchdog.fired
-        Downloads.Curl.CURLE_OPERATION_TIMEDOUT,
-        "No data received for $(watchdog.limit) seconds; if the API is slow to respond, \
-         raise the `timeout` of its RequestConfig"
+# The curl error codes of each `TransportError` reason
+const CURL_REASONS = let C = Downloads.Curl
+    (resolve = (C.CURLE_COULDNT_RESOLVE_HOST, C.CURLE_COULDNT_RESOLVE_PROXY),
+     connect = (C.CURLE_COULDNT_CONNECT,),
+     tls = (C.CURLE_SSL_CONNECT_ERROR, C.CURLE_SSL_CERTPROBLEM, C.CURLE_PEER_FAILED_VERIFICATION),
+     timeout = (C.CURLE_OPERATION_TIMEDOUT,),
+     dropped = (C.CURLE_PARTIAL_FILE, C.CURLE_GOT_NOTHING, C.CURLE_SEND_ERROR, C.CURLE_RECV_ERROR),
+     redirects = (C.CURLE_TOO_MANY_REDIRECTS,))
+end
+
+# A transport failure as a `TransportError`, with `req`'s secrets removed from its URL
+function transporterror(req::Request, err::Downloads.RequestError, watchdog::Watchdog)
+    reason, message = if watchdog.fired
+        :silence, "No data received for $(watchdog.limit) seconds"
     else
-        err.code, err.message
+        something(findfirst(codes -> err.code ∈ codes, CURL_REASONS), :other), err.message
     end
-    Downloads.RequestError(redactsecrets(err.url, secrets), code, reason,
-                           redactsecrets(err.response, secrets))
+    TransportError(req, redactsecrets(err.url, authsecrets(req)), reason, message)
 end
 
 const DEBUG_DIR = Ref("")
@@ -410,7 +407,7 @@ const MUNDANE_HEADERS = (
     # CDN headers
     "report-to", "reporting-endpoints", "nel", "via", "cf-cache-status", "cf-ray")
 
-function debug_response(url::String, res::Downloads.Response, buf::Union{IOBuffer, Nothing} = nothing;
+function debug_response(url::String, res::Response, buf::Union{IOBuffer, Nothing} = nothing;
                         secrets::NamedTuple = NO_SECRETS)
     url = redactsecrets(url, secrets)
     face = ifelse(res.status ∈ 200:299, :success, :warning)
@@ -421,7 +418,7 @@ function debug_response(url::String, res::Downloads.Response, buf::Union{IOBuffe
         nb = open(io -> dumpresponse(io, redactsecrets(res, secrets), buf), dumpfile, "w")
         S"$(Base.format_bytes(nb)) (saved to {bright_magenta:$dumpfile}) from"
     end
-    headers = filter(h -> lowercase(first(h)) ∉ MUNDANE_HEADERS, res.headers)
+    headers = [h for h in res.headers if first(h) ∉ MUNDANE_HEADERS]
     nhiddenheaders = length(res.headers) - length(headers)
     strheaders = join((S"\n       {emphasis:$k:} $v" for (k, v) in headers), "")
     strhiddenheaders = if iszero(nhiddenheaders)
@@ -521,10 +518,11 @@ http_request(req::Request, out::Outgoing, headers::Vector{Pair{String, String}} 
         options = TransferOptions(Watchdog(idlelimit(timeout)), nothing)
         res = curlrequest(out.url, options; out.method, output = buf, input, headers, timeout,
                           throw = false)
-        res isa Downloads.RequestError && throw(transfererror(req, res, options.watchdog))
+        res isa Downloads.RequestError && throw(transporterror(req, res, options.watchdog))
         seekstart(buf)
-        @debug debug_response(out.url, res, buf; secrets = authsecrets(req)) _file=nothing
-        Incoming(res, buf)
+        response = Response(res)
+        @debug debug_response(out.url, response, buf; secrets = authsecrets(req)) _file=nothing
+        Incoming(response, buf)
     end
 
 
@@ -598,7 +596,7 @@ function deliver(req::Request, incoming::Incoming)
 end
 
 # `interpretresponse`, with an exception raised as a `MalformedResponse` naming the request
-function interpret(req::Request, response::Downloads.Response, bytes::AbstractVector{UInt8},
+function interpret(req::Request, response::Response, bytes::AbstractVector{UInt8},
                    fmt::AbstractFormat, ::Type{T}) where {T}
     try
         interpretresponse(bytes, fmt, T)

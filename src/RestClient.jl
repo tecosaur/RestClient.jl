@@ -12,11 +12,11 @@ export RequestConfig, RateLimit, Request, perform, AbstractEndpoint, SingleRespo
 export List, nextpage, eachpage, Stream, SSEvent
 export RawFormat, JSONFormat, XMLFormat, FormFormat, MultipartFormat, MultipartFile
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth
-export MalformedRequest, ResponseError, MalformedResponse
+export MalformedRequest, TransportError, ResponseError, MalformedResponse
 public urlpath, headers, parameters, payload, validate, responsetype, postprocess,
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, isstreamskip, thispagenumber, remainingpages,
-    nextallowed, globalconfig
+    nextallowed, Response, Headers, globalconfig
 public StreamFormat, UnspecifiedFormat, readframe, framestate, elementpayload,
     authheaders, authparams, contents, pagecount, cachelifetime
 

@@ -6,7 +6,6 @@ module StreamEndpointTest
 using RestClient
 using JSON
 using Test
-using Downloads
 
 @jsondef struct Tok
     n::Int
@@ -122,8 +121,7 @@ function run(base)
             err = e
         end
         @test got == [Tok(n=1)]
-        @test err isa Downloads.RequestError
-        @test err.code == Downloads.Curl.CURLE_OPERATION_TIMEDOUT   # as for curl's own timeouts
+        @test err isa TransportError && err.reason === :silence
         @test occursin("No data received for 1.0 seconds", sprint(showerror, err))
         @test t < 3                                          # promptly, not after the stall
         # ...but a stream that keeps sending outlives it.
@@ -141,7 +139,7 @@ function run(base)
     @testset "transport error" begin
         # Nothing listens on port 1, so the request fails before any response
         err = try keyedchat(RequestConfig("http://127.0.0.1:1"; key = "topsecret")) catch e; e end
-        @test err isa RestClient.Downloads.RequestError
+        @test err isa TransportError && err.reason === :connect
         @test !occursin("topsecret", sprint(showerror, err))
     end
     @testset "failed postprocess closes" begin

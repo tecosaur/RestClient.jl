@@ -30,6 +30,8 @@ AbstractEndpoint
 SingleResponse
 ListResponse
 List
+RestClient.Response
+RestClient.Headers
 #+end_src
 
 * Errors
@@ -38,15 +40,15 @@ A failed [[@ref][~perform~]] raises one of these. A request that does not valida
 a [[@ref][~MalformedRequest~]] before anything is sent; an unsuccessful HTTP status raises
 a [[@ref][~ResponseError~]] carrying the server's response body; and a successful response
 that can't be read as the endpoint's result type (malformed JSON, a missing key) raises a
-[[@ref][~MalformedResponse~]] naming the request and holding the body. A transport failure (DNS,
-connection refused, TLS, exceeding the total ~timeout~, or going silent for too long)
-surfaces as a =Downloads.RequestError=, with any auth secrets hidden from its URL; both
-kinds of timeout carry curl's timeout code, 28.
+[[@ref][~MalformedResponse~]] naming the request and holding the body. A failure in transit
+(DNS, connection refused, TLS, exceeding the total ~timeout~, or going silent for too long)
+raises a [[@ref][~TransportError~]] saying which, with any auth secrets hidden from its URL.
 
 #+begin_src @docs
 ResponseError
 MalformedRequest
 MalformedResponse
+TransportError
 #+end_src
 
 * Streaming

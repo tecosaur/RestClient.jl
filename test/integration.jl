@@ -126,7 +126,7 @@ module IntegrationClient
     RestClient.authscheme(::LinkedqEndpoint) = QueryAuth("api_key")
     RestClient.authpolicy(::LinkedqEndpoint) = :optional
     RestClient.pagecount(response, ::LinkedqEndpoint, ::Paged) =
-        parse(Int, only(value for (name, value) in response.headers if name == "x-total-pages"))
+        parse(Int, response.headers["X-Total-Pages"])
     @endpoint struct LinkedOwnEndpoint
         linked_own(; page::Int = 1) -> "linked?{page}" -> Paged
         page::Int = 1
@@ -484,7 +484,7 @@ end
         @testset "transport errors" begin
             # Nothing listens on port 1, so the request fails before any response
             err = try IC.queryauth(cfg("http://127.0.0.1:1"; key = "topsecret")) catch e; e end
-            @test err isa RestClient.Downloads.RequestError
+            @test err isa TransportError && err.reason === :connect
             @test !occursin("topsecret", sprint(showerror, err))
         end
     end

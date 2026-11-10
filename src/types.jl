@@ -259,8 +259,7 @@ provided as keyword arguments:
   [`Stream`](@ref), the longest it may go without receiving data. Defaults to
   `Inf`, no limit, so a stream waits as long as it takes. Even so, a request
   that sends and receives nothing for 20 seconds (or `timeout`, if longer) is
-  abandoned. Either limit raises a `Downloads.RequestError` with curl's timeout
-  code (28).
+  abandoned. Either limit raises a [`TransportError`](@ref).
 - `cache::Bool`: Whether to cache the response, using lifetime information from
   standard HTTP response headers. Defaults to `true`. Responses are kept on
   disk in the user's cache directory (on Linux, `~/.cache/julia/restclient/`),
@@ -387,6 +386,64 @@ struct Outgoing{P <: Union{Nothing, Vector{UInt8}, IO}}
 end
 
 """
+    Headers
+
+The headers of a [`Response`](@ref), looked up by name in any case.
+
+`headers[name]` gives the first value of `name`, raising a `KeyError` if there
+is none, and `get(headers, name, default)` gives `default` instead. Iterating
+gives every `name => value` pair in order, with names in lower case, so a header
+sent more than once, such as `Link`, appears each time.
+
+# Examples
+
+```julia
+response.headers["Content-Type"]
+get(response.headers, "X-RateLimit-Remaining", nothing)
+```
+"""
+struct Headers
+    pairs::Vector{Pair{String, String}}
+    Headers(pairs) = new([lowercase(name) => String(value) for (name, value) in pairs])
+end
+
+Base.iterate(headers::Headers, state...) = iterate(headers.pairs, state...)
+Base.length(headers::Headers) = length(headers.pairs)
+Base.eltype(::Type{Headers}) = Pair{String, String}
+
+function Base.get(headers::Headers, name::AbstractString, default)
+    key = lowercase(name)
+    for (k, v) in headers.pairs
+        k == key && return v
+    end
+    default
+end
+
+Base.getindex(headers::Headers, name::AbstractString) =
+    @something(get(headers, name, nothing), throw(KeyError(name)))
+
+"""
+    Response
+
+A response from an API: as given to hooks such as [`postprocess`](@ref) and
+[`nextallowed`](@ref), and kept by a [`List`](@ref), [`Stream`](@ref) or
+[`ResponseError`](@ref).
+
+- `url::String`: where the response came from, after any redirects.
+- `status::Int`: its status code.
+- `message::String`: its status line, such as `"HTTP/1.1 200 OK"`.
+- `headers::Headers`: its [`Headers`](@ref).
+"""
+struct Response
+    url::String
+    status::Int
+    message::String
+    headers::Headers
+end
+
+Response(res::Downloads.Response) = Response(res.url, res.status, res.message, Headers(res.headers))
+
+"""
     Incoming{B <: IO, T <: Union{Task, Nothing}}
 
 A response head with its body, which for a stream is still arriving over
@@ -394,13 +451,13 @@ A response head with its body, which for a stream is still arriving over
 notifying its `interrupt`.
 """
 struct Incoming{B <: IO, T <: Union{Task, Nothing}}
-    response::Downloads.Response
+    response::Response
     body::B
     transfer::T
     interrupt::Union{Base.Event, Nothing}
 end
 
-Incoming(response::Downloads.Response, body::IO) = Incoming(response, body, nothing, nothing)
+Incoming(response::Response, body::IO) = Incoming(response, body, nothing, nothing)
 
 function Base.close(incoming::Incoming)
     close(incoming.body)
@@ -436,6 +493,57 @@ function Base.showerror(io::IO, @nospecialize(ex::MalformedRequest{<:Request{kin
 end
 
 """
+    TransportError <: Exception
+
+An exception type for requests that fail without a complete response.
+
+`request` is the request that failed, `url` where it was sent (with secrets
+hidden), `message` the transport's own account of the failure, and `reason` what
+kind of failure it was:
+
+- `:resolve`: the host could not be found;
+- `:connect`: the host could not be connected to;
+- `:tls`: the secure connection failed, such as over an invalid certificate;
+- `:timeout`: the request took longer than its config's `timeout`;
+- `:silence`: the request went too long without receiving data;
+- `:dropped`: the connection closed before the response was complete;
+- `:redirects`: the server redirected too many times;
+- `:other`: anything else.
+
+See also: [`perform`](@ref), [`RequestConfig`](@ref).
+"""
+struct TransportError{R <: Request} <: Exception
+    request::R
+    url::String
+    reason::Symbol
+    message::String
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::TransportError{<:Request{kind}})) where {kind}
+    (; request, url, reason, message) = ex
+    host = split(url, '/'; limit = 4)[3]
+    explanation = if reason === :resolve
+        "could not find the host $host. Check the base URL, and your network connection."
+    elseif reason === :connect
+        "could not connect to $host. Check the server is running, and the port is right."
+    elseif reason === :tls
+        "the secure connection to $host failed. Its certificate may be invalid or expired."
+    elseif reason === :timeout
+        "it took longer than its timeout of $(request.config.timeout) seconds. \
+         Raise the `timeout` of its RequestConfig if the API needs longer."
+    elseif reason === :silence
+        "it went too long without receiving data. \
+         If the API is slow to respond, raise the `timeout` of its RequestConfig."
+    elseif reason === :dropped
+        "the connection closed before the response was complete."
+    elseif reason === :redirects
+        "it was redirected too many times. The API may be redirecting in a loop."
+    end
+    print(io, "The :", kind, " request to ", nameof(typeof(request.endpoint)), " at ", url, " failed: ")
+    if isnothing(explanation) print(io, message) else print(io, explanation, "\n  (", message, ')') end
+end
+
+"""
     ResponseError <: Exception
 
 An exception type for requests that complete but return an unsuccessful HTTP
@@ -449,7 +557,7 @@ See also: [`perform`](@ref), [`Request`](@ref).
 """
 struct ResponseError{R <: Request} <: Exception
     request::R
-    response::Downloads.Response
+    response::Response
     body::Vector{UInt8}
 end
 
@@ -475,7 +583,7 @@ See also: [`perform`](@ref), [`interpretresponse`](@ref).
 """
 struct MalformedResponse{R <: Request} <: Exception
     request::R
-    response::Downloads.Response
+    response::Response
     type::Type
     body::Vector{UInt8}
     error::Exception
@@ -516,11 +624,11 @@ struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}, D}
     request::R
     items::Vector{T}
     data::D
-    response::Downloads.Response
+    response::Response
     page::Int
 end
 
-List{T}(request::Request{<:Any, E}, items, data, response::Downloads.Response,
+List{T}(request::Request{<:Any, E}, items, data, response::Response,
         page = something(thispagenumber(request.endpoint), 1)) where {T, E} =
     List{T, E, typeof(request), typeof(data)}(request, items, data, response, page)
 

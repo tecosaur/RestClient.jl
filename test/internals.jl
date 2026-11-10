@@ -6,19 +6,18 @@
 # covered by integration.jl; prefer adding coverage there.
 
 using Dates
-using Downloads: Response
+using RestClient: Response, Headers
 using Tables
 using RestClient: retryafter, unixtime, expirytime, dumpresponse, tryreadresponse, cachesave,
     opencacheentry, readcachestamp, CACHE_STALE_DURATION, HTTP_DATE_FORMAT
 
-hdr(pairs...) = Pair{String, String}[pairs...]
+hdr(pairs...) = Headers(pairs)
 http_date(t) = Dates.format(t, HTTP_DATE_FORMAT)
 
 sample_response(; status = 200,
                 headers = ["content-type" => "application/json",
                            "cache-control" => "max-age=600"]) =
-    Response("https", "https://api.example.com/thing", status,
-             "HTTP/1.1 $status OK", Pair{String, String}[headers...])
+    Response("https://api.example.com/thing", status, "HTTP/1.1 $status OK", Headers(headers))
 
 # Fixtures
 
@@ -225,6 +224,36 @@ end
         @test sprint(show, RequestConfig("http://x"; ratelimit = RateLimit(3))) ==
             "RequestConfig(\"http://x\"; ratelimit = RateLimit(3.0), cache = true)"
     end
+    @testset "headers" begin
+        headers = hdr("Content-Type" => "text/plain", "Link" => "<a>", "link" => "<b>")
+        @test headers["content-type"] == headers["CONTENT-TYPE"] == "text/plain"
+        @test get(headers, "Link", nothing) == "<a>"
+        @test isnothing(get(headers, "ETag", nothing))
+        @test_throws KeyError headers["ETag"]
+        @test collect(headers) == ["content-type" => "text/plain", "link" => "<a>", "link" => "<b>"]
+    end
+    @testset "transport errors" begin
+        req = Request{:get}(RequestConfig("https://api.example.com"; timeout = 30), PlainEP())
+        shown(reason, message = "curl says") =
+            sprint(showerror, RestClient.TransportError(req, "https://api.example.com/thing", reason, message))
+        @test occursin("could not find the host api.example.com", shown(:resolve))
+        @test occursin("could not connect to api.example.com", shown(:connect))
+        @test occursin("certificate", shown(:tls))
+        @test occursin("longer than its timeout of 30.0 seconds", shown(:timeout))
+        @test occursin("raise the `timeout`", shown(:silence))
+        @test occursin("closed before the response was complete", shown(:dropped))
+        @test occursin("redirecting in a loop", shown(:redirects))
+        @test all(r -> endswith(shown(r), "(curl says)"), (:resolve, :connect, :tls, :timeout, :silence, :dropped, :redirects))
+        @test endswith(shown(:other, "odd"), "failed: odd")
+        D = RestClient.Downloads
+        failure(code) = D.RequestError("https://api.example.com/thing", code, "curl says",
+                                       D.Response("https", "https://api.example.com/thing", 0, "", []))
+        reason(code) = RestClient.transporterror(req, failure(code), RestClient.Watchdog(20)).reason
+        @test reason(D.Curl.CURLE_COULDNT_CONNECT) === :connect
+        @test reason(D.Curl.CURLE_PEER_FAILED_VERIFICATION) === :tls
+        @test reason(D.Curl.CURLE_RECV_ERROR) === :dropped
+        @test reason(D.Curl.CURLE_ABORTED_BY_CALLBACK) === :other
+    end
     @testset "payload resending" begin
         prepare(value) = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), PayloadEP(value)))
         send(out) = read(RestClient.payloadio(out), String)
@@ -243,7 +272,7 @@ end
 
 @testset "caching" begin
     @testset "key covers the whole payload" begin
-        key(payload) = RestClient.cachekey("https://api.example.com/q", "QUERY", hdr(), payload)
+        key(payload) = RestClient.cachekey("https://api.example.com/q", "QUERY", Pair{String, String}[], payload)
         payload = rand(UInt8, 32768)
         edited = map(1:7:length(payload)) do i
             changed = copy(payload)
@@ -286,9 +315,8 @@ end
         seekstart(io)
         got = tryreadresponse(io)
         @test got.url == res.url
-        @test got.proto == res.proto                             # the scheme, not the HTTP version
         @test got.status == res.status
-        @test got.headers == res.headers
+        @test collect(got.headers) == collect(res.headers)
         @test read(io, String) == "{\"ok\":true}"     # IO left at body start
         @testset "malformed" begin
             @test isnothing(tryreadresponse(IOBuffer("")))
@@ -336,8 +364,7 @@ end
         end
         @testset "auth keys not stored" begin
             kreq = Request{:get}(RequestConfig("https://api.example.com"; key = "s3cret"), KeyedCacheEP())
-            res = Response("https", RestClient.url(kreq), 200, "HTTP/1.1 200 OK",
-                           Pair{String, String}["cache-control" => "max-age=600"])
+            res = Response(RestClient.url(kreq), 200, "HTTP/1.1 200 OK", hdr("cache-control" => "max-age=600"))
             cachesave(kreq, cfile, RestClient.url(kreq), res, IOBuffer(b"x"))
             @test !occursin("s3cret", read(cfile, String))
             @test occursin("api_key=*****", read(cfile, String))
@@ -908,14 +935,14 @@ end
                                        RestClient.authsecrets(shortreq)) ==
             "http://api.example.com/p?name=eve&api_key=*****&x=1"
         # ...and from a ResponseError's display
-        res = Response("http", RestClient.url(qreq), 500, "HTTP/1.1 500", Pair{String, String}[])
+        res = Response(RestClient.url(qreq), 500, "HTTP/1.1 500", hdr())
         shownerror = sprint(showerror, RestClient.ResponseError(qreq, res, UInt8[]))
         @test !occursin("s3cr", shownerror)
         @test occursin("api_key=*****", shownerror)
     end
     @testset "long error bodies" begin
         req = Request{:get}(RequestConfig("http://x"), PlainEP())
-        res = Response("http", "http://x/p", 500, "HTTP/1.1 500", Pair{String, String}[])
+        res = Response("http://x/p", 500, "HTTP/1.1 500", hdr())
         body = Vector{UInt8}("x"^511 * "é" * "y"^10_000)          # the cut splits `é`
         shown = sprint(showerror, RestClient.ResponseError(req, res, body))
         @test endswith(shown, "x"^511 * "� …")
@@ -925,7 +952,7 @@ end
     @testset "status lines" begin
         req = Request{:get}(RequestConfig("http://x"), PlainEP())
         shown(message, body = "") = sprint(showerror, RestClient.ResponseError(
-            req, Response("http", "http://x/p", 404, message, Pair{String, String}[]), Vector{UInt8}(body)))
+            req, Response("http://x/p", 404, message, hdr()), Vector{UInt8}(body)))
         @test startswith(shown("HTTP/2 404"), "HTTP 404 from http://x/p")              # no reason phrase
         @test startswith(shown("HTTP/1.1 404 Not Found"), "HTTP 404 Not Found from")
         @test endswith(shown("HTTP/2 404", "{\n  \"a\": 1\n}"), "\n  {\n    \"a\": 1\n  }")  # every line indented
@@ -1123,7 +1150,7 @@ end
 @testset "responses" begin
     @testset "malformed" begin
         req = Request{:get}(RequestConfig("https://api.example.com"), FieldSyntax.DefaultedEndpoint())
-        res = Response("https", "https://api.example.com/defaulted", 200, "HTTP/1.1 200 OK", [])
+        res = Response("https://api.example.com/defaulted", 200, "HTTP/1.1 200 OK", hdr())
         err = try RestClient.deliver(req, RestClient.Incoming(res, IOBuffer("{\"see\":2}"))) catch e; e end
         @test err isa MalformedResponse && err.error isa ArgumentError
         @test err.type === FieldSyntax.Defaulted && err.body == codeunits("{\"see\":2}")

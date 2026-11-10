@@ -26,7 +26,7 @@ const CACHE_BODY_HEADERS = ("content-length", "content-encoding", "content-range
 # Request caching and reading
 
 """
-    dumpresponse(io::IO, res::Downloads.Response, body::IO) -> Int
+    dumpresponse(io::IO, res::Response, body::IO) -> Int
 
 Dump a response to an IO stream, including the response (`res`) URL, headers,
 and message `body`.
@@ -35,7 +35,7 @@ Returns the number of bytes written to the IO stream.
 
 The `body` is restored to its original position after writing.
 """
-function dumpresponse(io::IO, res::Downloads.Response, body::IO)
+function dumpresponse(io::IO, res::Response, body::IO)
     println(io, res.url)
     println(io, res.message)
     for (k, v) in res.headers
@@ -49,9 +49,9 @@ function dumpresponse(io::IO, res::Downloads.Response, body::IO)
 end
 
 """
-    tryreadresponse(io::IO) -> Downloads.Response
+    tryreadresponse(io::IO) -> Response
 
-Read a `Downloads.Response` from an IO stream including the url, status, and headers.
+Read a [`Response`](@ref) from an IO stream including the url, status, and headers.
 
 The message body is not read, and the IO stream is left positioned at the
 beginning of the message body.
@@ -61,7 +61,6 @@ function tryreadresponse(io::IO)
     message = readline(io)
     components = split(message, ' ', limit=3)
     length(components) >= 2 || return
-    proto = lowercase(first(split(url, "://"; limit = 2))) # Downloads' `proto` is the scheme
     status = tryparse(Int, components[2])
     !isnothing(status) || return
     headers = Pair{String, String}[]
@@ -75,7 +74,7 @@ function tryreadresponse(io::IO)
         value = readline(io)
         push!(headers, name => value)
     end
-    Downloads.Response(proto, url, status, message, headers)
+    Response(url, status, message, Headers(headers))
 end
 
 
@@ -97,7 +96,7 @@ function cachekey(url::String, method::String, headers::Vector{Pair{String, Stri
 end
 
 """
-    cachelifetime(req::Request, res::Downloads.Response) -> Union{DateTime, Integer, Nothing}
+    cachelifetime(req::Request, res::Response) -> Union{DateTime, Integer, Nothing}
 
 Determine how long a response may be served from the cache: until a (UTC)
 `DateTime`, for a number of seconds, or `nothing` to follow the response's
@@ -108,22 +107,22 @@ HTTP caching headers.
 To specialise this function for a specific endpoint, define one of the following methods:
 
 ```
-cachelifetime(req::Request{kind, <:AbstractEndpoint}, res::Downloads.Response)
-cachelifetime([conf::RequestConfig], endpoint::AbstractEndpoint, res::Downloads.Response)
+cachelifetime(req::Request{kind, <:AbstractEndpoint}, res::Response)
+cachelifetime([conf::RequestConfig], endpoint::AbstractEndpoint, res::Response)
 ```
 """
 function cachelifetime end
 
-cachelifetime(req::Request, res::Downloads.Response) =
+cachelifetime(req::Request, res::Response) =
     cachelifetime(req.config, req.endpoint, res)
 
-cachelifetime(@nospecialize(::RequestConfig), endpoint::AbstractEndpoint, res::Downloads.Response) =
+cachelifetime(@nospecialize(::RequestConfig), endpoint::AbstractEndpoint, res::Response) =
     cachelifetime(endpoint, res)
 
-cachelifetime(@nospecialize(::AbstractEndpoint), res::Downloads.Response) =
+cachelifetime(@nospecialize(::AbstractEndpoint), res::Response) =
     cachelifetime(res)
 
-cachelifetime(@nospecialize(_::Downloads.Response)) = nothing
+cachelifetime(@nospecialize(_::Response)) = nothing
 
 """
     expirytime(headers::Vector{Pair{String, String}}, now::Int = trunc(Int, time())) -> Union{Int, Nothing}
@@ -135,8 +134,8 @@ Follows RFC 9111 for a private cache: `no-store` and `Vary: *` forbid storage;
 `no-cache` or a lack of freshness information makes the response stale at once;
 otherwise it is fresh for `max-age` less `Age`, or until `Expires` (relative to `Date`).
 """
-function expirytime(headers::Vector{Pair{String, String}}, now::Int = trunc(Int, time()))
-    strip(getheader(headers, "vary")) == "*" && return nothing
+function expirytime(headers::Headers, now::Int = trunc(Int, time()))
+    strip(get(headers, "vary", "")) == "*" && return nothing
     directives = [strip(d) for (k, v) in headers if k == "cache-control"
                       for d in eachsplit(lowercase(v), ',')]
     "no-store" ∈ directives && return nothing
@@ -146,16 +145,16 @@ function expirytime(headers::Vector{Pair{String, String}}, now::Int = trunc(Int,
         name == "max-age" || continue
         maxage = tryparse(Int, strip(value))
         isnothing(maxage) && continue
-        return now + maxage - something(tryparse(Int, getheader(headers, "age")), 0)
+        return now + maxage - something(tryparse(Int, get(headers, "age", "")), 0)
     end
-    expires = tryparse(DateTime, getheader(headers, "expires"), HTTP_DATE_FORMAT)
+    expires = tryparse(DateTime, get(headers, "expires", ""), HTTP_DATE_FORMAT)
     isnothing(expires) && return now # An absent or invalid Expires means stale (§5.3)
-    date = something(tryparse(DateTime, getheader(headers, "date"), HTTP_DATE_FORMAT),
+    date = something(tryparse(DateTime, get(headers, "date", ""), HTTP_DATE_FORMAT),
                      unix2datetime(now))
     now + fld(Dates.value(expires - date), 1000)
 end
 
-hasvalidator(headers::Vector{Pair{String, String}}) =
+hasvalidator(headers::Headers) =
     any(((k, _),) -> k == "etag" || k == "last-modified", headers)
 
 
@@ -192,14 +191,14 @@ function opencacheentry(cfile::String, url::String)
 end
 
 """
-    cachesave(req::Request, cfile::String, url::String, res::Downloads.Response, body::IO)
+    cachesave(req::Request, cfile::String, url::String, res::Response, body::IO)
 
 Store `res` and its `body` as the cache entry `cfile` for `req`, sent to `url`, or
 remove the entry if the response may not be stored (see [`cachelifetime`](@ref) and
 [`expirytime`](@ref)).
 Caching is best-effort: a filesystem failure only warns.
 """
-function cachesave(req::Request, cfile::String, url::String, res::Downloads.Response, body::IO)
+function cachesave(req::Request, cfile::String, url::String, res::Response, body::IO)
     now = trunc(Int, time())
     lifetime = cachelifetime(req, res)
     expiry = if isnothing(lifetime)
@@ -227,7 +226,7 @@ function cachesave(req::Request, cfile::String, url::String, res::Downloads.Resp
 end
 
 # Written to a temporary file and moved into place, so readers never see a partial entry
-function cachewrite(cfile::String, url::String, res::Downloads.Response, body::IO,
+function cachewrite(cfile::String, url::String, res::Response, body::IO,
                     expiry::Integer, retain::Integer)
     mkpath(dirname(cfile))
     tmpfile, io = mktemp(dirname(cfile))
@@ -277,7 +276,7 @@ function http_cached(cfile::String, req::Request, out::Outgoing)
         return http_request(req, out), false
     end
     @debug S"{inverse,magenta,bold: CACHE } revalidating stale entry" _file=nothing
-    etag, lastmod = getheader(res.headers, "etag"), getheader(res.headers, "last-modified")
+    etag, lastmod = get(res.headers, "etag", ""), get(res.headers, "last-modified", "")
     conditions = Pair{String, String}[]
     isempty(etag) || push!(conditions, "if-none-match" => etag)
     isempty(lastmod) || push!(conditions, "if-modified-since" => lastmod)
@@ -288,11 +287,11 @@ function http_cached(cfile::String, req::Request, out::Outgoing)
     end
     # Not Modified: refresh the stored headers (§4.3.4)
     @debug S"{inverse,magenta,bold: CACHE } stale entry is still valid" _file=nothing
-    updates = filter(((k, _),) -> k ∉ CACHE_BODY_HEADERS, revalidation.response.headers)
-    kept = filter(((k, _),) -> !any(u -> first(u) == k, updates), res.headers)
+    updates = [h for h in revalidation.response.headers if first(h) ∉ CACHE_BODY_HEADERS]
+    kept = [h for h in res.headers if !any(u -> first(u) == first(h), updates)]
     body = IOBuffer(read(io))
     close(io)
-    Incoming(Downloads.Response(res.proto, res.url, res.status, res.message, vcat(kept, updates)), body), false
+    Incoming(Response(res.url, res.status, res.message, Headers(vcat(kept, updates))), body), false
 end
 
 

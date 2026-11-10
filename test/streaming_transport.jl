@@ -8,7 +8,7 @@ using RestClient: @jsondef, open_stream, decode_stream, StreamFormat, dataformat
 import RestClient
 using JSON
 using Test
-using Downloads: RequestError
+using RestClient: TransportError
 
 @jsondef struct Tok
     n::Int
@@ -81,8 +81,8 @@ end
 end
 
 @testset "transport failure" begin
-    # nothing is listening on this port → RequestError, not a bogus Response
-    @test_throws RequestError open_get("http://127.0.0.1:1/x"; timeout = 2.0)
+    # nothing is listening on this port → TransportError, not a bogus Response
+    @test_throws TransportError open_get("http://127.0.0.1:1/x"; timeout = 2.0)
 end
 
 @testset "incremental delivery" begin
@@ -122,7 +122,7 @@ end
         # /abort writes 2 frames then drops the connection mid-stream
         r = stream_route("$base/abort", :NDJSON, Tok)
         got = Tok[]
-        @test_throws RequestError for tok in r.items; push!(got, tok); end
+        @test_throws TransportError for tok in r.items; push!(got, tok); end
         @test got == [Tok(n=1), Tok(n=2)]
     end
 end

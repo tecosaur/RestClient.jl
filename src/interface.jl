@@ -348,10 +348,10 @@ end
 
 postprocess(_, req::Request, data) = postprocess(req, data)
 
-restructure(::Downloads.Response, ::Request, data) = data
-restructure(::Downloads.Response, ::Request, single::SingleResponse) = contents(single)
+restructure(::Response, ::Request, data) = data
+restructure(::Response, ::Request, single::SingleResponse) = contents(single)
 
-restructure(response::Downloads.Response, req::Request, list::ListResponse{T}) where {T} =
+restructure(response::Response, req::Request, list::ListResponse{T}) where {T} =
     List{T}(req, contents(list), list, response)
 
 
@@ -547,7 +547,7 @@ Base.iterate(::Pages, page) = let next = nextpage(page); if !isnothing(next); (n
 # Rate limits
 
 """
-    nextallowed(endpoint::AbstractEndpoint, response::Downloads.Response) -> Union{Real, Nothing}
+    nextallowed(endpoint::AbstractEndpoint, response::Response) -> Union{Real, Nothing}
 
 Return when the API next allows a request after `response` to a request to
 `endpoint`, in seconds from now or as a Unix time (a `time()` value), or

@@ -102,7 +102,7 @@ See also: [`isstreamend`](@ref).
 """
 mutable struct Stream{T, F}
     const items::Channel{T}
-    const response::Downloads.Response
+    const response::Response
     const body::Base.BufferStream
     const cancelled::Threads.Atomic{Bool}
     function Stream{T, F}(items, response, body, cancelled) where {T, F}
@@ -264,14 +264,14 @@ function open_stream(req::Request, out::Outgoing)
     transfer = Threads.@spawn try
         result = curlrequest(out.url, options; out.method, out.headers, input,
                              output = gate, interrupt, throw = false)
-        if result isa Downloads.RequestError transfererror(req, result, options.watchdog) else result end
+        if result isa Downloads.RequestError transporterror(req, result, options.watchdog) else Response(result) end
     finally
         close(bs)
         put!(gate.signal, :done)
     end
     # Without a body (empty, or a transport failure), the transfer's result is final
     if take!(gate.signal) === :done
-        final = fetch(transfer)::Union{Downloads.Response, Exception}
+        final = fetch(transfer)::Union{Response, Exception}
         final isa Exception && throw(final)
         @debug debug_response(out.url, final; secrets) _file=nothing
         return Incoming(final, bs, transfer, interrupt)
@@ -280,7 +280,7 @@ function open_stream(req::Request, out::Outgoing)
     # head is read (relying on Downloads internals: its Multi's lock and `get_response_info`)
     res = try
         easy = take!(handle)
-        @lock DOWNLOADER[].multi.lock Downloads.Response(Downloads.Curl.get_response_info(easy)...)
+        Response(@lock DOWNLOADER[].multi.lock Downloads.Response(Downloads.Curl.get_response_info(easy)...))
     finally
         notify(gate.released)
     end
