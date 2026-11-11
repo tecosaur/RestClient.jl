@@ -101,6 +101,7 @@ either the extracted value or `nothing` if the path could not be found.
 
 Supported components:
 - `name` to extract a child node with the given tag name
+- `.` to extract the node itself
 - `*` to extract all children
 - `name/text()` to extract a child node's own text, without that of elements within it
 - `name/@attr` to extract the value of an attribute
@@ -117,6 +118,7 @@ macro xpath(spec::String)
             throw(ArgumentError("Unreachable component in XPath: $component"))
         elseif isempty(component)
             throw(ArgumentError("Ungrounded selectors are not supported"))
+        elseif component == "."
         elseif component == "text()"
             body = :(extract_text($body))
             terminated = true
@@ -192,13 +194,9 @@ macro xmldef(struc::Expr)
     # Create the parse rule
     fieldparsers = Any[]
     for (i, (; key, default)) in enumerate(fields)
-        node = if !isnothing(key)
-            ex = Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")),
-                      __source__, key)
-            :($(esc(ex))(node))
-        else
-            :node
-        end
+        ex = Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")),
+                  __source__, something(key, String(fields[i].name)))
+        node = :($(esc(ex))(node))
         parsefield(from) = :(parsexml(fieldtype(S, $i), $from))
         push!(fieldparsers, if isnothing(default) parsefield(node) else
             :(let found = $node

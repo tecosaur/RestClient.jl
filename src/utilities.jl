@@ -278,9 +278,12 @@ This macro conveniently combines the following pieces:
 - `RestClient.dataformat` to declare that this struct is XML-formatted.
 
 Note the `name."xpath"` syntax demonstrated in the examples, that allows for
-declaration of the (simple) XPath that should be used to extract the field. The
-subset of supported XPath components are:
+declaration of the (simple) XPath that should be used to extract the field. A
+field without one reads the child element named after it, so `title::String`
+reads `<title>`. The subset of supported XPath components are:
 - `nodetag` to extract all immediate children with a given tag name
+- `.` to extract the node itself, such as its whole text, or a type read from
+  the same element
 - `relative/node/paths`
 - `*` to extract all children
 - `text()` to extract a node's own text, without that of elements within it

@@ -65,6 +65,15 @@ module XMLClient
         value."@v"::T
         label."@l"::String
     end
+    @xmldef struct Bare
+        title::String
+        count::Union{Int, Nothing} = nothing
+    end
+    @xmldef struct Whole
+        id."@id"::String
+        text."."::String
+        book."."::Book
+    end
 end
 
 const XC = XMLClient
@@ -188,6 +197,18 @@ end
     @test xmlparse(XC.ChildValues, doc).count == 3
     @test_throws ArgumentError xmlparse(XC.ChildValues, "<b><count>3</count></b>")
     @test_throws ArgumentError xmlparse(XC.ChildValues, "<b><title>a</title><title>b</title><count>3</count></b>")
+end
+
+@testset "fields named after their element" begin
+    bare = xmlparse(XC.Bare, "<r><title>Dune</title><other>x</other></r>")
+    @test (bare.title, bare.count) == ("Dune", nothing)
+    @test_throws ArgumentError xmlparse(XC.Bare, "<r><other>x</other></r>")
+end
+
+@testset "the current element" begin
+    whole = xmlparse(XC.Whole, """<book id="b1" year="1965" ratio="0.5"><title>Dune</title></book>""")
+    @test (whole.id, whole.text) == ("b1", "Dune")
+    @test whole.book == XC.Book(title = "Dune", year = 1965, ratio = 0.5)
 end
 
 @testset "several where one expected" begin
