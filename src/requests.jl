@@ -36,9 +36,10 @@ does. A gateway failure (502, 503 or 504) is retried after the backoff, for
 methods safe to repeat (not POST or PATCH). A request is attempted at most five
 times.
 
-A wait longer than the request's `timeout` isn't waited: a retry is raised
-instead, and a request is sent anyway. With the default `timeout = Inf`, a wait
-can be long (until an hourly quota resets, say), so set a `timeout` to bound it.
+No wait is longer than the config's `timeout`. A retry that would need a longer
+one isn't made, and the response is raised instead; a request held back for
+longer is sent without waiting. With the default `timeout = Inf`, a wait can be
+long (until an hourly quota resets, say), so set a `timeout` to bound it.
 
 # Errors
 
@@ -319,7 +320,7 @@ function retryafter(headers::Headers)
     timeof(get(headers, "x-ratelimit-reset", ""))
 end
 
-# A time given in seconds from now or, past a year's worth, as a Unix time, as a Unix time
+# `t` seconds from now as a Unix time, or `t` itself if it's over a year's worth
 unixtime(t::Real) = if t < 365 * 24 * 60 * 60 time() + t else Float64(t) end
 
 
