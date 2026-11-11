@@ -7,7 +7,14 @@ using RestClient
 using JSON
 
 module JSONClient
-    using RestClient, JSON
+    using RestClient, JSON, Dates
+    @jsondef struct Mixed
+        pair::@NamedTuple{a::String, b::Vector{Int}}
+        counts::Dict{String, Vector{Int}} = Dict{String, Vector{Int}}()
+        id::Union{Int, String}
+        score::Float64
+        when::Union{Date, Nothing} = nothing
+    end
     @jsondef struct Item
         name::String
         id::Int
@@ -43,6 +50,12 @@ module JSONClient
         byname::ItemMap
         listed::ItemList
     end
+    @jsondef struct Shelf
+        label::String
+        top::Item
+        items::Vector{Item}
+        spare::Union{Tagged, Nothing} = nothing
+    end
     @jsondef struct NothingDefaults
         maybe::Union{Int, Nothing}          # defaults to nothing
         flags::Dict{String, Nothing}        # doesn't: Nothing is only a parameter
@@ -73,6 +86,32 @@ end
         t = jsonparse(JC.Tagged, """{"item_kind":"pen"}""")
         @test t.kind == "pen"
         @test t.note === nothing
+    end
+    @testset "nested structs" begin
+        json = """{"label":"a","top":{"name":"x","id":1},"items":[{"name":"y","id":2}],"spare":{"item_kind":"k"}}"""
+        shelf = jsonparse(JC.Shelf, json)
+        @test shelf.top == JC.Item(name = "x", id = 1)
+        @test shelf.items == [JC.Item(name = "y", id = 2)]
+        @test shelf.spare == JC.Tagged(kind = "k")
+        @test jsonparse(JC.Shelf, """{"label":"b","top":{"name":"x","id":1},"items":[]}""").spare === nothing
+        @test jsonwrite(jsonparse(JC.Shelf, jsonwrite(shelf))) == jsonwrite(shelf)
+        @test (@inferred JSON.parse(codeunits(json), JC.Shelf)) isa JC.Shelf
+    end
+    @testset "field values" begin
+        m = jsonparse(JC.Mixed, """{"pair":{"a":"x","b":[1,2]},"counts":{"k":[3]},"id":"s1","score":2,"when":"2024-02-29"}""")
+        @test m.pair == (a = "x", b = [1, 2])
+        @test m.counts == Dict("k" => [3])
+        @test m.id == "s1"
+        @test m.score === 2.0
+        @test m.when == JC.Date(2024, 2, 29)
+        m2 = jsonparse(JC.Mixed, """{"pair":{"b":[],"a":"y"},"id":5,"score":1.5,"when":null}""")
+        @test m2.id === 5 && m2.when === nothing && isempty(m2.counts)
+    end
+    @testset "unknown and missing keys" begin
+        @test jsonparse(JC.Item, """{"name":"w","extra":{"deep":[1]},"id":3}""") == JC.Item(name = "w", id = 3)
+        @test_throws ArgumentError JSON.parse(codeunits("""{"name":"w","id":3,"extra":1}"""), JC.Item; unknown_fields = :error)
+        @test_throws "required key \"id\"" jsonparse(JC.Item, """{"name":"w"}""")
+        @test_throws ArgumentError jsonparse(JC.Mixed, """{"pair":{"b":[]},"id":1,"score":1}""")
     end
 end
 

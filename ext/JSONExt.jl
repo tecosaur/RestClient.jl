@@ -45,6 +45,10 @@ function RestClient._jsondef_expand(source::LineNumberNode, option::Symbol, kind
     end
     option === :noshow || push!(body, kwshow(name, fields))
     push!(body, :(RestClient.dataformat(::Type{<:$T}) = RestClient.JSONFormat()))
+    # Compiled as defined, so nested structs come before those holding them: compiling an
+    # outer struct first makes inference re-infer the inner ones from every level, slowly
+    kind === :Struct &&
+        push!(body, :(isconcretetype($T) && precompile($(GlobalRef(JSON, :parse)), (Vector{UInt8}, Type{$T}))))
     Expr(:block, body...)
 end
 
