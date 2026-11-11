@@ -180,10 +180,11 @@ end
 """
     RateLimit(rate::Real = Inf; burst::Integer = 1, inflight::Integer = typemax(Int))
 
-How fast the requests sharing a [`RequestConfig`](@ref) may be sent: on average
-at most `rate` a second, up to `burst` of them at once, with no more than
-`inflight` awaiting a response at a time (a [`Stream`](@ref) until its response
-begins). A request that would exceed the limit waits until it may be sent.
+How fast requests through a [`RequestConfig`](@ref), and any other for the
+same host and key, may be sent: on average at most `rate` a second, up to
+`burst` of them at once, with no more than `inflight` awaiting a response at a
+time (a [`Stream`](@ref) until its response begins). A request that would
+exceed the limit waits until it may be sent.
 
 Give a limit published over a window, such as "100 a minute", as its rate,
 `RateLimit(100/60)`. A `burst` of the window's whole count would let up to twice
@@ -221,8 +222,8 @@ end
 """
     Throttle
 
-The pacing state shared by every request with the same config, kept to its
-[`RateLimit`](@ref).
+The pacing state shared by every request to the same host with the same key,
+kept to each config's [`RateLimit`](@ref).
 
 `arrival` is the theoretical arrival time of the generic cell rate algorithm
 (GCRA): a request may be sent from `arrival - (burst - 1) / rate`, and moves it on
@@ -237,14 +238,17 @@ end
 
 Throttle() = Throttle(0.0, 0, Threads.Condition())
 
+const THROTTLES = Base.Lockable(Dict{Tuple{String, UInt}, Throttle}())
+
 """
     RequestConfig(baseurl::String; key, ratelimit, timeout, cache)
     RequestConfig(config::RequestConfig; baseurl, key, ratelimit, timeout, cache)
 
 The general configuration for a request to the API, not tied to any specific endpoint.
 
-At a minimum, this holds the base URL of the API, and the pacing state its
-requests share.
+At a minimum, this holds the base URL of the API. Requests through every
+config with the same host and key are paced together, as the server counts
+them together.
 
 Other fields are optional, but may be useful for changing the way requests are
 performed or handling authentication. The following additional fields can be
@@ -268,8 +272,7 @@ provided as keyword arguments:
   Julia exits, and deleting that folder clears the whole cache.
 
 The second form derives a config from `config`, with any of its fields
-overridden, such as another key or host. It shares `config`'s pacing, so
-requests through either wait for each other.
+overridden, such as another key or host.
 
 See also: [`@globalconfig`](@ref), [`Request`](@ref).
 
@@ -288,25 +291,30 @@ RequestConfig("https://api.example.com"; timeout = 300.0, cache = true)
 """
 struct RequestConfig
     baseurl::String
-    throttle::Throttle
     ratelimit::RateLimit
     key::Union{Nothing, String}
     timeout::Float64
     cache::Bool
-    function RequestConfig(baseurl::AbstractString, throttle::Throttle, ratelimit::RateLimit,
+    function RequestConfig(baseurl::AbstractString, ratelimit::RateLimit,
                            key::Union{Nothing, String}, timeout::Real, cache::Bool)
         timeout > 0 || throw(ArgumentError("A RequestConfig's timeout must be positive (seconds), \
                                             got $timeout; leave it unset for no limit"))
-        new(String(rstrip(baseurl, '/')), throttle, ratelimit, key, Float64(timeout), cache)
+        new(String(rstrip(baseurl, '/')), ratelimit, key, Float64(timeout), cache)
     end
 end
 
 RequestConfig(baseurl::String; key = nothing, ratelimit = RateLimit(), timeout = Inf, cache = true) =
-    RequestConfig(baseurl, Throttle(), ratelimit, key, timeout, cache)
+    RequestConfig(baseurl, ratelimit, key, timeout, cache)
 
 RequestConfig(config::RequestConfig; baseurl = config.baseurl, key = config.key,
               ratelimit = config.ratelimit, timeout = config.timeout, cache = config.cache) =
-    RequestConfig(baseurl, config.throttle, ratelimit, key, timeout, cache)
+    RequestConfig(baseurl, ratelimit, key, timeout, cache)
+
+# Keyed by the key's hash, so the table doesn't keep secrets alive
+function throttler(config::RequestConfig)
+    host = lowercase(match(r"^(?:\w[\w+.-]*://)?([^/?#]*)", config.baseurl)[1])
+    @lock THROTTLES get!(Throttle, THROTTLES[], (host, hash(config.key)))
+end
 
 function Base.show(io::IO, rc::RequestConfig)
     show(io, RequestConfig)

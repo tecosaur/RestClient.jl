@@ -555,9 +555,9 @@ Return when the API next allows a request after `response` to a request to
 `nothing` to set no time. A time worth more than a year of seconds is taken as a
 Unix time.
 
-Each response from the network is given to this, and the requests sharing its
-config wait until the later of this and the time its rate-limit headers set
-(`Retry-After`, or `X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`), so a
+Each response from the network is given to this, and requests to the same host
+with the same key wait until the later of this and the time its rate-limit
+headers set (`Retry-After`, or `X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`), so a
 method can only lengthen the wait. An unsuccessful response with a time is
 retried then, and with `Inf` is raised without a retry. By default `nothing`.
 

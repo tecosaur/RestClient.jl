@@ -630,9 +630,7 @@ end
             @test time() - start < 2 * THROTTLE_RETRY_AFTER
         end
     end
-    @testset "@globalconfig throttle" begin
-        @test RestClient.globalconfig(Val(AuthClient)).throttle ===
-            RestClient.globalconfig(Val(AuthClient)).throttle
+    @testset "@globalconfig ratelimit" begin
         @eval module PacedClient
             using RestClient
             @globalconfig RequestConfig("http://paced.test"; ratelimit = RateLimit(3))

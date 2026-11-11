@@ -100,9 +100,6 @@ macro globalconfig(config, opts::Expr...)
             scheme = val
         end
     end
-    # `config` is evaluated per call (so e.g. an `ENV` key isn't baked into the
-    # precompile image), but every call shares one throttle.
-    throttle = esc(gensym("throttle"))
     superdef = if isnothing(super) nothing else
         :(const $(esc(SUPERTYPE_VAR)) = let T = $(esc(super))
               T isa Type && T <: $AbstractEndpoint ||
@@ -111,11 +108,8 @@ macro globalconfig(config, opts::Expr...)
           end)
     end
     quote
-        const $throttle = $Throttle()
-        $(@__MODULE__).globalconfig(::Val{$__module__}) =
-            let c = $(esc(config))::$RequestConfig
-                $RequestConfig(c.baseurl, $throttle, c.ratelimit, c.key, c.timeout, c.cache)
-            end
+        # Evaluated per call, so e.g. an `ENV` key isn't baked into the precompile image
+        $(@__MODULE__).globalconfig(::Val{$__module__}) = $(esc(config))::$RequestConfig
         $(@__MODULE__).globalauthdefault(::Val{$__module__}) = ($(esc(scheme)), $policy)
         $(@__MODULE__).globalformatdefault(::Val{$__module__}) = $format
         $superdef

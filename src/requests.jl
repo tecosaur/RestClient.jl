@@ -23,10 +23,11 @@ endpoint's [`headers`](@ref) give their own.
 
 # Retries and rate limits
 
-Requests sharing a config are sent no faster than its [`RateLimit`](@ref), and
-wait out any deadline a response sets: one its headers give (a `Retry-After`, or
-an `X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`), or [`nextallowed`](@ref)
-does. Responses served from the cache are not held back.
+Requests are sent no faster than their config's [`RateLimit`](@ref), and wait
+out any deadline set by a response to the same host with the same key: one its
+headers give (a `Retry-After`, or an `X-RateLimit-Reset` with
+`X-RateLimit-Remaining: 0`), or [`nextallowed`](@ref) does. Responses served
+from the cache are not held back.
 
 A 429 is retried at its deadline, or failing that after an exponential backoff
 (about 0.5, 1, 2 then 4 seconds, with jitter). A 403 or 503 is retried when its
@@ -243,7 +244,7 @@ function retrydeadline(req::Request, response::Response, isidempotent::Bool, att
     if deadline == -Inf time() + 2^(attempt - 1) * (0.5 + rand()) elseif isfinite(deadline) deadline end
 end
 
-# The deadlines `response` sets for requests sharing `req`'s config: the one
+# The deadlines `response` sets for requests sharing `req`'s throttle: the one
 # `nextallowed` asks for, and the one its headers give (each `-Inf` for none)
 deadlines(req::Request, response::Response) =
     (asked = unixtime(something(nextallowed(req.endpoint, response), -Inf)),
@@ -258,7 +259,8 @@ the throttle to the deadlines its response sets. It is in flight until
 `exchange` returns: once a stream's response has begun.
 """
 function throttled(exchange::F, req::Request) where {F <: Function}
-    (; throttle, ratelimit, timeout) = req.config
+    (; ratelimit, timeout) = req.config
+    throttle = throttler(req.config)
     @lock throttle.slots begin
         while throttle.inflight >= ratelimit.inflight
             wait(throttle.slots)
@@ -282,10 +284,11 @@ function throttled(exchange::F, req::Request) where {F <: Function}
     incoming
 end
 
-# Hold requests sharing `req`'s config back until `deadline`, if it's finite
+# Hold requests sharing `req`'s throttle back until `deadline`, if it's finite
 function hold!(req::Request, deadline::Float64)
     isfinite(deadline) || return
-    (; throttle, ratelimit, baseurl) = req.config
+    (; ratelimit, baseurl) = req.config
+    throttle = throttler(req.config)
     allowance = (ratelimit.burst - 1) / ratelimit.rate
     before, after = @atomic throttle.arrival max deadline + allowance
     after - before >= 1 &&

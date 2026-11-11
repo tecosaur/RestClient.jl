@@ -201,9 +201,9 @@ end
     end
     @testset "waiting out a deadline" begin
         config = RequestConfig("http://x")
-        @atomic config.throttle.arrival = time() + 1
+        @atomic RestClient.throttler(config).arrival = time() + 1
         ticks = Ref(0)
-        ticker = @async while time() < config.throttle.arrival
+        ticker = @async while time() < RestClient.throttler(config).arrival
             ticks[] += 1
             sleep(0.05)
         end
@@ -219,11 +219,19 @@ end
         derived = RequestConfig(base; key = "other", timeout = 300)
         @test (derived.key, derived.timeout) == ("other", 300)
         @test (derived.baseurl, derived.ratelimit, derived.cache) == (base.baseurl, base.ratelimit, base.cache)
-        @test derived.throttle === base.throttle
         @test isnothing(RequestConfig(base; key = nothing).key)
         @test RequestConfig(base; baseurl = "https://uploads.example.com/").baseurl == "https://uploads.example.com"
         @test_throws ArgumentError RequestConfig(base; timeout = 0)
-        @test RequestConfig("https://api.example.com").throttle !== base.throttle
+    end
+    @testset "shared pacing" begin
+        throttler = RestClient.throttler
+        base = RequestConfig("https://api.example.com/v1"; key = "k", ratelimit = RateLimit(3))
+        @test throttler(RequestConfig(base; timeout = 300)) === throttler(base)
+        @test throttler(RequestConfig("HTTPS://API.example.com/v2"; key = "k")) === throttler(base)
+        @test throttler(RequestConfig(base; key = "other")) !== throttler(base)
+        @test throttler(RequestConfig(base; key = nothing)) !== throttler(base)
+        @test throttler(RequestConfig(base; baseurl = "https://uploads.example.com")) !== throttler(base)
+        @test throttler(RequestConfig("https://api.example.com:8443"; key = "k")) !== throttler(base)
     end
     @testset "RateLimit" begin
         @test RateLimit() == RateLimit(Inf; burst = 1, inflight = typemax(Int))
