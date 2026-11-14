@@ -17,7 +17,8 @@ The result depends on the endpoint: the response parsed as its
 passed through [`postprocess`](@ref). A `:head` request's result is whether
 the resource exists: `true` on success, `false` on 404 or 410.
 
-Redirects are followed, a 303 (See Other) with a GET as it asks. Every request
+Up to 50 redirects are followed, each with the same method and body, but a 303
+(See Other) with a GET without its body, as it asks. Every request
 identifies itself as `User-Agent: RestClient.jl/<version>` unless the
 endpoint's [`headers`](@ref) give their own.
 

@@ -17,6 +17,10 @@ and is good for another stretch.
 
 + A response is stored under its URL, method, headers and payload, so requests
   with different keys or =Accept= headers never share one.
++ =Cache-Control: no-store= keeps a response off the disk, and =no-cache= has it
+  checked with the server each time it's wanted. A response that says nothing
+  about caching (no =Cache-Control=, =Expires=, =ETag= or =Last-Modified=) isn't
+  kept at all, unless [[@ref][~cachelifetime~]] gives it a lifetime.
 + It is dropped once it's out of date with nothing to check it against, when a
   =POST=, =PUT=, =PATCH= or =DELETE= succeeds at the same URL, or when it can't be
   read as the endpoint's result type.
@@ -77,8 +81,9 @@ Every request says =User-Agent: RestClient.jl/<version>=, with an =Accept= heade
 for the result's format and a =Content-Type= for the payload's. Headers you give,
 through the endpoint's or its API's [[@ref][~headers~]], are added to these, and
 replace them when they share a name. RestClient also asks for compressed
-responses and decompresses them, and follows redirects, turning a request into a
-=GET= after a 303 (See Other).
+responses and decompresses them, and follows up to 50 redirects. A 303 (See
+Other) turns the request into a =GET= without its body; every other redirect,
+301 and 302 included, sends the same method and body on.
 
 Keys are hidden as =*****= in errors, debug output, and the cache.
 

@@ -54,7 +54,8 @@ The default implementations return an empty list, or `()` for a type.
 !!! note "Default Content-Type"
 
     When no `Content-Type` (or `Accept`) header is provided, it is set from the
-    payload's (or result's) [`mimetype`](@ref).
+    payload's (or result's) [`mimetype`](@ref); one given replaces it, as a
+    `User-Agent` given replaces RestClient's own.
 """
 function headers(::AbstractEndpoint)
     Pair{String, String}[]
@@ -494,6 +495,12 @@ RestClient.thispagenumber(search::SearchEndpoint) = search.page
 RestClient.nextpage(search::SearchEndpoint, results::SearchResults) =
     if results.has_more SearchEndpoint(search; page = search.page + 1) end
 
+# An offset, stepping by the page size until it passes the total reported
+RestClient.nextpage(listing::ListingEndpoint, page::ListingPage) =
+    if listing.offset + listing.limit < page.total
+        ListingEndpoint(listing; offset = listing.offset + listing.limit)
+    end
+
 # A cursor
 RestClient.nextpage(works::WorksEndpoint, page::WorksPage) =
     if !isnothing(page.next_cursor) WorksEndpoint(works; cursor = page.next_cursor) end
@@ -646,6 +653,10 @@ See also: [`RateLimit`](@ref), for limits known ahead of time.
 ```julia
 # A full minute's pause after any 429
 RestClient.nextallowed(::LichessEndpoint, response) = if response.status == 429 60 end
+
+# An hourly quota used up, from a server that sends no reset time
+RestClient.nextallowed(::NASAEndpoint, response) =
+    if get(response.headers, "X-RateLimit-Remaining", "") == "0" 3600 end
 ```
 """
 nextallowed(@nospecialize(::AbstractEndpoint), _) = nothing

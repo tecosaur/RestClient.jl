@@ -92,6 +92,10 @@ fields defaulting to `nothing`. This makes function forms an easy way to
 prescribe positional, mandatory arguments with the flexibility to fully specify
 the endpoint with keyword arguments.
 
+Two endpoints may give functions of the same name with different arguments,
+which become methods of one function, as `fetch(ids::Vector{String})` and
+`fetch(history::SearchHistory)` might.
+
 A docstring on an `@endpoint` with a function form documents the function, and
 the struct is given a docstring that points to it. Without a function form, the
 docstring documents the struct.

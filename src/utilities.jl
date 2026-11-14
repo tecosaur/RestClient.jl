@@ -238,6 +238,9 @@ gives in another form: `lift` makes the field from the JSON value, and
 `dateformat` reads a date or time in that format. A `DateTime` already reads
 ISO 8601, with or without a `Z` or an offset.
 
+The struct may have a supertype, such as `<: ListResponse{Item}` or
+`<: Exception`, and type parameters, as in `Page{T} <: ListResponse{T}`.
+
 ```julia
 @jsondef struct Search
     count::Int &(lift = s -> parse(Int, s),)             # sent as "1053"
@@ -318,7 +321,9 @@ This macro conveniently combines the following pieces:
 Note the `name."xpath"` syntax demonstrated in the examples, that allows for
 declaration of the (simple) XPath that should be used to extract the field. A
 field without one reads the child element named after it, so `title::String`
-reads `<title>`. The subset of supported XPath components are:
+reads `<title>`. Paths start from the document's root element, whose own name
+isn't checked, so `title` reads `<feed><title>`, and tags are matched as
+written, namespace prefix and all: `arxiv:comment` matches only that prefix. The subset of supported XPath components are:
 - `nodetag` to extract all immediate children with a given tag name
 - `.` to extract the node itself, such as its whole text, or a type read from
   the same element

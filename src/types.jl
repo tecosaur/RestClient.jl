@@ -786,6 +786,16 @@ contents(list::ListResponse{T}) -> Vector{T}
 ```
 
 The generic implementation takes the response's field of type `Vector{T}`.
+
+A response that is a bare JSON array is read by a `@jsondef Vector` struct with
+that one field. Paged by `Link` headers, as many such APIs are, it needs no
+[`nextpage`](@ref) method:
+
+```julia
+@jsondef Vector struct IssuePage <: ListResponse{Issue}
+    issues::Vector{Issue}
+end
+```
 """
 abstract type ListResponse{T} end
 
