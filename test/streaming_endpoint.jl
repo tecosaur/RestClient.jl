@@ -55,6 +55,12 @@ RestClient.isstreamend(::SilentdoneEndpoint, fr::SSEvent) = fr.data == codeunits
 # Four frames a second apart: longer overall than a 2 s timeout, but never silent for it.
 @endpoint steady() -> "steady" -> Stream{Tok, :NDJSON}
 
+@jsondef struct Overload
+    message."error"::String
+end
+@endpoint overloaded() -> "ndjson/error" -> Stream{Tok, :NDJSON}
+RestClient.errortype(::OverloadedEndpoint) = Overload
+
 # An error status before any frame: should raise with the body, not stream.
 @endpoint failing() -> "error500" -> Stream{Tok}
 
@@ -135,6 +141,17 @@ function run(base)
         @test err isa RestClient.ResponseError
         @test err.response.status == 500
         @test err.body == codeunits("boom")
+    end
+    @testset "error in band" begin
+        got, err = Tok[], nothing
+        try
+            foreach(tok -> push!(got, tok), overloaded(cfg))
+        catch e
+            err = e
+        end
+        @test got == [Tok(n=1)]
+        @test err isa RestClient.ResponseError{Overload}
+        @test (err.response.status, err.detail.message) == (200, "overloaded")
     end
     @testset "transport error" begin
         # Nothing listens on port 1, so the request fails before any response

@@ -25,6 +25,15 @@ module IntegrationClient
         page::Int
         more::Bool
     end
+    @jsondef struct APIError
+        message."error"::String
+    end
+    abstract type AnyAPIError end
+    @jsondef struct Refusal <: AnyAPIError
+        message."error"::String
+    end
+    JSON.@choosetype AnyAPIError _ -> Refusal
+    RestClient.dataformat(::Type{AnyAPIError}) = RestClient.JSONFormat()
     @jsondef struct Echoed
         method::String
         content_type::String
@@ -75,6 +84,11 @@ module IntegrationClient
     @endpoint partial() -> "partial" -> Item
     @endpoint errored() -> "error" -> Item
     @endpoint missing_() -> "notfound" -> Item
+    @endpoint apierror(status::Int) -> "apierror/{status}" -> Item
+    @endpoint misreported() -> "notfound" -> Item
+    RestClient.errortype(::Union{ApierrorEndpoint, MisreportedEndpoint}) = APIError
+    @endpoint refusal(status::Int) -> "apierror/{status}" -> Item
+    RestClient.errortype(::RefusalEndpoint) = AnyAPIError
     @endpoint forbidden() -> "forbidden" -> Item
     @endpoint forbidden_limited() -> "forbidden/limited" -> Item
     @endpoint always429() -> "always429" -> Item
@@ -232,6 +246,34 @@ const AC = AuthClient
     @testset "`nothing` defaults" begin
         @test IC.NothingDefaults(flags = Dict{String, Nothing}()).maybe === nothing
         @test_throws UndefKeywordError IC.NothingDefaults()
+    end
+    @testset "error type" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            caught(f, args...) = try f(config, args...) catch err; err end
+            err = caught(IC.apierror, 400)
+            @test err isa RestClient.ResponseError{IC.APIError}
+            @test (err.response.status, err.detail.message) == (400, "bad id")
+            @test occursin("bad id", sprint(showerror, err))
+            unread = caught(IC.misreported)
+            @test unread isa RestClient.ResponseError{Nothing}
+            @test isnothing(unread.detail) && unread.body == codeunits("nope")
+            @test caught(IC.missing_) isa RestClient.ResponseError{Nothing}
+            @test caught(IC.exists, "broken") isa RestClient.ResponseError{Nothing}
+            refused = caught(IC.refusal, 400)
+            @test refused isa RestClient.ResponseError{IC.AnyAPIError}
+            @test refused.detail == IC.Refusal("bad id")
+            try
+                before = state.requests
+                inband = caught(IC.apierror, 200)
+                @test inband isa RestClient.ResponseError{IC.APIError}
+                @test (inband.response.status, inband.detail.message) == (200, "bad id")
+                @test caught(IC.apierror, 200) isa RestClient.ResponseError{IC.APIError}
+                @test state.requests == before + 2
+            finally
+                clean_cache("$baseurl/apierror/200")
+            end
+        end
     end
     @testset "error status" begin
         with_server() do baseurl, _

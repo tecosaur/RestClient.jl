@@ -13,7 +13,7 @@ export List, nextpage, eachpage, Stream, SSEvent
 export RawFormat, JSONFormat, XMLFormat, FormFormat, MultipartFormat, MultipartFile
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth
 export MalformedRequest, TransportError, ResponseError, MalformedResponse
-public urlpath, headers, parameters, payload, validate, responsetype, postprocess,
+public urlpath, headers, parameters, payload, validate, responsetype, errortype, postprocess,
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, isstreamskip, thispagenumber, remainingpages,
     nextallowed, Response, Headers, globalconfig
@@ -31,7 +31,7 @@ include("endpoint.jl")
 
 macro importapi()
     api = (:urlpath, :headers, :parameters, :payload, :validate, :responsetype,
-           :dataformat, :mimetype, :interpretresponse, :writepayload, :postprocess,
+           :errortype, :dataformat, :mimetype, :interpretresponse, :writepayload, :postprocess,
            :contents, :thispagenumber, :nextpage, :pagecount,
            :authscheme, :authpolicy, :authheaders, :authparams, :isstreamend, :isstreamskip, :cachelifetime, :nextallowed)
     Expr(:import, Expr(:(:), Expr(:., fullname(@__MODULE__)...), (Expr(:., name) for name in api)...)) |> esc

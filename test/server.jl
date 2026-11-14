@@ -96,6 +96,12 @@ function build_router(state::ServerState)
     end
     HTTP.register!(router, "GET", "/error", _ -> HTTP.Response(500, "boom"))
     HTTP.register!(router, "GET", "/notfound", _ -> HTTP.Response(404, "nope"))
+    # An API's own error body, under any status (a cacheable 200 reports it in band)
+    HTTP.register!(router, "GET", "/apierror/{status}",
+                   req -> HTTP.Response(parse(Int, HTTP.getparams(req)["status"]),
+                                        ["Content-Type" => "application/json",
+                                         "Cache-Control" => "max-age=60"],
+                                        JSON.json((; error = "bad id"))))
     HTTP.register!(router, "GET", "/nostore",
                    _ -> HTTP.Response(200, ["Content-Type" => "application/json",
                                             "Cache-Control" => "no-store"],
@@ -298,6 +304,9 @@ function stream_router(http::HTTP.Stream)
                      contenttype = "text/event-stream", interval = 3)
     elseif path == "/steady"             # frames a second apart, for a few seconds
         write_frames(http, [ndframes; "{\"n\":4}\n"]; contenttype = "application/x-ndjson", interval = 1)
+    elseif path == "/ndjson/error"       # an error reported in band, partway through
+        write_frames(http, ["{\"n\":1}\n", "{\"error\":\"overloaded\"}\n"];
+                     contenttype = "application/x-ndjson")
     elseif path == "/ndjson"
         write_frames(http, ndframes; contenttype = "application/x-ndjson")
     elseif path == "/slow"

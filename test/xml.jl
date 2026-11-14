@@ -72,6 +72,11 @@ module XMLClient
     @xmldef struct Sole
         affiliation."info/aff/text()"::Union{String, Nothing} = nothing
     end
+    @xmldef struct Fault
+        reason."reason/text()"::String
+    end
+    @endpoint faulty() -> "faulty"
+    RestClient.errortype(::FaultyEndpoint) = Fault
     @xmldef struct Bare
         title::String
         count::Union{Int, Nothing} = nothing
@@ -240,6 +245,13 @@ end
     @test xmlparse(XC.Nested, "<r><group/></r>").last_item === nothing
     nested = xmlparse(XC.Nested, "<r><group><item>x</item><item>y</item></group></r>")
     @test (nested.first_item, nested.last_item) == ("x", "y")
+end
+
+@testset "error type" begin
+    req = Request{:get}(RequestConfig("http://x"), XC.FaultyEndpoint())
+    res = RestClient.Response("http://x/faulty", 503, "HTTP/1.1 503", RestClient.Headers(Pair{String, String}[]))
+    err = RestClient.ResponseError(req, res, Vector{UInt8}("<fault><reason>overloaded</reason></fault>"))
+    @test err isa ResponseError{XC.Fault} && err.detail.reason == "overloaded"
 end
 
 @testset "xpath errors" begin

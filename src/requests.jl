@@ -70,7 +70,8 @@ function send(req::Request{kind}, out::Outgoing) where {kind}
     catch err
         # A successful response that can't be read mustn't be replayed from the cache
         cfile = cachefile(req, out)
-        err isa MalformedResponse && !isnothing(cfile) && rm(cfile; force = true)
+        err isa Union{MalformedResponse, ResponseError} && err.response.status ∈ 200:299 &&
+            !isnothing(cfile) && rm(cfile; force = true)
         rethrow()
     end
 end
@@ -602,14 +603,28 @@ function deliver(req::Request, incoming::Incoming)
     end
 end
 
-# `interpretresponse`, with an exception raised as a `MalformedResponse` naming the request
 function interpret(req::Request, response::Response, bytes::AbstractVector{UInt8},
                    fmt::AbstractFormat, ::Type{T}) where {T}
     try
         interpretresponse(bytes, fmt, T)
     catch err
         err isa InterruptException && rethrow()
-        throw(MalformedResponse(req, response, T, collect(bytes), err::Exception))
+        failure = ResponseError(req, response, collect(bytes))
+        failure isa ResponseError{Nothing} || throw(failure)
+        throw(MalformedResponse(req, response, T, failure.body, err::Exception))
+    end
+end
+
+function ResponseError(req::Request, response::Response, body::Vector{UInt8})
+    E = errortype(req.endpoint)
+    E === Nothing && return ResponseError(req, response, body, nothing)
+    try
+        detail = interpretresponse(copy(body), dataformat(req.endpoint, E), E)
+        ResponseError{E, typeof(req)}(req, response, body, detail)
+    catch err
+        err isa InterruptException && rethrow()
+        @debug "The response from $(nameof(typeof(req.endpoint))) doesn't read as its error type $E either" exception = err
+        ResponseError(req, response, body, nothing)
     end
 end
 
@@ -619,6 +634,6 @@ function deliver(req::Request{:head}, incoming::Incoming)
     close(incoming)
     (; response) = incoming
     exists = response.status ∈ 200:299
-    exists || response.status ∈ (404, 410) || throw(ResponseError(req, response, UInt8[]))
+    exists || response.status ∈ (404, 410) || throw(ResponseError(req, response, UInt8[], nothing))
     postprocess(response, req, exists)
 end

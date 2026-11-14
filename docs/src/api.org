@@ -38,9 +38,11 @@ RestClient.Headers
 
 A failed [[@ref][~perform~]] raises one of these. A request that does not validate raises
 a [[@ref][~MalformedRequest~]] before anything is sent; an unsuccessful HTTP status raises
-a [[@ref][~ResponseError~]] carrying the server's response body; and a successful response
-that can't be read as the endpoint's result type (malformed JSON, a missing key) raises a
-[[@ref][~MalformedResponse~]] naming the request and holding the body. A failure in transit
+a [[@ref][~ResponseError~]] carrying the server's response body, read as the endpoint's
+[[@ref][~errortype~]] when it declares one; and a successful response that can't be read
+as the endpoint's result type (malformed JSON, a missing key) raises a
+[[@ref][~MalformedResponse~]] naming the request and holding the body, unless it reads as
+the ~errortype~. A failure in transit
 (DNS, connection refused, TLS, exceeding the total ~timeout~, or going silent for too long)
 raises a [[@ref][~TransportError~]] saying which, with any auth secrets hidden from its URL.
 
@@ -109,6 +111,7 @@ RestClient.authparams
 
 #+begin_src @docs
 RestClient.responsetype
+RestClient.errortype
 RestClient.postprocess
 RestClient.contents
 #+end_src

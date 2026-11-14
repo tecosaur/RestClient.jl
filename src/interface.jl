@@ -223,6 +223,43 @@ function responsetype(::AbstractEndpoint)
 end
 
 """
+    errortype(endpoint::AbstractEndpoint) -> Type
+
+Return the type an error response to `endpoint` is read as, in its own
+[`dataformat`](@ref), or `Nothing` (the default) to leave error bodies unread.
+
+The [`ResponseError`](@ref) raised for an unsuccessful status then carries the
+body read as this type, as its `detail`. A body that doesn't read as it leaves
+the `detail` as `nothing`, and the error is raised all the same.
+
+A successful response that can't be read as the endpoint's
+[`responsetype`](@ref) is tried as this type too, so an API that reports errors
+inside a `200` raises them as a `ResponseError` (as does a [`Stream`](@ref)
+element, partway through the stream). For that, the error type needs
+a required field that a successful body lacks, or it would read from any body.
+
+Define this for an API's endpoint supertype to read its errors from every endpoint.
+An abstract error type (with a subtype chosen per body, such as by JSON.jl's
+`@choosetype`) is matched as declared: `ResponseError{APIError}` for any subtype.
+Make the type an `Exception` with a `showerror` method to give the
+`ResponseError` the API's own explanation, rather than the type's `show`.
+
+!!! note
+    Part of the `AbstractEndpoint` interface.
+
+# Examples
+
+```julia
+@jsondef struct EnsemblError
+    message."error"::String
+end
+
+RestClient.errortype(::EnsemblEndpoint) = EnsemblError
+```
+"""
+errortype(@nospecialize(::AbstractEndpoint)) = Nothing
+
+"""
     dataformat([endpoint::AbstractEndpoint], ::Type{T}) -> AbstractFormat
 
 Return the expected format that `T` is represented by in requests to and
@@ -277,6 +314,10 @@ defaultlabel(::AbstractFormat, ::Type) = nothing
 Interpret `data` as a response of type `T` according to `fmt`.
 
 For `JSONFormat`, the methods are implemented in the JSON.jl package extension.
+
+A method must leave `data` intact, as a body that fails to read is tried as the
+endpoint's [`errortype`](@ref), and kept in the error raised. Beware `String(data)`,
+which takes `data`'s memory and leaves it empty: use `String(copy(data))`.
 """
 function interpretresponse end
 
@@ -330,7 +371,8 @@ Post-process the data returned by the request, by default returning it as-is.
 [`responsetype`](@ref): reading happens first, and a body that can't be read
 raises a [`MalformedResponse`](@ref) without reaching `postprocess`. An error
 status raises a [`ResponseError`](@ref) before either. To raise an error an API
-reports inside a successful response, throw it here.
+reports inside a successful response, throw it here, or declare its
+[`errortype`](@ref).
 
 The result is then restructured: a [`ListResponse`](@ref) is wrapped in a
 [`List`](@ref), and a [`SingleResponse`](@ref) gives its [`contents`](@ref). So

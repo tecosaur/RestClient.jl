@@ -24,6 +24,7 @@ urlpath([config::RequestConfig], endpoint::AbstractEndpoint) -> String
 headers([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 parameters([config::RequestConfig], endpoint::AbstractEndpoint) -> Vector{Pair{String, String}}
 responsetype(endpoint::AbstractEndpoint) -> Type
+errortype(endpoint::AbstractEndpoint) -> Type
 validate([config::RequestConfig], endpoint::AbstractEndpoint) -> Union{Nothing, Bool, AbstractString, AbstractVector{<:AbstractString}}
 postprocess([response], request::Request, data) -> Any
 ```
@@ -566,14 +567,17 @@ function Base.showerror(io::IO, @nospecialize(ex::TransportError{<:Request{kind}
 end
 
 """
-    ResponseError <: Exception
+    ResponseError{E} <: Exception
 
 An exception type for requests that complete but return an unsuccessful HTTP
-status (outside `200:299`).
+status (outside `200:299`), or a successful one that reads as the endpoint's
+[`errortype`](@ref).
 
 Unlike a bare transport failure, the server's response is available: `response`
 holds the status and headers, and `body` holds the raw response body, which APIs
-routinely use to explain *why* a request failed.
+routinely use to explain *why* a request failed. `detail` holds that body read
+as the endpoint's `errortype` `E`, or `nothing` (with `E` as `Nothing`) if it
+declares none or the body doesn't read as it.
 
 See also: [`perform`](@ref), [`Request`](@ref).
 
@@ -581,17 +585,18 @@ See also: [`perform`](@ref), [`Request`](@ref).
 
 ```julia
 try
-    search(query = "...")
+    lookup("ENSG00000157764")
 catch err
-    err isa ResponseError{<:Request{<:Any, <:MyAPIEndpoint}} || rethrow()
-    throw(RestClient.interpretresponse(err.body, JSONFormat(), MyAPIError))
+    err isa ResponseError{EnsemblError} || rethrow()
+    @warn "Ensembl refused the lookup" err.response.status err.detail.message
 end
 ```
 """
-struct ResponseError{R <: Request} <: Exception
+struct ResponseError{E, R <: Request} <: Exception
     request::R
     response::Response
     body::Vector{UInt8}
+    detail::E
 end
 
 function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
@@ -599,7 +604,12 @@ function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     print(io, "HTTP ", ex.response.status)
     isempty(reason) || print(io, ' ', reason)
     print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
-    isempty(ex.body) || print(io, "\n  ", bodypreview(ex.body))
+    if !isnothing(ex.detail)
+        shown = sprint(if ex.detail isa Exception showerror else show end, ex.detail; context = io)
+        print(io, "\n  ", replace(rstrip(shown), '\n' => "\n  "))
+    elseif !isempty(ex.body)
+        print(io, "\n  ", bodypreview(ex.body))
+    end
 end
 
 """
