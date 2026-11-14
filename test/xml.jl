@@ -84,6 +84,11 @@ module XMLClient
     end
     @endpoint faulty() -> "faulty"
     RestClient.errortype(::FaultyEndpoint) = Fault
+    @xmldef struct Dated
+        when::DateTime
+        day::Date
+        at::Union{DateTime, Nothing} = nothing
+    end
     @xmldef struct Bare
         title::String
         count::Union{Int, Nothing} = nothing
@@ -260,6 +265,18 @@ end
     @test (s.published, s.count, s.seen, s.updated) ==
         (DateTime(2024, 1, 2, 3, 4, 5), 1053, [2, 3], Date(2024, 5, 6))
     @test isnothing(xmlparse(XC.Stamped, """<e count="1"><published>2024-01-02T03:04:05Z</published></e>""").updated)
+end
+
+@testset "dates" begin
+    d = xmlparse(XC.Dated, "<d><when>2018-04-16T18:00:06Z</when><day>2018-04-16</day><at>2018-04-16T18:00:06+02:30</at></d>")
+    @test (d.when, d.day, d.at) == (DateTime(2018, 4, 16, 18, 0, 6), Date(2018, 4, 16), DateTime(2018, 4, 16, 15, 30, 6))
+    @test xmlparse(XC.Dated, "<d><when>2018-04-16T18:00:06-0100</when><day>2018-04-16</day></d>").when ==
+        DateTime(2018, 4, 16, 19, 0, 6)
+end
+
+@testset "keyword display" begin
+    @test endswith(sprint(show, XC.Bare(title = "t")), "Bare(title=\"t\")")
+    @test endswith(sprint(show, XC.Bare(title = "t", count = 2)), "Bare(title=\"t\", count=2)")
 end
 
 @testset "error type" begin

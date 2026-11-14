@@ -50,7 +50,7 @@ function RestClient._jsondef_expand(source::LineNumberNode, option::Symbol, kind
             push!(body, :($(GlobalRef(StructUtils, :fieldtags))(::$(GlobalRef(StructUtils, :StructStyle)), ::Type{<:$T}) =
                               $(Expr(:tuple, Expr(:parameters, tagged...)))))
     end
-    option === :noshow || push!(body, kwshow(name, fields))
+    option === :noshow || push!(body, RestClient.kwshow(name, fields))
     push!(body, :(RestClient.dataformat(::Type{<:$T}) = RestClient.JSONFormat()))
     # Compiled as defined, so nested structs come before those holding them: compiling an
     # outer struct first makes inference re-infer the inner ones from every level, slowly
@@ -85,25 +85,6 @@ function fielddefaults_method(name::Symbol, fields)
           $(fill...)
           $(Expr(:tuple, Expr(:parameters, defaults...)))
       end)
-end
-
-# `show` as `Name(field=value, …)`, leaving out fields at their default; the fields are
-# bound first, so a default may refer to them
-function kwshow(structname::Symbol, fields)
-    showfields = map(fields) do (; name, default)
-        showfield = :(print(io, ifelse(needscomma, ", ", ""), $("$name=")); show(io, $(esc(name))); needscomma = true)
-        if isnothing(default) showfield else :($(esc(name)) === $(esc(default)) || $showfield) end
-    end
-    bindings = [:($(esc(name)) = x.$name) for (; name) in fields]
-    quote
-        function Base.show(io::IO, x::$(esc(structname)))
-            show(io, $(esc(structname)))
-            print(io, '(')
-            needscomma = false
-            $(Expr(:let, Expr(:block, bindings...), Expr(:block, showfields...)))
-            print(io, ')')
-        end
-    end
 end
 
 end

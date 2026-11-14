@@ -6,6 +6,7 @@ module XMLExt
 using RestClient
 import RestClient: @xmldef
 using XML
+using Dates: DateTime, TimeType, Minute
 
 # XML 0.4 unescapes text and attribute values as it reads them; 0.3 leaves them as written
 const XML_UNESCAPES = pkgversion(XML) >= v"0.4"
@@ -168,10 +169,18 @@ parsexml(::Type{Any}, ::Nothing) = nothing
 parsexml(::Type{String}, content::String) = content
 parsexml(::Type{Symbol}, content::String) = Symbol(content)
 parsexml(::Type{T}, content::String) where {T} = parse(T, content)
+# ISO 8601, as JSON reads it, with any `Z` or offset taken to UTC
+function parsexml(::Type{DateTime}, content::String)
+    stamp, sign, hours, minutes = match(r"^(.+?)(?:Z|([+-])(\d\d):?(\d\d))?$", content)
+    moment = DateTime(stamp)
+    isnothing(sign) && return moment
+    offset = Minute(60 * parse(Int, hours) + parse(Int, minutes))
+    if sign == "+" moment - offset else moment + offset end
+end
 parsexml(::Type{Vector{T}}, nodes::Vector{<:LazyNode}) where {T} = [parsexml(T, n) for n in nodes]
 parsexml(::Type{Vector{T}}, values::Vector{String}) where {T} = [parsexml(T, v) for v in values]
 parsexml(::Type{Vector{T}}, ::Nothing) where {T} = T[]
-parsexml(::Type{T}, node::LazyNode) where {T <: Union{AbstractString, Number}} =
+parsexml(::Type{T}, node::LazyNode) where {T <: Union{AbstractString, Number, TimeType}} =
     parsexml(T, textvalue(sprint(printtext, node)))
 parsexml(::Type{T}, ::Nothing) where {T} =
     throw(ArgumentError("Required XML field of type `$T` is missing or empty"))
@@ -237,6 +246,7 @@ macro xmldef(struc::Expr)
               end)
         end)
     end
+    push!(body, RestClient.kwshow(name, fields))
     push!(body, :(function $(esc(:($(@__MODULE__).parsexml)))(::Type{S}, node::$LazyNode) where {S <: $(esc(name))}
                       S isa UnionAll &&
                           throw(ArgumentError("Cannot parse XML as $S without its type parameters (e.g. $S{Int})"))

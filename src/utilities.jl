@@ -146,6 +146,25 @@ function parsefield(line)
     (; name = field, key, type, default, tags)
 end
 
+# `show` as `Name(field=value, …)`, leaving out fields at their default; the fields are
+# bound first, so a default may refer to them
+function kwshow(structname::Symbol, fields)
+    showfields = map(fields) do (; name, default)
+        showfield = :(print(io, ifelse(needscomma, ", ", ""), $("$name=")); show(io, $(esc(name))); needscomma = true)
+        if isnothing(default) showfield else :($(esc(name)) === $(esc(default)) || $showfield) end
+    end
+    bindings = [:($(esc(name)) = x.$name) for (; name) in fields]
+    quote
+        function Base.show(io::IO, x::$(esc(structname)))
+            show(io, $(esc(structname)))
+            print(io, '(')
+            needscomma = false
+            $(Expr(:let, Expr(:block, bindings...), Expr(:block, showfields...)))
+            print(io, ')')
+        end
+    end
+end
+
 """
     parsefields(struc::Expr, source::LineNumberNode)
         -> (; name::Symbol, fields, structdef::Expr)
@@ -292,6 +311,8 @@ Define a struct that can be used with `XML`.
 This macro conveniently combines the following pieces:
 - XML deserialization
 - `@kwdef` to define keyword constructors for the struct.
+- A `Base.show` method showing the struct with keyword arguments, omitting
+  default values, as [`@jsondef`](@ref) does.
 - `RestClient.dataformat` to declare that this struct is XML-formatted.
 
 Note the `name."xpath"` syntax demonstrated in the examples, that allows for
@@ -319,9 +340,11 @@ Other fields need each step before the last to match one element; at the
 last, a `Union{…, Nothing}` field takes the first of several, and any other
 field requires exactly one.
 
-A field may take the same tags as in [`@jsondef`](@ref): `lift` makes the field
-from its text (each match's, for a `Vector`), and `dateformat` reads a date or
-time in that format, as in `published::DateTime &(dateformat = "yyyy-mm-ddTHH:MM:SSZ",)`.
+A `Date` or `DateTime` field reads ISO 8601 text, as in JSON, with any `Z` or
+offset taken to UTC. A field may take the same tags as in [`@jsondef`](@ref):
+`lift` makes the field from its text (each match's, for a `Vector`), and
+`dateformat` reads a date or time in that format, as in
+`published::DateTime &(dateformat = "yyyy-mm-dd HH:MM",)`.
 
 !!! warning "Soft XML dependency"
     This macro is implemented in a package extension, and so
