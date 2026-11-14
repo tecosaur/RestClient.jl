@@ -37,15 +37,18 @@ methods safe to repeat (not POST or PATCH). A request is attempted at most five
 times.
 
 No wait is longer than the config's `timeout`. A retry that would need a longer
-one isn't made, and the response is raised instead; a request held back for
-longer is sent without waiting. With the default `timeout = Inf`, a wait can be
-long (until an hourly quota resets, say), so set a `timeout` to bound it.
+one isn't made, and the response is raised instead; a request that would be held
+back for longer isn't sent, and raises a [`RateLimitError`](@ref). With the
+default `timeout = Inf`, a wait can be long (until an hourly quota resets, say),
+so set a `timeout` to bound it.
 
 # Errors
 
 - [`MalformedRequest`](@ref) if the request fails validation.
 - [`ResponseError`](@ref) if the server responds with an unsuccessful status,
   once any retries are spent.
+- [`RateLimitError`](@ref) if the request would wait longer than its `timeout`
+  to be sent.
 - [`MalformedResponse`](@ref) if a successful response can't be read as the
   endpoint's [`responsetype`](@ref).
 - `ArgumentError` if `kind` is not a supported HTTP method.
@@ -280,12 +283,7 @@ response has been received: for a stream, until its transfer ends.
 function throttled(exchange::F, req::Request) where {F <: Function}
     (; ratelimit, timeout) = req.config
     throttle = throttler(req.config)
-    @lock throttle.slots begin
-        while throttle.inflight >= ratelimit.inflight
-            wait(throttle.slots)
-        end
-        throttle.inflight += 1
-    end
+    claimslot!(req, throttle)
     release() = @lock throttle.slots (throttle.inflight -= 1; notify(throttle.slots))
     incoming = try
         # Wait (up to `timeout`) for the time the GCRA admits a request, and claim it
@@ -293,7 +291,8 @@ function throttled(exchange::F, req::Request) where {F <: Function}
         while true
             now, arrival = time(), @atomic throttle.arrival
             pause = arrival - allowance - now
-            0 < pause <= timeout && (sleep(pause); continue)
+            pause > timeout && throw(RateLimitError(req, unix2datetime(arrival - allowance)))
+            pause > 0 && (sleep(pause); continue)
             @atomicreplace(throttle.arrival, arrival => max(arrival, now) + 1 / ratelimit.rate).success && break
         end
         exchange()::Incoming
@@ -307,8 +306,29 @@ function throttled(exchange::F, req::Request) where {F <: Function}
         # Its failure is the stream's to report
         Threads.@spawn (wait(incoming.transfer; throw = false); release())
     end
+    quota = quotaof(incoming.response.headers)
+    isnothing(quota) || @atomic throttle.quota = quota
     hold!(req, max(deadlines(req, incoming.response)...))
     incoming
+end
+
+function claimslot!(req::Request, throttle::Throttle)
+    (; ratelimit, timeout) = req.config
+    giveup = time() + timeout
+    # A task, not a `Timer` callback, whose error printing can't be trimmed
+    alarm = if isfinite(timeout) Timer(timeout) end
+    isnothing(alarm) || Threads.@spawn (wait(alarm); @lock throttle.slots notify(throttle.slots))
+    try
+        @lock throttle.slots begin
+            while throttle.inflight >= ratelimit.inflight
+                time() >= giveup && throw(RateLimitError(req, nothing))
+                wait(throttle.slots)
+            end
+            throttle.inflight += 1
+        end
+    finally
+        isnothing(alarm) || close(alarm)
+    end
 end
 
 # Hold requests sharing `req`'s throttle back until `deadline`, if it's finite
@@ -334,17 +354,51 @@ Checks (in order):
 - `X-RateLimit-Reset`: seconds from now, a Unix time, or an HTTP date
 """
 function retryafter(headers::Headers)
-    function timeof(value::String)
-        seconds = if all(isdigit, value) tryparse(Int, value) end
-        isnothing(seconds) || return unixtime(seconds)
-        date = tryparse(DateTime, value, HTTP_DATE_FORMAT)
-        if isnothing(date); -Inf else datetime2unix(date) end
-    end
-    after = timeof(get(headers, "retry-after", ""))
+    after = headertime(get(headers, "retry-after", ""))
     after > -Inf && return after
     something(tryparse(Float64, get(headers, "x-ratelimit-remaining", "")), Inf) > 0 && return -Inf
-    timeof(get(headers, "x-ratelimit-reset", ""))
+    headertime(get(headers, "x-ratelimit-reset", ""))
 end
+
+# A header's time (seconds from now, a Unix time, or an HTTP date) as a `time()` value
+function headertime(value::String)
+    seconds = if all(isdigit, value) tryparse(Int, value) end
+    isnothing(seconds) || return unixtime(seconds)
+    date = tryparse(DateTime, value, HTTP_DATE_FORMAT)
+    if isnothing(date); -Inf else datetime2unix(date) end
+end
+
+function quotaof(headers::Headers)
+    function requests(name)
+        n = tryparse(Float64, get(headers, name, ""))
+        if !isnothing(n) && 0 <= n < typemax(Int) floor(Int, n) end
+    end
+    reset = headertime(get(headers, "x-ratelimit-reset", ""))
+    quota = (limit = requests("x-ratelimit-limit"), remaining = requests("x-ratelimit-remaining"),
+             reset = if isfinite(reset) unix2datetime(reset) end)
+    if !all(isnothing, quota) quota end
+end
+
+"""
+    quota(config::RequestConfig) -> Union{Quota, Nothing}
+
+Return the rate limit the server last reported to requests through `config`, or
+any other config for the same host and key, or `nothing` if none has.
+
+It is read from the response's `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
+`X-RateLimit-Reset` headers, as a `(; limit, remaining, reset)` named tuple: the
+requests allowed and those left, and when the count renews (a UTC `DateTime`).
+A field is `nothing` when its header wasn't given. Responses from the cache don't
+count, as their headers are as old as the response.
+
+# Examples
+
+```julia
+julia> RestClient.quota(config)
+(limit = 5000, remaining = 4987, reset = DateTime("2026-11-14T13:00:00"))
+```
+"""
+quota(config::RequestConfig) = @atomic throttler(config).quota
 
 # `t` seconds from now as a Unix time, or `t` itself if it's over a year's worth
 unixtime(t::Real) = if t < 365 * 24 * 60 * 60 time() + t else Float64(t) end

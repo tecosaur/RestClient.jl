@@ -218,6 +218,39 @@ end
         @test waited >= 0.9
         @test ticks[] > 5                          # the wait yields, rather than spinning
     end
+    @testset "refusing a long wait" begin
+        unsent(config) = try
+            RestClient.throttled(() -> error("sent"), Request{:get}(config, PlainEP()))
+        catch err
+            err
+        end
+        held = RequestConfig("http://held.example"; timeout = 1)
+        @atomic RestClient.throttler(held).arrival = time() + 60
+        err = unsent(held)
+        @test err isa RateLimitError && 58 < datetime2unix(err.until) - time() <= 60
+        @test occursin("was not sent: requests there are held until", sprint(showerror, err))
+        busy = RequestConfig("http://busy.example"; timeout = 0.5, ratelimit = RateLimit(inflight = 1))
+        RestClient.throttler(busy).inflight = 1
+        waited = @elapsed (err = unsent(busy))
+        @test err isa RateLimitError && isnothing(err.until)
+        @test 0.4 < waited < 2
+        @test RestClient.throttler(busy).inflight == 1
+    end
+    @testset "quota" begin
+        config = RequestConfig("http://quota.example")
+        @test isnothing(RestClient.quota(config))
+        reply(headers) = RestClient.throttled(Request{:get}(config, PlainEP())) do
+            RestClient.Incoming(sample_response(; headers), IOBuffer())
+        end
+        reply(["x-ratelimit-limit" => "60", "x-ratelimit-remaining" => "59.0",
+               "x-ratelimit-reset" => "1700000000"])
+        @test RestClient.quota(config) == (limit = 60, remaining = 59, reset = unix2datetime(1700000000))
+        @test RestClient.quota(RequestConfig("http://quota.example/v2")) == RestClient.quota(config)
+        reply(["content-type" => "text/plain"])
+        @test RestClient.quota(config).remaining == 59
+        reply(["x-ratelimit-remaining" => "many"])
+        @test RestClient.quota(config).remaining == 59
+    end
     @testset "derived config" begin
         base = RequestConfig("https://api.example.com"; key = "k", ratelimit = RateLimit(3), timeout = 10)
         derived = RequestConfig(base; key = "other", timeout = 300)

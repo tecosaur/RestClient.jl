@@ -3,6 +3,7 @@
 
 module RestClient
 
+using Dates
 using Downloads
 using Base.ScopedValues: ScopedValue, with
 using StyledStrings: @styled_str as @S_str
@@ -12,11 +13,11 @@ export RequestConfig, RateLimit, Request, perform, AbstractEndpoint, SingleRespo
 export List, nextpage, eachpage, Stream, SSEvent
 export RawFormat, JSONFormat, XMLFormat, FormFormat, MultipartFormat, MultipartFile
 export AuthScheme, NoAuth, BearerAuth, BasicAuth, HeaderAuth, QueryAuth
-export MalformedRequest, TransportError, ResponseError, MalformedResponse
+export MalformedRequest, TransportError, ResponseError, MalformedResponse, RateLimitError
 public urlpath, headers, parameters, payload, validate, responsetype, errortype, postprocess,
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, isstreamskip, thispagenumber, remainingpages,
-    nextallowed, Response, Headers, globalconfig
+    nextallowed, quota, Response, Headers, globalconfig
 public StreamFormat, UnspecifiedFormat, readframe, framestate, elementpayload,
     authheaders, authparams, contents, pagecount, cachelifetime
 

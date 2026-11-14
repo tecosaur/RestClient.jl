@@ -220,6 +220,9 @@ function Base.show(io::IO, (; rate, burst, inflight)::RateLimit)
           if isempty(options) "" else "; " * join(options, ", ") end, ')')
 end
 
+const Quota = @NamedTuple{limit::Union{Int, Nothing}, remaining::Union{Int, Nothing},
+                          reset::Union{DateTime, Nothing}}
+
 """
     Throttle
 
@@ -229,15 +232,17 @@ kept to each config's [`RateLimit`](@ref).
 `arrival` is the theoretical arrival time of the generic cell rate algorithm
 (GCRA): a request may be sent from `arrival - (burst - 1) / rate`, and moves it on
 by `1 / rate`. A response's deadline holds requests back by moving it too.
-`inflight` counts the requests awaiting a response, under the `slots` lock.
+`inflight` counts the requests awaiting a response, under the `slots` lock, and
+`quota` is the rate limit the server last reported (see [`quota`](@ref)).
 """
 mutable struct Throttle
     @atomic arrival::Float64
     inflight::Int
     const slots::Threads.Condition
+    @atomic quota::Union{Quota, Nothing}
 end
 
-Throttle() = Throttle(0.0, 0, Threads.Condition())
+Throttle() = Throttle(0.0, 0, Threads.Condition(), nothing)
 
 const THROTTLES = Base.Lockable(Dict{Tuple{String, UInt}, Throttle}())
 
@@ -565,6 +570,40 @@ function Base.showerror(io::IO, @nospecialize(ex::TransportError{<:Request{kind}
     end
     print(io, "The :", kind, " request to ", nameof(typeof(request.endpoint)), " at ", url, " failed: ")
     if isnothing(explanation) print(io, message) else print(io, explanation, "\n  (", message, ')') end
+end
+
+"""
+    RateLimitError <: Exception
+
+An exception type for requests not sent because they would have waited longer
+than their config's `timeout` (see [`perform`](@ref)).
+
+`request` is the request, and `until` when it could have been sent (a UTC
+`DateTime`), held back by a deadline a response set or by its config's
+[`RateLimit`](@ref). An `until` of `nothing` means it waited for one of its
+`inflight` requests to finish, and none did in time.
+
+Raise the config's `timeout` to wait instead, or try again later.
+"""
+struct RateLimitError{R <: Request} <: Exception
+    request::R
+    until::Union{DateTime, Nothing}
+end
+
+function Base.showerror(io::IO, @nospecialize(ex::RateLimitError{<:Request{kind}})) where {kind}
+    (; request, until) = ex
+    (; baseurl, ratelimit, timeout) = request.config
+    print(io, "The :", kind, " request to ", nameof(typeof(request.endpoint)), " at ", baseurl,
+          " was not sent: ")
+    if isnothing(until)
+        print(io, "no more than ", ratelimit.inflight, " may await a response at once, and none \
+                   finished within its timeout of ", timeout, " seconds.")
+    else
+        print(io, "requests there are held until ", until, " UTC, ",
+              round(Int, datetime2unix(until) - time()), " seconds from now, past its timeout of ",
+              timeout, " seconds.")
+    end
+    print(io, " Raise the `timeout` of its RequestConfig to wait.")
 end
 
 """

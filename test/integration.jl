@@ -732,7 +732,8 @@ end
         with_server() do baseurl, state
             config = cfg(baseurl; timeout = 2)
             IC.stalled(config)
-            @test @elapsed(IC.stalled(config)) < 2
+            @test @elapsed(@test_throws RateLimitError IC.stalled(config)) < 2
+            @test state.requests == 1
         end
         with_server() do baseurl, state
             @test IC.teapot(cfg(baseurl)).id == 1

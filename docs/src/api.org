@@ -42,12 +42,14 @@ a [[@ref][~ResponseError~]] carrying the server's response body, read as the end
 [[@ref][~errortype~]] when it declares one; and a successful response that can't be read
 as the endpoint's result type (malformed JSON, a missing key) raises a
 [[@ref][~MalformedResponse~]] naming the request and holding the body, unless it reads as
-the ~errortype~. A failure in transit
+the ~errortype~. A request that would wait longer than its ~timeout~ to be sent, under a
+rate limit, raises a [[@ref][~RateLimitError~]] rather than being sent. A failure in transit
 (DNS, connection refused, TLS, exceeding the total ~timeout~, or going silent for too long)
 raises a [[@ref][~TransportError~]] saying which, with any auth secrets hidden from its URL.
 
 #+begin_src @docs
 ResponseError
+RateLimitError
 MalformedRequest
 MalformedResponse
 TransportError
@@ -130,6 +132,7 @@ RestClient.pagecount
 
 #+begin_src @docs
 RestClient.nextallowed
+RestClient.quota
 #+end_src
 
 * Caching interface
