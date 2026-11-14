@@ -269,7 +269,8 @@ responses from `endpoint`.
 A type without a format of its own has [`UnspecifiedFormat`](@ref), which for an
 endpoint becomes its API's format: [`RawFormat`](@ref), unless declared otherwise
 with `@globalconfig … format = …` (see [`@globalconfig`](@ref)). Bytes and `IO`
-are always `RawFormat`, as is any type whose own `dataformat` method says so.
+are always `RawFormat`, as is any type whose own `dataformat` method says so, and
+a string is text whatever the API's format (though a `Vector{String}` takes it).
 
 A `dataformat(::Type)` method is automatically defined when invoking [`@jsondef`](@ref).
 """
@@ -278,7 +279,13 @@ dataformat(@nospecialize(::Type)) = UnspecifiedFormat()
 function dataformat(endpoint::AbstractEndpoint, ::Type{T}) where {T}
     T <: Stream && return StreamFormat{framingtype(T)}(dataformat(endpoint, elementpayload(eltype(T))))
     fmt = dataformat(T)
-    if fmt isa UnspecifiedFormat globalformatdefault(Val(parentmodule(typeof(endpoint)))) else fmt end
+    if !(fmt isa UnspecifiedFormat)
+        fmt
+    elseif T <: AbstractString
+        RawFormat()
+    else
+        globalformatdefault(Val(parentmodule(typeof(endpoint))))
+    end
 end
 
 dataformat(::Type{<:AbstractVector{UInt8}}) = RawFormat()

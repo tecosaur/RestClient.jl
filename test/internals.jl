@@ -1050,25 +1050,28 @@ end
             @endpoint login(user::String) -> Login(user) -> "l" -> String
             @endpoint tag(tags::Vector{String}) -> tags -> :post("t") -> Nothing
             @endpoint words() -> "w" -> Stream{String}
+            @endpoint note(text::String) -> text -> "t" -> Nothing
             struct CsvText; text::String; end
             RestClient.dataformat(::Type{CsvText}) = RawFormat()     # explicitly raw
             @endpoint csv() -> "c" -> CsvText
         end
         FC, json = FormatClient, RestClient.JSONFormat()
-        # Values without a format of their own take the API's; bytes stay raw
+        # Values without a format of their own take the API's; bytes and text stay raw
         @test @inferred(RestClient.dataformat(FC.NamesEndpoint(), Vector{String})) === json
-        @test RestClient.dataformat(FC.NameEndpoint(), String) === json
+        @test RestClient.dataformat(FC.NameEndpoint(), String) === RawFormat()
         @test RestClient.dataformat(FC.BytesEndpoint(), Vector{UInt8}) === RawFormat()
         @test RestClient.dataformat(FC.LoginEndpoint("u"), FC.Login) === RestClient.FormFormat()
-        @test RestClient.dataformat(FC.WordsEndpoint(), Stream{String}) == RestClient.StreamFormat{:SSE}(json)
+        @test RestClient.dataformat(FC.WordsEndpoint(), Stream{String}) == RestClient.StreamFormat{:SSE}(RawFormat())
         @test RestClient.dataformat(PlainEP(), Vector{String}) === RawFormat()   # no API format
         @test RestClient.dataformat(FC.CsvEndpoint(), FC.CsvText) === RawFormat()  # declared raw stays raw
         @test RestClient.dataformat(Vector{String}) === RestClient.UnspecifiedFormat()
         # Resolved when compiled: the call is just its result
         ci = only(code_typed(RestClient.dataformat, Tuple{FC.NamesEndpoint, Type{Vector{String}}}))[1]
         @test count(s -> !Meta.isexpr(s, :code_coverage_effect), ci.code) == 1
-        # A JSON string decodes, and a collection payload is sent as JSON
-        @test RestClient.interpretresponse(codeunits("\"bob\""), RestClient.dataformat(FC.NameEndpoint(), String), String) == "bob"
+        # Text is read as it is, and a collection payload is sent as JSON
+        @test RestClient.interpretresponse(codeunits("\"bob\""), RestClient.dataformat(FC.NameEndpoint(), String), String) == "\"bob\""
+        note = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), FC.NoteEndpoint("{\"a\": 1}")))
+        @test String(copy(note.payload)) == "{\"a\": 1}"
         out = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), FC.TagEndpoint(["a", "b"])))
         @test String(copy(out.payload)) == "[\"a\",\"b\"]"
         @test ("Content-Type" => "application/json") in out.headers
