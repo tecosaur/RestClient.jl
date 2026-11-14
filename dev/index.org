@@ -5,8 +5,10 @@ involved in making well-formed requests, handling serialisation and
 deserialisation, request limiting, and result pagination.
 
 =RestClient= aims to take care of as much of this boilerplate as possible without
-compromising on flexibility. See [[file:tutorial.md][the tutorial]] for a sense of what this looks
-like in practice.
+compromising on flexibility. [[file:tutorial.org][The tutorial]] builds a client step by step, the
+[[file:howto.org][how-to guides]] answer particular tasks (errors, paging, rate limits and so on),
+[[file:behaviour.org][What RestClient does for you]] explains what happens by default, and the [[file:api.org][API]]
+pages are the reference.
 
 * Getting started
 ** Set the API configuration
@@ -72,7 +74,7 @@ name a [[@ref][~Stream~]] output type and iterate the elements as they arrive:
 @endpoint chat(; messages) -> "messages" -> Stream{Delta}
 #+end_src
 
-See [[file:streaming.md][the streaming manual]] for more information.
+See [[file:streaming.org][the streaming manual]] for more information.
 
 ** Extra functionality
 
@@ -82,14 +84,14 @@ See [[file:streaming.md][the streaming manual]] for more information.
 + [[@ref Caching-interface][Caching]]
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
 + Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
-+ [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
++ [[file:streaming.org][Streaming responses]] (via SSE and NDJSON)
 + [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
 + Pacing to an API's [[@ref][~RateLimit~]], and retries of rate-limited requests (waiting
   as the response, or [[@ref][~nextallowed~]], asks) and gateway failures
 + API-wide defaults for authentication, data format, and endpoint supertype, through
   [[@ref][~@globalconfig~]]
-+ Configs derived from another, for a second key or host, sharing its pacing
-  ([[@ref][~RequestConfig~]])
++ Configs derived from another for a second key or host, with pacing shared by host
+  and key ([[@ref][~RequestConfig~]])
 + Headers and query parameters for a whole API, declared once on its endpoint
   supertype ([[@ref][~headers~]], [[@ref][~parameters~]])
 

@@ -12,7 +12,7 @@ Looking at the API documentation, we can see that
 + Decks can be created at the =deck/new= API (optionally shuffled)
 + Operations on a deck occur at =deck/<id>/operation= endpoints
 
-That's it! To get started we'll create an blank package and call it "DeckAPI"
+That's it! To get started we'll create a blank package and call it "DeckAPI"
 (I did this in my temp directory).
 
 #+begin_example
@@ -45,8 +45,8 @@ using RestClient, JSON
 
 Now we're ready to get started implementing the API! To start with, we'll want
 to create a [[@ref][~RequestConfig~]] to hold the context in which we're calling the API.
-This just holds the base URL, a request lock, API access key (optional), and
-timeout value (optional). The /Deck of Cards/ API is simple enough that we can set
+This holds the base URL, and optionally an access key, a rate limit, a timeout,
+and whether to cache responses. The /Deck of Cards/ API is simple enough that we can set
 a single global ~RequestConfig~, but in a more complex case we might define a
 utility function to create a ~RequestConfig~ based on user-provided parameters.
 
@@ -65,7 +65,7 @@ If we didn't care about creating the ~DECK_CONFIG~ variable, this could be
 simplified to just [[@ref @globalconfig][~@globalconfig RequestConfig(...)~]].
 
 That's all the setup needed, next we'll define types for the JSON structures
-that /Desk of Cards/ can return.
+that /Deck of Cards/ can return.
 
 * Defining API types
 
@@ -85,9 +85,7 @@ Thanks to the [[@ref][~@jsondef~]] macro, this is merely a matter of
 
 #+begin_src julia
 @jsondef struct Deck
-    # success::Bool # I don't think we care about this?
     id."deck_id"::String
-    # shuffled::Bool # We should know this anyway?
     remaining::Int
 end
 #+end_src
@@ -97,11 +95,13 @@ We can also draw cards, which look like this
 #+begin_src julia
 @jsondef struct Card
     code::String
-    # image # Not needed by us (at the moment)
     value::String
     suit::String
 end
 #+end_src
+
+We leave out the keys we have no use for (=success=, =shuffled=, a card's
+=image=): keys a struct doesn't name are ignored.
 
 Cards are given as a list in a certain response form, which gives us an
 opportunity to define a [[@ref][~ListResponse~]] subtype.
@@ -123,7 +123,7 @@ In =RestClient=, the bundle of information required to make a request to an
 endpoint is represented with a dedicated struct, subtyping [[@ref][~AbstractEndpoint~]].
 
 The endpoint can then be implemented through the various /endpoint interface
-functions/ ([[@ref][~urlpath~]], [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~parameters~]], [[@ref][~responsetype~]],
+functions/ ([[@ref][~urlpath~]], [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~payload~]], [[@ref][~responsetype~]],
 and [[@ref][~postprocess~]]). We'll start by implementing appropriate methods for the deck
 creation endpoint, then show how this can be simplified using [[@ref][~@endpoint~]]
 shorthand.
@@ -141,7 +141,7 @@ struct NewDeckEndpoint <: AbstractEndpoint
 end
 #+end_src
 
-This endpoint is located at either =deck/new= or =desk/new/shuffle= depending on
+This endpoint is located at either =deck/new= or =deck/new/shuffle= depending on
 whether it should be shuffled.
 
 #+begin_src julia
@@ -216,7 +216,7 @@ this as well, as we did with ~shuffle~ above.
 ** Draw endpoint
 
 The draw endpoint has a similar form to shuffle. You specify a target deck with
-=deck/{deck.id}=, but then end with =shuffle= and specify the number of cards that
+=deck/{deck.id}=, but then end with =draw= and specify the number of cards that
 should be drawn.
 
 The step of defining an accessor method can also be performed by the [[@ref][~@endpoint~]]

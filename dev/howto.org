@@ -1,0 +1,230 @@
+#+title: How-to guides
+
+Each section here answers one question that comes up when wrapping a real API,
+such as "how do I send this header on every request?" or "how do I page through
+results by offset?". They assume you've met ~@endpoint~ and ~@jsondef~, in [[file:tutorial.org][the
+tutorial]] or [[file:index.org][the introduction]], and link to the reference for the details.
+
+The examples share an API supertype, set up as in the first section.
+
+* Set things once for the whole API
+
+Most APIs want the same headers, parameters or key on every request. Give the
+API's endpoints a supertype, and define these for that type:
+
+#+begin_src julia
+abstract type ExampleEndpoint <: AbstractEndpoint end
+
+const CONFIG = RequestConfig("https://api.example.com/v1")
+@globalconfig CONFIG auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
+
+RestClient.headers(::RequestConfig, ::Type{ExampleEndpoint}) =
+    ["Accept" => "application/vnd.example+json",
+     "User-Agent" => "ExampleClient/0.1 (example@example.com)"]
+RestClient.parameters(::RequestConfig, ::Type{ExampleEndpoint}) = ("format" => "json",)
+#+end_src
+
++ Define them for ~Type{ExampleEndpoint}~, not ~Type{<:ExampleEndpoint}~, or they
+  are sent once for every type below it too.
++ An endpoint that gives a header or parameter of the same name replaces the
+  API-wide one, and a given =Accept= or =User-Agent= replaces RestClient's own.
++ With an ~:optional~ auth policy the key is sent only when a config has one, so a
+  caller with a key passes ~RequestConfig(Example.CONFIG; key = "…")~ as the first
+  argument of any endpoint function.
+
+See [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~@globalconfig~]] and [[@ref][~AuthScheme~]].
+
+* Turn the API's errors into its own exception
+
+Declare the type the API's error bodies read as, and every failure raises a
+[[@ref][~ResponseError~]] carrying it as its ~detail~:
+
+#+begin_src julia
+@jsondef struct ExampleError <: Exception
+    code::Int
+    message::String
+end
+
+Base.showerror(io::IO, err::ExampleError) =
+    print(io, "Example API error ", err.code, ": ", err.message)
+
+RestClient.errortype(::ExampleEndpoint) = ExampleError
+#+end_src
+
+A caller then matches the API's errors without touching anything else:
+
+#+begin_src julia
+try
+    lookup("missing-id")
+catch err
+    err isa ResponseError{ExampleError} || rethrow()
+    @warn "Lookup refused" err.detail.code
+end
+#+end_src
+
+An API that reports errors inside a =200= needs nothing more, as long as the
+error type has a required field that a successful body lacks: a body that
+doesn't read as the result is tried as the error type. When an error body also
+reads as a valid result (an empty list with an ~error~ key beside it, say), check
+for it in [[@ref][~postprocess~]], and throw the error type there. It's raised as a
+~ResponseError~ like any other:
+
+#+begin_src julia
+RestClient.postprocess(::Request{<:Any, SummaryEndpoint}, summary::Summary) =
+    if isnothing(summary.error) summary else throw(ExampleError(0, summary.error)) end
+#+end_src
+
++ For errors in several shapes, declare an abstract error type with a subtype
+  chosen per body (as by JSON.jl's ~@choosetype~), and give it a format of its
+  own with ~RestClient.dataformat(::Type{AnyExampleError}) = JSONFormat()~.
++ One endpoint can have its own error type, as in ~@endpoint lookup(id) -> "items/{id}" -> Item | LookupError~.
+
+See [[@ref][~errortype~]].
+
+* Page through results
+
+Declare the page as a [[@ref][~ListResponse~]], and a call returns a [[@ref][~List~]]
+of its items. [[@ref][~nextpage~]] fetches the page after it, and [[@ref][~eachpage~]]
+walks them all, lazily:
+
+#+begin_src julia
+for page in Iterators.take(eachpage(search("julia")), 3)
+    foreach(println, page)
+end
+#+end_src
+
+An API that pages by =Link: <…>; rel="next"= headers needs no more. For any other
+scheme, say where the next page is with a ~nextpage(endpoint, data)~ method. By
+page number, until the response says there are no more:
+
+#+begin_src julia
+RestClient.nextpage(search::SearchEndpoint, results::SearchResults) =
+    if results.has_more SearchEndpoint(search; page = search.page + 1) end
+#+end_src
+
+By offset, until it passes the total reported, stepping by the page size you
+asked for, as a page may come back short:
+
+#+begin_src julia
+RestClient.nextpage(listing::ListingEndpoint, page::ListingPage) =
+    if listing.offset + listing.limit < page.total
+        ListingEndpoint(listing; offset = listing.offset + listing.limit)
+    end
+#+end_src
+
+A cursor the response gives works the same way, with
+~ListingEndpoint(listing; cursor = page.next_cursor)~, and for a URL the response
+gives, return the URL.
+
+Each ~@endpoint~ struct has a copy constructor, ~Endpoint(old; field = new)~,
+which these use. To show "page 2 of 7", give [[@ref][~thispagenumber~]] for an
+endpoint that starts partway through, and [[@ref][~pagecount~]] for the total. A
+response that is a bare JSON array is read by a ~@jsondef Vector~ struct, as the
+~ListResponse~ reference shows.
+
+* Respect a rate limit
+
+Give the published limit as the config's [[@ref][~RateLimit~]], in requests a
+second, and requests are paced to it:
+
+#+begin_src julia
+RequestConfig("https://api.example.com"; ratelimit = RateLimit(100 / 60))  # 100 a minute
+RequestConfig("https://api.example.com"; ratelimit = RateLimit(inflight = 1))  # one at a time
+#+end_src
+
++ A pause the server asks for, with =Retry-After= or an exhausted
+  =X-RateLimit-Remaining=, is waited out without any code from you.
++ For a rule the headers don't carry, such as "wait a full minute after any
+  429", return the wait from [[@ref][~nextallowed~]], as in
+  ~RestClient.nextallowed(::ExampleEndpoint, r) = if r.status == 429 60 end~.
++ If the API counts some endpoints separately (GitHub's searches, Slack's
+  method tiers), give them a [[@ref][~ratebucket~]], so using up one limit
+  doesn't hold back the rest: ~RestClient.ratebucket(::SearchEndpoint) = :search~.
++ To show a caller how many requests they have left, read [[@ref][~quota~]].
++ To be told rather than kept waiting, give the config a ~timeout~: a request
+  that would wait longer raises a [[@ref][~RateLimitError~]] instead.
+
+* Reach a second host, or use several keys
+
+A config holds one base URL and one key. For another host, or another key,
+derive a config from the first, which keeps its other settings:
+
+#+begin_src julia
+const GEOCODING = RequestConfig(CONFIG; baseurl = "https://geocoding.example.com/v1")
+#+end_src
+
+Pass it as the first argument of an endpoint function, as in
+~search(RequestConfig(CONFIG; key = "…"), "julia")~. For an endpoint that always
+lives on the second host, leave out the function form and write the function
+yourself:
+
+#+begin_src julia
+@endpoint struct GeocodeEndpoint
+    "search?{name}&{count}" -> Places
+    name::String
+    count::Int = 10
+end
+
+geocode(name::String; count::Int = 10) =
+    perform(Request{:get}(GEOCODING, GeocodeEndpoint(name, count)))
+#+end_src
+
+Requests through configs with the same host and key are paced together, as the
+server counts them; a different key is paced apart.
+
+* Read a format RestClient doesn't know
+
+Define a format type, the media type it's labelled with, and how to read it,
+then say which types come in it:
+
+#+begin_src julia
+struct FASTAFormat <: RestClient.AbstractFormat end
+
+RestClient.mimetype(::FASTAFormat, ::Type) = "text/x-fasta"
+
+struct FastaRecord
+    header::String
+    sequence::String
+end
+
+RestClient.dataformat(::Type{FastaRecord}) = FASTAFormat()
+
+function RestClient.interpretresponse(data::AbstractVector{UInt8}, ::FASTAFormat,
+                                      ::Type{Vector{FastaRecord}})
+    map(split(String(copy(data)), '>'; keepempty = false)) do entry
+        header, lines... = split(entry, '\n')
+        FastaRecord(header, join(lines))
+    end
+end
+#+end_src
+
+An endpoint ~-> Vector{FastaRecord}~ then asks for =text/x-fasta= and reads the
+reply with this method, unless an =Accept= header is given: an API-wide one, as in
+the first section, would need replacing on that endpoint. Read from a copy of ~data~, as ~String(data)~ empties it.
+To send the format too, define [[@ref][~writepayload~]] for it.
+
+* Test a client without the network
+
+You can check your types against a saved response with
+[[@ref][~interpretresponse~]], which is how RestClient reads every body:
+
+#+begin_src julia
+RestClient.interpretresponse(read("sample.json"), JSONFormat(), SearchResults)
+#+end_src
+
+To test a ~postprocess~ or ~nextallowed~ method, build the response it would see:
+
+#+begin_src julia
+RestClient.Response("https://api.example.com/search", 429, "HTTP/1.1 429",
+                    RestClient.Headers(["Retry-After" => "30"]))
+#+end_src
+
+* See what's sent
+
+Set =JULIA_DEBUG=RestClient= to log every request and response, with their
+headers. A request or response with a body has it saved to a file in a
+temporary folder, named in the log, which is deleted when Julia exits. To see
+it from within a script, wrap the calls in ~withenv("JULIA_DEBUG" => "RestClient") do … end~.
+
+A response's [[@ref][~Response~]] ~source~ says whether it came from the network
+or the cache.
