@@ -40,7 +40,8 @@ endpoint methods:
 taking the request's [`RequestConfig`](@ref) first, so they take precedence over
 any method on a supertype. Parameters every endpoint of an API needs are instead
 defined for the API's type, and are added to those generated (see
-[`parameters`](@ref)).
+[`parameters`](@ref)), as are those of a one-argument `parameters(endpoint)`
+method, for pairs a template can't spell, such as a set only known when sent.
 
 In our `@endpoint israining() ...` example, in addition to defining the
 `israining` function and an (implicit) `IsrainingEndpoint` struct, the macro will
@@ -354,7 +355,8 @@ macro endpoint(args...)
     end
     push!(body, methoddef(:urlpath, path))
     isnothing(params) ||
-        push!(body, methoddef(:parameters, :($querypairs($(Expr(:tuple, params...))))))
+        push!(body, methoddef(:parameters, :($append!($querypairs($(Expr(:tuple, params...))),
+                                                         $(@__MODULE__).parameters($ANAPHORIC_VAR)))))
     push!(body, methoddef(:responsetype, einfo.out; withconfig = false))
     isnothing(einfo.error) ||
         push!(body, methoddef(:errortype, einfo.error; withconfig = false))

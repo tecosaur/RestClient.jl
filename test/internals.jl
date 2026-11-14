@@ -1026,6 +1026,9 @@ end
             end
             RestClient.headers(::FindEndpoint) = ["X-Find" => "1"]
             RestClient.headers(::RequestConfig, ::Type{FindEndpoint}) = ["X-Kind" => "find"]
+            @endpoint scoped(site::String, extra::Vector{Pair{String, String}}) -> "s?{site}" -> String
+            RestClient.parameters(s::ScopedEndpoint) = s.extra
+            RestClient.headers(::ScopedEndpoint) = ["accept" => "text/plain"]
         end
         get(endpoint; key = nothing) = Request{:get}(RequestConfig("http://x"; key), endpoint)
         ping, find = TieredClient.PingEndpoint(), TieredClient.FindEndpoint("a b")
@@ -1036,6 +1039,9 @@ end
              "Accept" => "application/vnd.x+json"]
         @test RestClient.url(get(find)) == "http://x/f?q=a%20b&site=main"
         @test RestClient.url(get(find; key = "k")) == "http://x/f?q=a%20b&tier=keyed&site=main"
+        scoped = TieredClient.ScopedEndpoint("own", ["b" => "2", "b" => "3"])
+        @test RestClient.url(get(scoped)) == "http://x/s?site=own&b=2&b=3"
+        @test RestClient.headers(get(scoped)) == ["accept" => "text/plain"]
         @test RestClient.parameters(RequestConfig("http://x"), Int) === ()
         @test RestClient.headers(Request{:get}(RequestConfig("http://x"), SharedHeadersEP())) ===
             SHARED_HEADERS                                       # nothing to add, so not copied

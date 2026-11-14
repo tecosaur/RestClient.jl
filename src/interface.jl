@@ -44,7 +44,8 @@ urlpath(::RequestConfig, endpoint::AbstractEndpoint) = urlpath(endpoint)
 Return headers for the given `endpoint`, or for every endpoint of type `T`.
 
 A request sends the endpoint's own headers, then those for its type and for each
-of its supertypes in turn, so headers for a whole API belong on its supertype.
+of its supertypes in turn, except those named by a header before them: so
+headers for a whole API belong on its supertype, and an endpoint can replace one.
 Define these for the type itself (`Type{MyAPI}`, not `Type{<:MyAPI}`), or they
 are sent again for each type below it.
 
@@ -74,8 +75,9 @@ Return URI parameters for the given `endpoint`, or for every endpoint of type `T
 
 These are combined with the endpoint URL to form the full query URL: the
 endpoint's own parameters, then those for its type and for each of its
-supertypes in turn. As with [`headers`](@ref), parameters for a whole API belong
-on its supertype, defined for the type itself.
+supertypes in turn, except those named by a parameter before them. As with
+[`headers`](@ref), parameters for a whole API belong on its supertype, defined
+for the type itself, and an endpoint can replace one by giving it itself.
 
 The default implementations return an empty list, or `()` for a type.
 
@@ -109,10 +111,16 @@ hasgenericattr(fn::F, conf::RequestConfig, ::Type{E}) where {F, E} =
 hasgenericattr(::Function, ::RequestConfig, ::Type{Any}) = false
 
 function addgenericattrs!(attrs::Vector{Pair{String, String}}, fn::F, conf::RequestConfig, ::Type{E}) where {F, E}
-    append!(attrs, fn(conf, E))
+    given = Set(attrname(fn, name) for (name, _) in attrs)
+    for attr in fn(conf, E)
+        attrname(fn, first(attr)) ∈ given || push!(attrs, attr)
+    end
     addgenericattrs!(attrs, fn, conf, supertype(E))
 end
 addgenericattrs!(attrs::Vector{Pair{String, String}}, ::Function, ::RequestConfig, ::Type{Any}) = attrs
+
+attrname(::typeof(headers), name::AbstractString) = lowercase(name)
+attrname(::Function, name::AbstractString) = name
 
 """
     authscheme(endpoint::AbstractEndpoint) -> AuthScheme
