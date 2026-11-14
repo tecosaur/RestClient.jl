@@ -1,9 +1,12 @@
 #+title: RestClient.jl
 
-=RestClient= is for writing Julia clients for web APIs. You declare each
-endpoint's URL and the types it sends and receives, and =RestClient= builds the
-requests, reads the responses, and handles paging, rate limits, caching and
-retries. [[file:tutorial.org][The tutorial]] works through a complete client.
+As simple as a RESTful API may be, there's often a fair bit of boilerplate
+involved in making well-formed requests, handling serialisation and
+deserialisation, request limiting, and result pagination.
+
+=RestClient= aims to take care of as much of this boilerplate as possible without
+compromising on flexibility. See [[file:tutorial.org][the tutorial]] for a sense of what this looks
+like in practice.
 
 * Getting started
 ** Set the API configuration

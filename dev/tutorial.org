@@ -3,7 +3,9 @@
 
 * Basic setup
 
-In this tutorial we'll implement a client for part of the [[https://deckofcardsapi.com/][Deck of Cards API]].
+To demonstrate how this can simplify API wrapping, in this tutorial we'll
+implement a client for the [[https://deckofcardsapi.com/][Deck of Cards API]]. For demonstration purposes, we'll
+just wrap part of the API.
 
 Looking at the API documentation, we can see that
 + The base URL is =https://deckofcardsapi.com/api/=
@@ -79,11 +81,13 @@ implement. First, there's the new deck object
 }
 #+end_src
 
-With the [[@ref][~@jsondef~]] macro, this is
+Thanks to the [[@ref][~@jsondef~]] macro, this is merely a matter of
 
 #+begin_src julia
 @jsondef struct Deck
+    # success::Bool # I don't think we care about this?
     id."deck_id"::String
+    # shuffled::Bool # We should know this anyway?
     remaining::Int
 end
 #+end_src
@@ -93,13 +97,11 @@ We can also draw cards, which look like this
 #+begin_src julia
 @jsondef struct Card
     code::String
+    # image # Not needed by us (at the moment)
     value::String
     suit::String
 end
 #+end_src
-
-We leave out the keys we have no use for (=success=, =shuffled=, a card's
-=image=): keys a struct doesn't name are ignored.
 
 Cards are given as a list in a certain response form, which gives us an
 opportunity to define a [[@ref][~ListResponse~]] subtype.
@@ -112,7 +114,7 @@ opportunity to define a [[@ref][~ListResponse~]] subtype.
 end
 #+end_src
 
-Since we've subtyped ~ListResponse~, this will be turned into a [[@ref][~List~]]
+Since we've subtyped ~ListResponse~, this will automagically be turned into a [[@ref][~List~]]
 holding ~cards~.
 
 * Adding endpoints
