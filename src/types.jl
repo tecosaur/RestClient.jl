@@ -264,8 +264,9 @@ provided as keyword arguments:
 - `timeout::Float64`: The longest a request may take, in seconds, or for a
   [`Stream`](@ref), the longest it may go without receiving data. Defaults to
   `Inf`, no limit, so a stream waits as long as it takes. Even so, a request
-  that sends and receives nothing for 20 seconds (or `timeout`, if longer) is
-  abandoned. Either limit raises a [`TransportError`](@ref).
+  is abandoned if its response stops for 20 seconds partway, or takes 120
+  seconds to begin (or `timeout`, if longer). Either limit raises a
+  [`TransportError`](@ref).
 - `cache::Bool`: Whether to cache the response, using lifetime information from
   standard HTTP response headers. Defaults to `true`. Responses are kept on
   disk in the user's cache directory (on Linux, `~/.cache/julia/restclient/`),

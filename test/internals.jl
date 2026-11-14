@@ -273,6 +273,19 @@ end
         @test reason(D.Curl.CURLE_RECV_ERROR) === :dropped
         @test reason(D.Curl.CURLE_ABORTED_BY_CALLBACK) === :other
     end
+    @testset "silence" begin
+        watchdog = RestClient.Watchdog(1)
+        watchdog.lastactive -= 2
+        @test watchdog(0, 0)
+        @test watchdog(10, 0)
+        watchdog.lastactive -= 2
+        @test !watchdog(10, 0)
+        @test watchdog.fired
+        waiting = RestClient.Watchdog(1)
+        waiting.lastactive -= RestClient.DEFAULT_RESPONSE_SECONDS + 1
+        @test !waiting(0, 0)
+        @test RestClient.Watchdog(Inf)(0, 0)
+    end
     @testset "payload resending" begin
         prepare(value) = RestClient.outgoing(Request{:post}(RequestConfig("http://x"), PayloadEP(value)))
         send(out) = read(RestClient.payloadio(out), String)

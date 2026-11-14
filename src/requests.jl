@@ -97,27 +97,38 @@ const NO_SECRETS = (header = nothing, param = nothing)
 """
     DEFAULT_IDLE_SECONDS
 
-How long a request (not a stream) may go without sending or receiving data
-before it is abandoned, unless its `timeout` asks for longer (Downloads' own
-default).
+How long a request (not a stream) may go without sending or receiving data,
+once its response has begun, before it is abandoned, unless its `timeout` asks
+for longer (Downloads' own default).
 """
 const DEFAULT_IDLE_SECONDS = 20
+
+"""
+    DEFAULT_RESPONSE_SECONDS
+
+How long a request may wait for its response to begin before it is abandoned,
+unless its silence limit is longer.
+"""
+const DEFAULT_RESPONSE_SECONDS = 120
 
 # `CURLOPT_FOLLOWLOCATION` mode (libcurl ≥ 8.13; older versions treat it as plain
 # following): a redirect rewrites the method as its status says, so a 303 turns a
 # request with a body into a GET, rather than resending the same method without it.
 const CURLFOLLOW_OBEYCODE = 2
 
-# Abandons a transfer once no data has moved for `limit` seconds, as reported by
+# Abandons a transfer once no data has moved for its `silencelimit`, as reported by
 # curl's progress callback (at least once a second).
 mutable struct Watchdog
     const limit::Float64
     bytes::Int
     lastactive::Float64
+    responding::Bool
     fired::Bool
 end
 
-Watchdog(limit::Real) = Watchdog(Float64(limit), 0, time(), false)
+Watchdog(limit::Real) = Watchdog(Float64(limit), 0, time(), false, false)
+
+silencelimit(w::Watchdog) = if w.responding w.limit else max(w.limit, DEFAULT_RESPONSE_SECONDS) end
 
 # Never less than the total `timeout`, which curl enforces
 idlelimit(timeout::Real) = if isfinite(timeout) max(timeout, DEFAULT_IDLE_SECONDS) else DEFAULT_IDLE_SECONDS end
@@ -375,7 +386,9 @@ end
 # A transport failure as a `TransportError`, with `req`'s secrets removed from its URL
 function transporterror(req::Request, err::Downloads.RequestError, watchdog::Watchdog)
     reason, message = if watchdog.fired
-        :silence, "No data received for $(watchdog.limit) seconds"
+        waited = silencelimit(watchdog)
+        :silence, if watchdog.responding "No data received for $waited seconds"
+                  else "No response for $waited seconds" end
     else
         something(findfirst(codes -> err.code ∈ codes, CURL_REASONS), :other), err.message
     end
@@ -556,9 +569,10 @@ curlrequest(url::String, options::TransferOptions; kwargs...) =
 # Whether the transfer may continue, given the bytes moved so far
 function (w::Watchdog)(dlnow::Integer, ulnow::Integer)
     now = time()
+    w.responding |= dlnow > 0
     if dlnow + ulnow != w.bytes
         w.bytes, w.lastactive = dlnow + ulnow, now
-    elseif now - w.lastactive > w.limit
+    elseif now - w.lastactive > silencelimit(w)
         w.fired = true
     end
     !w.fired
