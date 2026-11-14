@@ -3,9 +3,7 @@
 
 * Basic setup
 
-To demonstrate how this can simplify API wrapping, in this tutorial we'll
-implement a client for the [[https://deckofcardsapi.com/][Deck of Cards API]]. For demonstration purposes, we'll
-just wrap part of the API.
+In this tutorial we'll implement a client for part of the [[https://deckofcardsapi.com/][Deck of Cards API]].
 
 Looking at the API documentation, we can see that
 + The base URL is =https://deckofcardsapi.com/api/=
@@ -81,7 +79,7 @@ implement. First, there's the new deck object
 }
 #+end_src
 
-Thanks to the [[@ref][~@jsondef~]] macro, this is merely a matter of
+With the [[@ref][~@jsondef~]] macro, this is
 
 #+begin_src julia
 @jsondef struct Deck
@@ -114,7 +112,7 @@ opportunity to define a [[@ref][~ListResponse~]] subtype.
 end
 #+end_src
 
-Since we've subtyped ~ListResponse~, this will automagically be turned into a [[@ref][~List~]]
+Since we've subtyped ~ListResponse~, this will be turned into a [[@ref][~List~]]
 holding ~cards~.
 
 * Adding endpoints

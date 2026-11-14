@@ -56,8 +56,8 @@ For a newline-delimited endpoint, name the framing as the second type parameter:
 @endpoint generate(; prompt) -> "api/generate" -> Stream{Token, :NDJSON}
 #+end_src
 
-A ~Stream~ result type is all it takes: whatever the endpoint's supertype, its
-requests are read incrementally, just as a [[@ref][~ListResponse~]] result is wrapped
+With a ~Stream~ result type, whatever the endpoint's supertype, its requests are
+read incrementally, just as a [[@ref][~ListResponse~]] result is wrapped
 in a [[@ref][~List~]]. The =Accept= header is set from the framing automatically
 (=text/event-stream= for SSE, =application/x-ndjson= for NDJSON), so you need not
 set it yourself.
@@ -222,3 +222,11 @@ apply, but only to the response status: a 429 is retried before the first
 element reaches you, as for a buffered request, and once elements flow there is
 nothing to retry.
 #+end_info
+
+* Beyond SSE and NDJSON
+
+A framing of your own, such as a length-prefixed binary protocol, is added from
+outside the package by defining [[@ref][~RestClient.readframe~]] and its companions
+for a new framing symbol, with no change to ~Stream~, the transport, or
+cancellation. Few clients will need one; it's there for libraries built on
+=RestClient=.

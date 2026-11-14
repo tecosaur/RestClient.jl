@@ -1,9 +1,7 @@
-#+title: What RestClient does for you
+#+title: Default behaviour
 
-Call an endpoint twice in a minute, and the second answer may come from your own
-disk rather than the server. Call it while the server is asking clients to slow
-down, and it waits before sending. Most of what happens between calling an
-endpoint and getting its result needs no code from you.
+By default, =RestClient= caches responses, paces and retries requests, and limits
+how long a request may take.
 
 * Caching
 
@@ -73,7 +71,7 @@ still stop a request (other than a stream) that will never finish:
 A longer ~timeout~ raises both. A request that hits either raises a
 [[@ref][~TransportError~]] saying which.
 
-* What each request sends
+* What's sent
 
 Every request says =User-Agent: RestClient.jl/<version>=, with an =Accept= header
 for the result's format and a =Content-Type= for the payload's. Headers you give,
@@ -85,7 +83,7 @@ Other) turns the request into a =GET= without its body; every other redirect,
 
 Keys are hidden as =*****= in errors, debug output, and the cache.
 
-* The order things happen in
+* Order of events
 
 1. [[@ref][~validate~]] checks the endpoint, before anything is sent.
 2. The request waits its turn, then is sent, or served from the cache.
