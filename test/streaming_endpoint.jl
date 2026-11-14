@@ -172,12 +172,14 @@ function run(base)
         hangup = timedwait(() -> isready(Main.SILENT_HANGUPS), 5)
         hangup === :ok && take!(Main.SILENT_HANGUPS)
     end
-    @testset "in flight until the response begins" begin
+    @testset "in flight until closed" begin
         single = RequestConfig(base; ratelimit = RateLimit(inflight = 1))
         s = silent(single)
         @test first(s) == Tok(n=1)
-        @test collect(ssechat(single)) == [Tok(n=1), Tok(n=2), Tok(n=3)]
+        next = Threads.@spawn collect(ssechat(single))
+        @test timedwait(() -> istaskdone(next), 1) === :timed_out
         close(s)
+        @test fetch(next) == [Tok(n=1), Tok(n=2), Tok(n=3)]
         hangup = timedwait(() -> isready(Main.SILENT_HANGUPS), 5)
         hangup === :ok && take!(Main.SILENT_HANGUPS)
     end

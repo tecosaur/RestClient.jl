@@ -184,7 +184,7 @@ end
 How fast requests through a [`RequestConfig`](@ref), and any other for the
 same host and key, may be sent: on average at most `rate` a second, up to
 `burst` of them at once, with no more than `inflight` awaiting a response at a
-time (a [`Stream`](@ref) until its response begins). A request that would
+time (a [`Stream`](@ref) until it's closed or ends). A request that would
 exceed the limit waits until it may be sent.
 
 Give a limit published over a window, such as "100 a minute", as its rate,

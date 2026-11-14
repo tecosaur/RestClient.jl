@@ -263,8 +263,8 @@ deadlines(req::Request, response::Response) =
 
 Run `exchange()`, `req`'s exchange with the network, once its config's
 [`Throttle`](@ref) admits it under the config's [`RateLimit`](@ref), then hold
-the throttle to the deadlines its response sets. It is in flight until
-`exchange` returns: once a stream's response has begun.
+the throttle to the deadlines its response sets. It is in flight until its
+response has been received: for a stream, until its transfer ends.
 """
 function throttled(exchange::F, req::Request) where {F <: Function}
     (; ratelimit, timeout) = req.config
@@ -275,6 +275,7 @@ function throttled(exchange::F, req::Request) where {F <: Function}
         end
         throttle.inflight += 1
     end
+    release() = @lock throttle.slots (throttle.inflight -= 1; notify(throttle.slots))
     incoming = try
         # Wait (up to `timeout`) for the time the GCRA admits a request, and claim it
         allowance = (ratelimit.burst - 1) / ratelimit.rate
@@ -285,8 +286,15 @@ function throttled(exchange::F, req::Request) where {F <: Function}
             @atomicreplace(throttle.arrival, arrival => max(arrival, now) + 1 / ratelimit.rate).success && break
         end
         exchange()::Incoming
-    finally
-        @lock throttle.slots (throttle.inflight -= 1; notify(throttle.slots))
+    catch
+        release()
+        rethrow()
+    end
+    if isnothing(incoming.transfer)
+        release()
+    else
+        # Its failure is the stream's to report
+        Threads.@spawn (wait(incoming.transfer; throw = false); release())
     end
     hold!(req, max(deadlines(req, incoming.response)...))
     incoming
