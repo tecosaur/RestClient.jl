@@ -479,6 +479,11 @@ end
 @testset "endpoint macro" begin
     # The macros' happy paths run throughout integration.jl; these pin the
     # compile-time errors, which have no request analogue.
+    @testset "arrow chains" begin
+        lines(ex) = Expr(:block, LineNumberNode(1), LineNumberNode(2), ex)
+        @test RestClient.linearize_arrowforms(Expr(:->, :(f(x)), lines(Expr(:->, "u", lines(:T))))) ==
+            Any[:(f(x)), "u", :T]
+    end
     @testset "errors" begin
         @test_throws Exception @macroexpand @endpoint 42               # not a struct/arrow form
         @test_throws "Unknown @jsondef option" @macroexpand @jsondef :nosho struct J; x::Int; end

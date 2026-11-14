@@ -693,9 +693,9 @@ function linearize_arrowforms(expr::Expr)
     components = Any[]
     while Meta.isexpr(expr, :->, 2)
         push!(components, expr.args[1])
-        expr = if Meta.isexpr(expr.args[2], :block, 2)
-            expr.args[2].args[2]
-        end
+        body = expr.args[2]
+        exprs = if Meta.isexpr(body, :block) filter(a -> !(a isa LineNumberNode), body.args) else () end
+        expr = if length(exprs) == 1 only(exprs) end
     end
     push!(components, expr)
     components
