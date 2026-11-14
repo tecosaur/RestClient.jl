@@ -8,8 +8,7 @@ it:
 #+begin_src julia
 abstract type ExampleEndpoint <: AbstractEndpoint end
 
-const CONFIG = RequestConfig("https://api.example.com/v1")
-@globalconfig CONFIG auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
+@globalconfig RequestConfig("https://api.example.com/v1") auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
 
 RestClient.headers(::RequestConfig, ::Type{ExampleEndpoint}) =
     ["Accept" => "application/vnd.example+json",
@@ -21,9 +20,8 @@ RestClient.parameters(::RequestConfig, ::Type{ExampleEndpoint}) = ("format" => "
   are sent once for every type below it too.
 + An endpoint that gives a header or parameter of the same name replaces the
   API-wide one, and a given =Accept= or =User-Agent= replaces RestClient's own.
-+ With an ~:optional~ auth policy the key is sent only when a config has one, so a
-  caller with a key passes ~RequestConfig(Example.CONFIG; key = "…")~ as the first
-  argument of any endpoint function.
++ With an ~:optional~ auth policy the key is sent only when a config has one, so
+  callers without a key need nothing more.
 
 See [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~@globalconfig~]] and [[@ref][~AuthScheme~]].
 
@@ -139,14 +137,16 @@ RequestConfig("https://api.example.com"; ratelimit = RateLimit(inflight = 1))  #
 * Use a second host or key
 
 A config holds one base URL and one key. For another host, or another key,
-derive a config from the first, which keeps its other settings:
+derive a config from the API's, which ~@globalconfig~ without arguments gives,
+keeping its other settings:
 
 #+begin_src julia
-const GEOCODING = RequestConfig(CONFIG; baseurl = "https://geocoding.example.com/v1")
+const GEOCODING = RequestConfig(@globalconfig; baseurl = "https://geocoding.example.com/v1")
 #+end_src
 
-Pass it as the first argument of an endpoint function, as in
-~search(RequestConfig(CONFIG; key = "…"), "julia")~. For an endpoint that always
+Pass a derived config as the first argument of an endpoint function. Outside the
+module, ~RestClient.globalconfig(Val(Example))~ gives its config, as in
+~search(RequestConfig(RestClient.globalconfig(Val(Example)); key = "…"), "julia")~. For an endpoint that always
 lives on the second host, leave out the function form and write the function
 yourself:
 
