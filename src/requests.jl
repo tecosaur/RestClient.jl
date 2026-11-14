@@ -319,7 +319,10 @@ function throttled(exchange::F, req::Request) where {F <: Function}
     end
     quota = quotaof(incoming.response.headers)
     isnothing(quota) || @atomic throttle.quota = quota
-    hold!(req, max(deadlines(req, incoming.response)...))
+    deadline = max(deadlines(req, incoming.response)...)
+    hold!(req, deadline) &&
+        @info S"$(req.config.baseurl) asked for a pause of {emphasis:$(round(deadline - time(), digits = 1))} \
+                seconds, answering $(endpointlabel(req.endpoint)) with a $(incoming.response.status)"
     incoming
 end
 
@@ -342,15 +345,15 @@ function claimslot!(req::Request, throttle::Throttle)
     end
 end
 
-# Hold requests sharing `req`'s throttle back until `deadline`, if it's finite
+# Hold requests sharing `req`'s throttle back until `deadline`, if it's finite,
+# and say whether that holds them a second or more longer
 function hold!(req::Request, deadline::Float64)
-    isfinite(deadline) || return
-    (; ratelimit, baseurl) = req.config
+    isfinite(deadline) || return false
+    (; ratelimit) = req.config
     throttle = throttler(req.config, ratebucket(req.endpoint))
     allowance = (ratelimit.burst - 1) / ratelimit.rate
     before, after = @atomic throttle.arrival max deadline + allowance
-    after - before >= 1 &&
-        @info S"$baseurl asked for a pause of {emphasis:$(round(deadline - time(), digits = 1))} seconds"
+    after - before >= 1
 end
 
 """

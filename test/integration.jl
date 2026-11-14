@@ -780,7 +780,7 @@ end
     end
     @testset "waits logged" begin
         with_server() do baseurl, state
-            @test_logs (:info, r"asked for a pause of") match_mode = :any IC.limited(cfg(baseurl))
+            @test_logs (:info, r"asked for a pause of .* answering limited\(…\) with a 429") match_mode = :any IC.limited(cfg(baseurl))
         end
     end
     @testset "@globalconfig of a name" begin
