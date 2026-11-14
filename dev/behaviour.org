@@ -1,4 +1,4 @@
-#+title: Default behaviour
+#+title: Built-in behaviours
 
 By default, =RestClient= caches responses, paces and retries requests, and limits
 how long a request may take.
