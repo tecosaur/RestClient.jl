@@ -671,9 +671,9 @@ function Base.showerror(io::IO, @nospecialize(ex::ResponseError))
     print(io, " from ", redactsecrets(ex.response.url, authsecrets(ex.request)))
     if !isnothing(ex.detail)
         shown = sprint(if ex.detail isa Exception showerror else show end, ex.detail; context = io)
-        print(io, "\n  ", replace(rstrip(shown), '\n' => "\n  "))
+        print(io, "\n  ", replace(hidekey(rstrip(shown), ex.request), '\n' => "\n  "))
     elseif !isempty(ex.body)
-        print(io, "\n  ", bodypreview(ex.body))
+        print(io, "\n  ", bodypreview(ex.body, ex.request))
     end
 end
 
@@ -702,7 +702,7 @@ function Base.showerror(io::IO, @nospecialize(ex::MalformedResponse))
           " response to the request for ", endpointlabel(ex.request.endpoint), " at ",
           redactsecrets(ex.response.url, authsecrets(ex.request)), "\n  ",
           replace(rstrip(sprint(showerror, ex.error; context = io)), '\n' => "\n  "))
-    isempty(ex.body) || print(io, "\n  Body: ", bodypreview(ex.body))
+    isempty(ex.body) || print(io, "\n  Body: ", bodypreview(ex.body, ex.request))
 end
 
 function endpointlabel(endpoint::AbstractEndpoint)
@@ -710,10 +710,17 @@ function endpointlabel(endpoint::AbstractEndpoint)
     if isnothing(source) string(nameof(typeof(endpoint))) else "$source(…)" end
 end
 
-function bodypreview(body::Vector{UInt8})
+function bodypreview(body::Vector{UInt8}, req::Request)
     shown = map(c -> if isvalid(c) && (isprint(c) || isspace(c)) c else '�' end,
                 String(body[1:min(end, 512)]))
-    replace(rstrip(shown), '\n' => "\n  ") * ifelse(length(body) > 512, " …", "")
+    replace(hidekey(rstrip(shown), req), '\n' => "\n  ") * ifelse(length(body) > 512, " …", "")
+end
+
+# `text` with `req`'s key hidden, as a server may echo it back; one short enough to
+# turn up by chance isn't worth garbling the text for
+function hidekey(text::AbstractString, req::Request)
+    (; key) = req.config
+    if isnothing(key) || length(key) < 8 text else replace(text, key => "*****") end
 end
 
 

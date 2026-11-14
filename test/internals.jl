@@ -292,6 +292,13 @@ end
         @test sprint(show, RequestConfig("http://x"; ratelimit = RateLimit(3))) ==
             "RequestConfig(\"http://x\"; ratelimit = RateLimit(3.0), cache = true)"
     end
+    @testset "key hidden in a shown body" begin
+        shown(key) = sprint(showerror, ResponseError(Request{:get}(RequestConfig("http://x"; key), PlainEP()),
+                                                     sample_response(; status = 401),
+                                                     Vector{UInt8}("api-key \"$key\" is invalid"), nothing))
+        @test occursin("api-key \"*****\" is invalid", shown("s3cr3tkey"))
+        @test occursin("api-key \"k\" is invalid", shown("k"))
+    end
     @testset "headers" begin
         headers = hdr("Content-Type" => "text/plain", "Link" => "<a>", "link" => "<b>")
         @test headers["content-type"] == headers["CONTENT-TYPE"] == "text/plain"
