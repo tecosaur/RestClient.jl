@@ -509,7 +509,7 @@ MalformedRequest(request::Request, issues::AbstractVector{<:AbstractString}) =
     MalformedRequest{typeof(request)}(request, collect(String, issues))
 
 function Base.showerror(io::IO, @nospecialize(ex::MalformedRequest{<:Request{kind}})) where {kind}
-    print(io, "Malformed :", kind, " request to ", nameof(typeof(ex.request.endpoint)), ':')
+    print(io, "Malformed :", kind, " request for ", endpointlabel(ex.request.endpoint), ':')
     if isempty(ex.issues)
         print(io, " (no details provided)")
     elseif length(ex.issues) == 1
@@ -568,7 +568,7 @@ function Base.showerror(io::IO, @nospecialize(ex::TransportError{<:Request{kind}
     elseif reason === :redirects
         "it was redirected too many times. The API may be redirecting in a loop."
     end
-    print(io, "The :", kind, " request to ", nameof(typeof(request.endpoint)), " at ", url, " failed: ")
+    print(io, "The :", kind, " request for ", endpointlabel(request.endpoint), " at ", url, " failed: ")
     if isnothing(explanation) print(io, message) else print(io, explanation, "\n  (", message, ')') end
 end
 
@@ -593,7 +593,7 @@ end
 function Base.showerror(io::IO, @nospecialize(ex::RateLimitError{<:Request{kind}})) where {kind}
     (; request, until) = ex
     (; baseurl, ratelimit, timeout) = request.config
-    print(io, "The :", kind, " request to ", nameof(typeof(request.endpoint)), " at ", baseurl,
+    print(io, "The :", kind, " request for ", endpointlabel(request.endpoint), " at ", baseurl,
           " was not sent: ")
     if isnothing(until)
         print(io, "no more than ", ratelimit.inflight, " may await a response at once, and none \
@@ -674,10 +674,15 @@ end
 
 function Base.showerror(io::IO, @nospecialize(ex::MalformedResponse))
     print(io, "Could not read a ", ex.type, " from the HTTP ", ex.response.status,
-          " response to ", nameof(typeof(ex.request.endpoint)), " at ",
+          " response to the request for ", endpointlabel(ex.request.endpoint), " at ",
           redactsecrets(ex.response.url, authsecrets(ex.request)), "\n  ",
           replace(rstrip(sprint(showerror, ex.error; context = io)), '\n' => "\n  "))
     isempty(ex.body) || print(io, "\n  Body: ", bodypreview(ex.body))
+end
+
+function endpointlabel(endpoint::AbstractEndpoint)
+    source = endpointsource(typeof(endpoint))
+    if isnothing(source) string(nameof(typeof(endpoint))) else "$source(…)" end
 end
 
 function bodypreview(body::Vector{UInt8})

@@ -491,7 +491,7 @@ function nextpage(list::List{<:Any, <:Any, <:Request{kind}}) where {kind}
         perform(Request{kind}(request.config, target))
     elseif !isnothing(target)
         absolute = @something(underbase(request.config, target), throw(ArgumentError(
-            "The next page of $(nameof(typeof(request.endpoint))), \
+            "The next page of $(endpointlabel(request.endpoint)), \
              $(redactsecrets(target, authsecrets(request))), is not under the API's base URL \
              $(request.config.baseurl); `nextpage` should give a URL under it, or an endpoint")))
         url = withauthparam(request, absolute)

@@ -690,6 +690,8 @@ end
         @eval module CollisionClient
             using RestClient
             @endpoint get_item(id) -> "items/{id}" -> String
+            @endpoint fetch_named(id) -> struct NamedEndpoint; id::Int; end -> "n/{id}" -> String
+            @endpoint struct BareEndpoint; "b" -> String; end
             abstract type CountriesEndpoint <: AbstractEndpoint end
         end
         cc = CollisionClient
@@ -700,6 +702,13 @@ end
         @test_throws "`@endpoint get_item(…)` already defines it" @eval cc @endpoint getItem(id) -> "x" -> String
         @test_throws "already defines it" @eval cc @endpoint struct GetItemEndpoint; "y" -> String; end
         @test_throws "`CountriesEndpoint` is already defined" @eval cc @endpoint countries() -> "c" -> String
+        @test_throws "already defines it" @eval cc @endpoint fetch_other(id) -> struct NamedEndpoint
+            id::Int
+        end -> "m/{id}" -> String
+        shown(endpoint) = sprint(showerror, MalformedRequest(Request{:get}(RequestConfig("http://x"), endpoint), ["bad"]))
+        @test shown(cc.GetItemEndpoint(1)) == "Malformed :get request for get_item(…): bad"
+        @test shown(cc.NamedEndpoint(1)) == "Malformed :get request for fetch_named(…): bad"
+        @test shown(cc.BareEndpoint()) == "Malformed :get request for BareEndpoint: bad"
     end
     @testset "fields without tags" begin
         @test_throws "cannot take tags" @macroexpand @endpoint struct TagEndpoint
@@ -907,7 +916,7 @@ end
         @test_throws ArgumentError check(42)
         @test MalformedRequest(Request{:get}(keyed, PlainEP()), [SubString("ab", 1, 1)]).issues == ["a"]
         @test sprint(showerror, MalformedRequest(Request{:post}(keyed, PlainEP()), ["bad"])) ==
-            "Malformed :post request to PlainEP: bad"
+            "Malformed :post request for PlainEP: bad"
         @testset "missing key" begin
             issues = ["bad"]
             err = try check(issues; config = RequestConfig("http://x")) catch e; e end
@@ -1280,7 +1289,7 @@ end
         @test err isa MalformedResponse && err.error isa ArgumentError
         @test err.type === FieldSyntax.Defaulted && err.body == codeunits("{\"see\":2}")
         msg = sprint(showerror, err)
-        @test all(s -> occursin(s, msg), ("DefaultedEndpoint", "https://api.example.com/defaulted",
+        @test all(s -> occursin(s, msg), ("request for defaulted(…)", "https://api.example.com/defaulted",
                                           "required key \"ay\"", "{\"see\":2}"))
     end
     @testset "contents" begin

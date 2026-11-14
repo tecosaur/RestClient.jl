@@ -369,13 +369,11 @@ macro endpoint(args...)
     esc(Expr(:block, body...))
 end
 
-# The function whose `@endpoint` generated `T`'s name, or `nothing` for a struct named
-# by hand, so a redefinition (by Revise, say) can be told from a clash
+# The function `@endpoint` made for `T`, or `nothing` for one declared without
 endpointsource(@nospecialize(::Type)) = nothing
 
-# Refuse to define the endpoint struct `name`, for the function `source` (or by hand
-# if `nothing`), over anything but an earlier definition of the same endpoint. A
-# struct with no recorded source may be one whose `@endpoint` Revise has removed.
+# Refuse to define the endpoint struct `name` over anything but its own earlier
+# definition; one with no recorded source may be an endpoint Revise has just removed
 function claimname(mod::Module, name::Symbol, source::Union{Symbol, Nothing})
     isdefined(mod, name) || return
     existing = getglobal(mod, name)
@@ -595,7 +593,7 @@ function extract_forms(args::Tuple; mod::Module)
     # Chosen as the struct is defined, so a `@globalconfig` in the same block applies
     esuper = something(esuper, :(if isdefined($mod, $(QuoteNode(SUPERTYPE_VAR))); $(GlobalRef(mod, SUPERTYPE_VAR))
                                  else $(GlobalRef(@__MODULE__, :AbstractEndpoint)) end))
-    esource = if isnothing(estruct) first(efunc.args) end
+    esource = if !isnothing(efunc) first(efunc.args) end
     if isnothing(estruct)
         estructname = Symbol(join(map(uppercasefirst, split(String(efunc.args[1]), '_'))) * "Endpoint")
         estructparams = nothing

@@ -699,7 +699,7 @@ function ResponseError(req::Request, response::Response, body::Vector{UInt8})
         ResponseError{E, typeof(req)}(req, response, body, detail)
     catch err
         err isa InterruptException && rethrow()
-        @debug "The response from $(nameof(typeof(req.endpoint))) doesn't read as its error type $E either" exception = err
+        @debug "The response for $(endpointlabel(req.endpoint)) doesn't read as its error type $E either" exception = err
         ResponseError(req, response, body, nothing)
     end
 end
