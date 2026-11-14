@@ -3,9 +3,7 @@
 Call an endpoint twice in a minute, and the second answer may come from your own
 disk rather than the server. Call it while the server is asking clients to slow
 down, and it waits before sending. Most of what happens between calling an
-endpoint and getting its result needs no code from you. This page sets out what
-RestClient does by default, so none of it catches you out, and how to change it.
-For testing a client offline or seeing what it sends, see the [[file:howto.org][how-to guides]].
+endpoint and getting its result needs no code from you.
 
 * Caching
 

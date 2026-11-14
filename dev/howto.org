@@ -1,16 +1,9 @@
 #+title: How-to guides
 
-Each section here answers one question that comes up when wrapping a real API,
-such as "how do I send this header on every request?" or "how do I page through
-results by offset?". They assume you've met ~@endpoint~ and ~@jsondef~, in [[file:tutorial.org][the
-tutorial]] or [[file:index.org][the introduction]], and link to the reference for the details.
-
-The examples share an API supertype, set up as in the first section.
-
 * Set things once for the whole API
 
-Most APIs want the same headers, parameters or key on every request. Give the
-API's endpoints a supertype, and define these for that type:
+Give the API's endpoints a supertype, and define the headers, parameters and key
+every request needs for that type:
 
 #+begin_src julia
 abstract type ExampleEndpoint <: AbstractEndpoint end
@@ -51,7 +44,7 @@ Base.showerror(io::IO, err::ExampleError) =
 RestClient.errortype(::ExampleEndpoint) = ExampleError
 #+end_src
 
-A caller then matches the API's errors without touching anything else:
+A caller then catches them by type:
 
 #+begin_src julia
 try
