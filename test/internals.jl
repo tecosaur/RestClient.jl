@@ -649,6 +649,21 @@ end
             @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
         end
     end
+    @testset "name collisions" begin
+        @eval module CollisionClient
+            using RestClient
+            @endpoint get_item(id) -> "items/{id}" -> String
+            abstract type CountriesEndpoint <: AbstractEndpoint end
+        end
+        cc = CollisionClient
+        redirect_stderr(devnull) do
+            @eval cc @endpoint get_item(id) -> "again/{id}" -> String
+        end
+        @test RestClient.urlpath(RequestConfig("http://x"), cc.GetItemEndpoint(1)) == "again/1"
+        @test_throws "`@endpoint get_item(…)` already defines it" @eval cc @endpoint getItem(id) -> "x" -> String
+        @test_throws "already defines it" @eval cc @endpoint struct GetItemEndpoint; "y" -> String; end
+        @test_throws "`CountriesEndpoint` is already defined" @eval cc @endpoint countries() -> "c" -> String
+    end
     @testset "error type" begin
         @eval module ErrorTypeClient
             using RestClient

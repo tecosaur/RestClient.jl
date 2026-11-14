@@ -79,7 +79,9 @@ done by [`@globalconfig`](@ref).
 Without a `struct` form, the arguments of the function will be used to generate
 a `struct` named after the function, with each `_`-separated word capitalised and
 joined, and `Endpoint` appended (`getUserInfo` gives `GetUserInfoEndpoint`,
-and `list_repos` gives `ListReposEndpoint`), and populate its fields.
+and `list_repos` gives `ListReposEndpoint`), and populate its fields. A name
+already taken by something else, such as `get_user_info`'s struct, is refused:
+give one of them a `struct` form to name it.
 
 With a `struct` form, all arguments that match a field name will inherit the
 field's type and default value, though a positional argument followed by a
@@ -311,6 +313,8 @@ macro endpoint(args...)
     body = Expr[]
     # Standard components: struct, page, parameters, responsetype
     structdef = Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, einfo.structdef)
+    # Checked as the macro expands, which Revise repeats, so it may see a redefinition
+    claimname(__module__, einfo.structname, einfo.source)
     if isnothing(einfo.func)
         push!(body, structdef)
     else
@@ -320,6 +324,8 @@ macro endpoint(args...)
                          "    $(einfo.structname)\n\nThe request made by `$(first(einfo.func.args))`, which see.\n",
                          einfo.structname))
     end
+    isnothing(einfo.source) ||
+        push!(body, :($(@__MODULE__).endpointsource(::Type{$(einfo.structname)}) = $(QuoteNode(einfo.source))))
     if !isempty(efields)
         old = gensym("old")
         push!(body, :($(einfo.structname)($old::$(einfo.structname); $((Expr(:kw, f, :($old.$f)) for f in efields)...)) =
@@ -359,6 +365,29 @@ macro endpoint(args...)
         push!(body, Expr(:macrocall, GlobalRef(Base, Symbol("@__doc__")), __source__, fnoconfig), fconfig)
     end
     esc(Expr(:block, body...))
+end
+
+# The function whose `@endpoint` generated `T`'s name, or `nothing` for a struct named
+# by hand, so a redefinition (by Revise, say) can be told from a clash
+endpointsource(@nospecialize(::Type)) = nothing
+
+# Refuse to define the endpoint struct `name`, for the function `source` (or by hand
+# if `nothing`), over anything but an earlier definition of the same endpoint. A
+# struct with no recorded source may be one whose `@endpoint` Revise has removed.
+function claimname(mod::Module, name::Symbol, source::Union{Symbol, Nothing})
+    isdefined(mod, name) || return
+    existing = getglobal(mod, name)
+    isstruct = existing isa Type && existing <: AbstractEndpoint && !isabstracttype(existing)
+    previous = if isstruct endpointsource(existing) end
+    isstruct && (isnothing(previous) || previous === source) && return
+    claimant = if isnothing(source) "struct $name … end" else "$source(…)" end
+    holder = if isnothing(previous)
+        "`$name` is already defined in $mod"
+    else
+        "`@endpoint $previous(…)` already defines it in $mod"
+    end
+    throw(ArgumentError("`@endpoint $claimant` would define `$name`, but $holder. Give one of them \
+                         its own struct name, as in `@endpoint f(…) -> struct OtherEndpoint … end -> …`."))
 end
 
 # `expr` with its `@__doc__` markers removed, so a docstring passes it by
@@ -564,6 +593,7 @@ function extract_forms(args::Tuple; mod::Module)
     # Chosen as the struct is defined, so a `@globalconfig` in the same block applies
     esuper = something(esuper, :(if isdefined($mod, $(QuoteNode(SUPERTYPE_VAR))); $(GlobalRef(mod, SUPERTYPE_VAR))
                                  else $(GlobalRef(@__MODULE__, :AbstractEndpoint)) end))
+    esource = if isnothing(estruct) first(efunc.args) end
     if isnothing(estruct)
         estructname = Symbol(join(map(uppercasefirst, split(String(efunc.args[1]), '_'))) * "Endpoint")
         estructparams = nothing
@@ -572,7 +602,7 @@ function extract_forms(args::Tuple; mod::Module)
         estruct.args[2] = Expr(:<:, estruct.args[2], esuper)
     end
     (; func=efunc, structdef=estruct, structname=estructname, structparams=estructparams,
-     fields=efields, in=ein, method=emethod, url=eurl, out=eout, error=eerror,
+     fields=efields, source=esource, in=ein, method=emethod, url=eurl, out=eout, error=eerror,
      authpolicy=if isnothing(marker) nothing else AUTH_MARKERS[marker] end)
 end
 
