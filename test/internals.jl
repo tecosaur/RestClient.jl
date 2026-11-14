@@ -1070,6 +1070,8 @@ end
         @test spliced(nothing) == "http://x/s?a=1&b=2&site=main"
         @test_throws "splices in `name => value` pairs" spliced(["x=1"])
         @test RestClient.url(get(TieredClient.JoinedEndpoint("a"))) == "http://x/j/a?q=a&site=main"
+        line = which(RestClient.urlpath, (RequestConfig, TieredClient.JoinedEndpoint))
+        @test endswith(string(line.file), "internals.jl") && line.line > 0
         @test RestClient.parameters(RequestConfig("http://x"), Int) === ()
         @test RestClient.headers(Request{:get}(RequestConfig("http://x"), SharedHeadersEP())) ===
             SHARED_HEADERS                                       # nothing to add, so not copied

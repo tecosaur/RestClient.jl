@@ -343,8 +343,8 @@ macro endpoint(args...)
         push!(body, :($(@__MODULE__).endpointsource(::Type{$(einfo.structname)}) = $(QuoteNode(einfo.source))))
     if !isempty(efields)
         old = gensym("old")
-        push!(body, :($(einfo.structname)($old::$(einfo.structname); $((Expr(:kw, f, :($old.$f)) for f in efields)...)) =
-                      $(GlobalRef(Core, :typeof))($old)($(efields...))))
+        push!(body, Expr(:(=), :($(einfo.structname)($old::$(einfo.structname); $((Expr(:kw, f, :($old.$f)) for f in efields)...))),
+                         Expr(:block, __source__, :($(GlobalRef(Core, :typeof))($old)($(efields...))))))
     end
     # `RestClient.func([config,] self::Struct{params...}) where {params...} = body`
     function methoddef(func::Symbol, body; withconfig::Bool = true)
@@ -354,7 +354,7 @@ macro endpoint(args...)
         withconfig && pushfirst!(sigargs, :($CONFIG_VAR::$RequestConfig))
         sig = :($(@__MODULE__).$func($(sigargs...)))
         isnothing(structparams) || (sig = Expr(:where, sig, structparams...))
-        :($sig = $body)
+        Expr(:(=), sig, Expr(:block, __source__, body))
     end
     varcontext = (; varname = ANAPHORIC_VAR, localvars = [ANAPHORIC_VAR, CONFIG_VAR], knownfields = efields, mod=__module__)
     if !isnothing(einfo.in)
@@ -377,7 +377,7 @@ macro endpoint(args...)
         push!(body, methoddef(:authpolicy, QuoteNode(einfo.authpolicy); withconfig = false))
     # Function (optional)
     if !isnothing(einfo.func)
-        fnoconfig, fconfig = generate_funcalls(einfo; mod=__module__)
+        fnoconfig, fconfig = generate_funcalls(einfo, __source__; mod=__module__)
         push!(body, Expr(:macrocall, GlobalRef(Base, Symbol("@__doc__")), __source__, fnoconfig), fconfig)
     end
     esc(Expr(:block, body...))
@@ -448,7 +448,7 @@ function parsearg(arg)
     name, type, default
 end
 
-function generate_funcalls(einfo; mod::Module)
+function generate_funcalls(einfo, source::LineNumberNode; mod::Module)
     includedargs = Symbol[]
     fspecs = Dict(f.name => (; type=f.type, default=f.default) for f in einfo.fields)
     args, kwargs = splitargs(einfo.func)
@@ -482,7 +482,7 @@ function generate_funcalls(einfo; mod::Module)
         isempty(kwargs) || insert!(call.args, 2, Expr(:parameters, kwargs...))
         isnothing(einfo.structparams) || (call = Expr(:where, call, einfo.structparams...))
         endpoint = Expr(:call, einfo.structname, map(f -> f.name, einfo.fields)...)
-        :($call = $perform_($Request_{$(QuoteNode(einfo.method))}($config, $endpoint)))
+        Expr(:(=), call, Expr(:block, source, :($perform_($Request_{$(QuoteNode(einfo.method))}($config, $endpoint)))))
     end
     confarg = gensym("request-config")
     definition(args, :($globalconfig_($Val_{$mod}()))),
