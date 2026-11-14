@@ -33,8 +33,9 @@ A 429 is retried at its deadline, or failing that after an exponential backoff
 (about 0.5, 1, 2 then 4 seconds, with jitter). A 403 or 503 is retried when its
 headers give a deadline, and any other unsuccessful response when `nextallowed`
 does. A gateway failure (502, 503 or 504) is retried after the backoff, for
-methods safe to repeat (not POST or PATCH). A request is attempted at most five
-times.
+methods safe to repeat (not POST or PATCH), unless its body reads as the
+endpoint's [`errortype`](@ref): then the API gave it, and it stands. A request is
+attempted at most five times.
 
 No wait is longer than the config's `timeout`. A retry that would need a longer
 one isn't made, and the response is raised instead; a request that would be held
@@ -62,7 +63,7 @@ function send(req::Request{kind}, out::Outgoing) where {kind}
     isretryable = !(out.payload isa IO) || !isnothing(out.payloadstart)
     attempt, incoming = 1, transmit(req, out)
     while true
-        retry = retrydeadline(req, incoming.response, kind ∉ (:post, :patch), attempt)
+        retry = retrydeadline(req, incoming, kind ∉ (:post, :patch), attempt)
         isretryable && attempt < MAX_ATTEMPTS && !isnothing(retry) && retry - time() <= req.config.timeout || break
         close(incoming)
         hold!(req, retry)
@@ -254,16 +255,25 @@ function mimeheaders(req::Request, fmt::AbstractFormat, in::Type)
     append!(Pair{String, String}[h for h in hdrs], extras)
 end
 
-# When to retry `req` after `response`, its `attempt`th (see `perform`), or `nothing` not to
-function retrydeadline(req::Request, response::Response, isidempotent::Bool, attempt::Int)
+# When to retry `req` after `incoming`, its `attempt`th (see `perform`), or `nothing` not to
+function retrydeadline(req::Request, incoming::Incoming, isidempotent::Bool, attempt::Int)
+    (; response) = incoming
     (; status) = response
     status >= 400 || return
     (; asked, given) = deadlines(req, response)
     isretry = asked > -Inf || status == 429 || status ∈ (403, 503) && given > -Inf ||
-        isidempotent && status ∈ (502, 503, 504)
+        isidempotent && status ∈ (502, 503, 504) && !isownerror(req, incoming)
     isretry || return
     deadline = max(asked, given)
     if deadline == -Inf time() + 2^(attempt - 1) * (0.5 + rand()) elseif isfinite(deadline) deadline end
+end
+
+# Whether `incoming`'s body reads as `req`'s error type: the API's own answer, not a gateway's
+function isownerror(req::Request, (; response, body)::Incoming)
+    errortype(req.endpoint) !== Nothing && body isa IOBuffer || return false
+    detail = ResponseError(req, response, read(body)).detail
+    seekstart(body)
+    !isnothing(detail)
 end
 
 # The deadlines `response` sets for requests sharing `req`'s throttle: the one
@@ -673,7 +683,14 @@ function deliver(req::Request, incoming::Incoming)
         data = if dtype !== Nothing
             interpret(req, response, read(body), dataformat(req.endpoint, dtype), dtype)
         end
-        restructure(response, req, postprocess(response, req, data))
+        result = try
+            postprocess(response, req, data)
+        catch err
+            E = errortype(req.endpoint)
+            err isa E || rethrow()
+            throw(ResponseError{E, typeof(req)}(req, response, read(seekstart(body)), err))
+        end
+        restructure(response, req, result)
     finally
         close(incoming)
     end
@@ -694,12 +711,18 @@ end
 function ResponseError(req::Request, response::Response, body::Vector{UInt8})
     E = errortype(req.endpoint)
     E === Nothing && return ResponseError(req, response, body, nothing)
+    fmt = dataformat(req.endpoint, E)
     try
-        detail = interpretresponse(copy(body), dataformat(req.endpoint, E), E)
+        detail = interpretresponse(copy(body), fmt, E)
         ResponseError{E, typeof(req)}(req, response, body, detail)
     catch err
         err isa InterruptException && rethrow()
-        @debug "The response for $(endpointlabel(req.endpoint)) doesn't read as its error type $E either" exception = err
+        if fmt isa RawFormat
+            @warn "Error responses for $(endpointlabel(req.endpoint)) can't be read as $E, which has no data format: \
+                   give it a `dataformat` method, or the API one with `@globalconfig … format = …`" maxlog = 1
+        else
+            @debug "The response for $(endpointlabel(req.endpoint)) doesn't read as its error type $E either" exception = err
+        end
         ResponseError(req, response, body, nothing)
     end
 end

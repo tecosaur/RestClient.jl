@@ -34,6 +34,14 @@ module IntegrationClient
     end
     JSON.@choosetype AnyAPIError _ -> Refusal
     RestClient.dataformat(::Type{AnyAPIError}) = RestClient.JSONFormat()
+    abstract type BareAPIError end
+    @jsondef struct BareRefusal <: BareAPIError
+        message."error"::String
+    end
+    JSON.@choosetype BareAPIError _ -> BareRefusal
+    @jsondef struct Flag
+        error::Union{String, Nothing}
+    end
     @jsondef struct Echoed
         method::String
         content_type::String
@@ -92,11 +100,15 @@ module IntegrationClient
     RestClient.errortype(::Union{ApierrorEndpoint, MisreportedEndpoint}) = APIError
     @endpoint refusal(status::Int) -> "apierror/{status}" -> Item
     RestClient.errortype(::RefusalEndpoint) = AnyAPIError
+    @endpoint unformatted(status::Int) -> "apierror/{status}" -> Item | BareAPIError
+    @endpoint flagged() -> "apierror/200" -> Flag | APIError
+    RestClient.postprocess(::RestClient.Request{<:Any, FlaggedEndpoint}, flag::Flag) =
+        if isnothing(flag.error) flag else throw(APIError(flag.error)) end
     @endpoint forbidden() -> "forbidden" -> Item
     @endpoint forbidden_limited() -> "forbidden/limited" -> Item
     @endpoint always429() -> "always429" -> Item
     @endpoint unavailable() -> "unavailable" -> Item
-    @endpoint flaky(status::Int) -> "flaky/{status}" -> Item
+    @endpoint flaky(status::Int) -> "flaky/{status}" -> Item | APIError
     @endpoint flaky_post(status::Int; item::Item) -> item -> "flaky/{status}" -> Item
     @endpoint long_limited() -> "ratelimited/long" -> Item
     @endpoint exhausted() -> "exhausted" -> Item
@@ -266,6 +278,8 @@ const AC = AuthClient
             refused = caught(IC.refusal, 400)
             @test refused isa RestClient.ResponseError{IC.AnyAPIError}
             @test refused.detail == IC.Refusal("bad id")
+            unformatted = @test_logs (:warn, r"no data format") caught(IC.unformatted, 400)
+            @test unformatted isa RestClient.ResponseError{Nothing}
             try
                 before = state.requests
                 inband = caught(IC.apierror, 200)
@@ -273,6 +287,11 @@ const AC = AuthClient
                 @test (inband.response.status, inband.detail.message) == (200, "bad id")
                 @test caught(IC.apierror, 200) isa RestClient.ResponseError{IC.APIError}
                 @test state.requests == before + 2
+                flagged = caught(IC.flagged)
+                @test flagged isa RestClient.ResponseError{IC.APIError}
+                @test (flagged.detail.message, String(flagged.body)) == ("bad id", JSON.json((; error = "bad id")))
+                @test caught(IC.flagged) isa RestClient.ResponseError{IC.APIError}
+                @test state.requests == before + 4
             finally
                 clean_cache("$baseurl/apierror/200")
             end
@@ -608,6 +627,13 @@ end
         with_server() do baseurl, state
             @test IC.flaky(cfg(baseurl), status).id == 1
             @test state.requests == 2
+        end
+    end
+    @testset "$status the API explains not retried" for status in (502, 503, 504)
+        with_server() do baseurl, state
+            err = try IC.apierror(cfg(baseurl), status) catch e; e end
+            @test err isa RestClient.ResponseError{IC.APIError}
+            @test state.requests == 1
         end
     end
     @testset "$status not retried for a POST" for status in (502, 503)

@@ -42,7 +42,8 @@ An unsuccessful response is retried, up to five attempts in all, when:
 + it's a 403 or 503 whose headers say when to try again;
 + ~nextallowed~ gives a time for it, whatever the method;
 + it's a 502, 503 or 504 from a gateway, and the method is safe to repeat (not
-  =POST= or =PATCH=).
+  =POST= or =PATCH=). One whose body reads as the endpoint's [[@ref][~errortype~]]
+  came from the API itself, and isn't retried.
 
 A retry waits until the time it was given, or failing that for about 0.5, 1, 2
 and then 4 seconds. No wait is ever longer than the config's ~timeout~: a retry

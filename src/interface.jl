@@ -245,11 +245,16 @@ A successful response that can't be read as the endpoint's
 inside a `200` raises them as a `ResponseError` (as does a [`Stream`](@ref)
 element, partway through the stream). For that, the error type needs
 a required field that a successful body lacks, or it would read from any body.
+An error that also reads as a result (an empty one, say) can be thrown as this
+type from [`postprocess`](@ref) instead. A 502, 503 or 504 whose body reads as
+this type is the API's own answer, so it isn't retried as a gateway failure.
 
 Define this for an API's endpoint supertype to read its errors from every
 endpoint, or give one endpoint its own with [`@endpoint`](@ref)'s
 `-> Result | Error`. An abstract error type, with a subtype chosen per body (as
 by JSON.jl's `@choosetype`), is matched as declared: `ResponseError{APIError}`.
+It has no format of its own, so give it a `dataformat` method, or the API one
+with `@globalconfig … format = …`.
 Make it an `Exception` with a `showerror` method for the error to show the API's
 own explanation.
 
@@ -387,8 +392,9 @@ Post-process the data returned by the request, by default returning it as-is.
 [`responsetype`](@ref): reading happens first, and a body that can't be read
 raises a [`MalformedResponse`](@ref) without reaching `postprocess`. An error
 status raises a [`ResponseError`](@ref) before either. To raise an error an API
-reports inside a successful response, throw it here, or declare its
-[`errortype`](@ref).
+reports inside a successful response, declare its [`errortype`](@ref); one that
+also reads as a result can be thrown here as that type, and is raised as a
+`ResponseError` like any other.
 
 The result is then restructured: a [`ListResponse`](@ref) is wrapped in a
 [`List`](@ref), and a [`SingleResponse`](@ref) gives its [`contents`](@ref). So
