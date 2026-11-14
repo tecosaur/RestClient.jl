@@ -575,19 +575,22 @@ thispagenumber(@nospecialize ::AbstractEndpoint) = nothing
 
 Return how many pages follow `list`, if [`pagecount`](@ref) gives their total.
 """
-function remainingpages((; request, response, data, page)::List)
-    total = pagecount(response, request.endpoint, data)
-    if !isnothing(total) max(total - page, 0) end
+function remainingpages(list::List)
+    total = pagecount(list)
+    if !isnothing(total) max(total - list.page, 0) end
 end
 
 """
+    pagecount(list::List) -> Union{Int, Nothing}
     pagecount([response], endpoint::AbstractEndpoint, data) -> Union{Int, Nothing}
 
-Return the total number of pages in the listing that `data`, read from a
-request to `endpoint`, is a page of, if known: for instance from a count of
-items in `data`, or from the three-argument form's `response` headers. By
-default `nothing`.
+Return the total number of pages in the listing `list` is a page of, if known.
+
+Define the second form to give it, for `data` read from a request to `endpoint`:
+for instance from a count of items in `data`, or from the three-argument form's
+`response` headers. By default `nothing`.
 """
+pagecount((; request, response, data)::List) = pagecount(response, request.endpoint, data)
 pagecount(_, endpoint::AbstractEndpoint, data) = pagecount(endpoint, data)
 pagecount(@nospecialize(::AbstractEndpoint), _) = nothing
 

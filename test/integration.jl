@@ -345,6 +345,7 @@ const AC = AuthClient
             @test all(page -> page[1].name == "k", eachpage(IC.linkedq(cfg(baseurl; key = "k"))))
             @test RestClient.thispagenumber.(pages) == [1, 2, 3]            # counted along the links
             @test map(RestClient.remainingpages, eachpage(IC.linkedq(cfg(baseurl)))) == [2, 1, 0]
+            @test map(RestClient.pagecount, eachpage(IC.linkedq(cfg(baseurl)))) == [3, 3, 3]
             @test isnothing(nextpage(IC.linked(cfg(baseurl); variant = "self")))  # links to itself
             @test isnothing(nextpage(IC.linkedq(cfg(baseurl; key = "k"); variant = "self")))
             @test ids(IC.linked(cfg(baseurl); variant = "root")) == [1, 2, 3]

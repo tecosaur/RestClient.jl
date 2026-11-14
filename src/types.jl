@@ -436,7 +436,8 @@ end
 The headers of a [`Response`](@ref), looked up by name in any case.
 
 `headers[name]` gives the first value of `name`, raising a `KeyError` if there
-is none, and `get(headers, name, default)` gives `default` instead. Iterating
+is none, `get(headers, name, default)` gives `default` instead, and
+`haskey(headers, name)` says whether there is one. Iterating
 gives every `name => value` pair in order, with names in lower case, so a header
 sent more than once, such as `Link`, appears each time.
 
@@ -466,6 +467,8 @@ end
 
 Base.getindex(headers::Headers, name::AbstractString) =
     @something(get(headers, name, nothing), throw(KeyError(name)))
+
+Base.haskey(headers::Headers, name::AbstractString) = !isnothing(get(headers, name, nothing))
 
 """
     Response

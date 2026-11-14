@@ -289,6 +289,7 @@ end
         @test get(headers, "Link", nothing) == "<a>"
         @test isnothing(get(headers, "ETag", nothing))
         @test_throws KeyError headers["ETag"]
+        @test haskey(headers, "LINK") && !haskey(headers, "ETag")
         @test collect(headers) == ["content-type" => "text/plain", "link" => "<a>", "link" => "<b>"]
     end
     @testset "transport errors" begin
