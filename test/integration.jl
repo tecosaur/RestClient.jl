@@ -790,6 +790,12 @@ end
             @globalconfig CONFIG
         end
         @test RestClient.globalconfig(Val(NamedConfigClient)).baseurl == "http://named.test"
+        @eval module DerivedConfigClient
+            using RestClient
+            @globalconfig RequestConfig("http://derived.test"; timeout = 5)
+            const KEYED = RequestConfig(@globalconfig; key = "k")
+        end
+        @test (DerivedConfigClient.KEYED.baseurl, DerivedConfigClient.KEYED.timeout) == ("http://derived.test", 5)
     end
 end
 

@@ -137,18 +137,16 @@ RequestConfig("https://api.example.com"; ratelimit = RateLimit(inflight = 1))  #
 * Use a second host or key
 
 A config holds one base URL and one key. For another host, or another key,
-derive a config from the API's, which keeps its other settings. To refer to the
-API's config, name it, and give the name to ~@globalconfig~:
+derive a config from the API's, which ~@globalconfig~ without arguments gives,
+keeping its other settings:
 
 #+begin_src julia
-const CONFIG = RequestConfig("https://api.example.com/v1")
-@globalconfig CONFIG auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
-
-const GEOCODING = RequestConfig(CONFIG; baseurl = "https://geocoding.example.com/v1")
+const GEOCODING = RequestConfig(@globalconfig; baseurl = "https://geocoding.example.com/v1")
 #+end_src
 
-Pass a derived config as the first argument of an endpoint function, as in
-~search(RequestConfig(Example.CONFIG; key = "…"), "julia")~. For an endpoint that always
+Pass a derived config as the first argument of an endpoint function. Outside the
+module, ~RestClient.globalconfig(Val(Example))~ gives its config, as in
+~search(RequestConfig(RestClient.globalconfig(Val(Example)); key = "…"), "julia")~. For an endpoint that always
 lives on the second host, leave out the function form and write the function
 yourself:
 

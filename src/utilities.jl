@@ -31,9 +31,12 @@ authparams(a::QueryAuth, key::String) = a.name => key
 
 """
     @globalconfig config [auth=scheme | auth=(scheme, policy)] [format=fmt] [supertype=T]
+    @globalconfig
 
 Define [`globalconfig`](@ref) for the current module as `config`, and optionally
 module-wide authentication, format and supertype defaults for its endpoints.
+Without arguments, give the current module's config, such as to derive another
+from it: `RequestConfig(@globalconfig; key)`.
 
 This avoids having to write the slightly awkward
 `RestClient.globalconfig(::Val{@__MODULE__}) = config` by hand. Similarly, the
@@ -75,6 +78,8 @@ See also: [`globalconfig`](@ref), [`RequestConfig`](@ref), [`authscheme`](@ref).
 @globalconfig RequestConfig("https://api.example.com") format=:json
 ```
 """
+macro globalconfig() :($globalconfig(Val($__module__))) end
+
 macro globalconfig(config, opts::Expr...)
     scheme, policy, format, super = :($(@__MODULE__).NoAuth()), QuoteNode(:off), RawFormat(), nothing
     for opt in opts
