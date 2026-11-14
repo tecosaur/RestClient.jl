@@ -17,7 +17,7 @@ export MalformedRequest, TransportError, ResponseError, MalformedResponse, RateL
 public urlpath, headers, parameters, payload, validate, responsetype, errortype, postprocess,
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, isstreamskip, thispagenumber, remainingpages,
-    nextallowed, quota, Quota, Response, Headers, globalconfig
+    nextallowed, ratebucket, quota, Quota, Response, Headers, globalconfig
 public StreamFormat, UnspecifiedFormat, readframe, framestate, elementpayload,
     authheaders, authparams, contents, pagecount, cachelifetime
 
@@ -34,7 +34,7 @@ macro importapi()
     api = (:urlpath, :headers, :parameters, :payload, :validate, :responsetype,
            :errortype, :dataformat, :mimetype, :interpretresponse, :writepayload, :postprocess,
            :contents, :thispagenumber, :nextpage, :pagecount,
-           :authscheme, :authpolicy, :authheaders, :authparams, :isstreamend, :isstreamskip, :cachelifetime, :nextallowed)
+           :authscheme, :authpolicy, :authheaders, :authparams, :isstreamend, :isstreamskip, :cachelifetime, :nextallowed, :ratebucket)
     Expr(:import, Expr(:(:), Expr(:., fullname(@__MODULE__)...), (Expr(:., name) for name in api)...)) |> esc
 end
 

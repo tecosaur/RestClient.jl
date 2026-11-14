@@ -132,6 +132,7 @@ RestClient.pagecount
 
 #+begin_src @docs
 RestClient.nextallowed
+RestClient.ratebucket
 RestClient.quota
 RestClient.Quota
 #+end_src

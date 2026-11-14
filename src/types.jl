@@ -182,7 +182,7 @@ end
     RateLimit(rate::Real = Inf; burst::Integer = 1, inflight::Integer = typemax(Int))
 
 How fast requests through a [`RequestConfig`](@ref), and any other for the
-same host and key, may be sent: on average at most `rate` a second, up to
+same host and key, may be sent (for each [`ratebucket`](@ref)): on average at most `rate` a second, up to
 `burst` of them at once, with no more than `inflight` awaiting a response at a
 time (a [`Stream`](@ref) until it's closed or ends). A request that would
 exceed the limit waits until it may be sent.
@@ -270,7 +270,7 @@ The general configuration for a request to the API, not tied to any specific end
 
 At a minimum, this holds the base URL of the API. Requests through every
 config with the same host and key are paced together, as the server counts
-them together.
+them together (or by [`ratebucket`](@ref), where it counts some apart).
 
 Other fields are optional, but may be useful for changing the way requests are
 performed or handling authentication. The following additional fields can be
@@ -333,10 +333,10 @@ RequestConfig(config::RequestConfig; baseurl = config.baseurl, key = config.key,
               ratelimit = config.ratelimit, timeout = config.timeout, cache = config.cache) =
     RequestConfig(baseurl, ratelimit, key, timeout, cache)
 
-# Keyed by the key's hash, so the table doesn't keep secrets alive
-function throttler(config::RequestConfig)
+# Keyed by a hash of the key, so the table doesn't keep secrets alive
+function throttler(config::RequestConfig, bucket = nothing)
     host = lowercase(match(r"^(?:\w[\w+.-]*://)?([^/?#]*)", config.baseurl)[1])
-    @lock THROTTLES get!(Throttle, THROTTLES[], (host, hash(config.key)))
+    @lock THROTTLES get!(Throttle, THROTTLES[], (host, hash((config.key, bucket))))
 end
 
 function Base.show(io::IO, rc::RequestConfig)

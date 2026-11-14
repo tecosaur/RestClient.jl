@@ -32,6 +32,9 @@ RestClient.authscheme(::KeyedCacheEP) = QueryAuth("api_key")
 RestClient.authpolicy(::KeyedCacheEP) = :required
 struct PlainEP <: AbstractEndpoint end
 RestClient.urlpath(::PlainEP) = "p"
+struct SearchEP <: AbstractEndpoint end
+RestClient.urlpath(::SearchEP) = "search"
+RestClient.ratebucket(::SearchEP) = :search
 struct PagedListEP <: AbstractEndpoint end
 RestClient.urlpath(::PagedListEP) = "p"
 struct ValidatedEP <: AbstractEndpoint
@@ -219,8 +222,8 @@ end
         @test ticks[] > 5                          # the wait yields, rather than spinning
     end
     @testset "refusing a long wait" begin
-        unsent(config) = try
-            RestClient.throttled(() -> error("sent"), Request{:get}(config, PlainEP()))
+        unsent(config, endpoint = PlainEP()) = try
+            RestClient.throttled(() -> error("sent"), Request{:get}(config, endpoint))
         catch err
             err
         end
@@ -229,6 +232,7 @@ end
         err = unsent(held)
         @test err isa RateLimitError && 58 < datetime2unix(err.until) - time() <= 60
         @test occursin("was not sent: requests there are held until", sprint(showerror, err))
+        @test unsent(held, SearchEP()) == ErrorException("sent")
         busy = RequestConfig("http://busy.example"; timeout = 0.5, ratelimit = RateLimit(inflight = 1))
         RestClient.throttler(busy).inflight = 1
         waited = @elapsed (err = unsent(busy))
@@ -272,6 +276,8 @@ end
         @test throttler(RequestConfig(base; key = nothing)) !== throttler(base)
         @test throttler(RequestConfig(base; baseurl = "https://uploads.example.com")) !== throttler(base)
         @test throttler(RequestConfig("https://api.example.com:8443"; key = "k")) !== throttler(base)
+        @test throttler(RequestConfig(base; timeout = 300), :search) === throttler(base, :search)
+        @test throttler(base, :search) !== throttler(base)
     end
     @testset "RateLimit" begin
         @test RateLimit() == RateLimit(Inf; burst = 1, inflight = typemax(Int))

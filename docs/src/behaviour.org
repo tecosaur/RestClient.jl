@@ -37,7 +37,9 @@ that's how the server counts them. They are sent no faster than the config's
 [[@ref][~RateLimit~]] allows, and they all wait when a response asks for a pause:
 with a =Retry-After= header, or with =X-RateLimit-Remaining: 0= and an
 =X-RateLimit-Reset= time (in seconds from now, as a Unix time, or as a date).
-[[@ref][~nextallowed~]] can ask for longer pauses than the headers do.
+[[@ref][~nextallowed~]] can ask for longer pauses than the headers do. For an
+API that counts some endpoints apart, such as GitHub's searches, give those a
+[[@ref][~ratebucket~]] of their own, and they're paced and paused separately.
 
 An unsuccessful response is retried, up to five attempts in all, when:
 + it's a 429 (Too Many Requests);

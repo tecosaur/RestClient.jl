@@ -24,7 +24,8 @@ endpoint's [`headers`](@ref) give their own.
 # Retries and rate limits
 
 Requests are sent no faster than their config's [`RateLimit`](@ref), and wait
-out any deadline set by a response to the same host with the same key: one its
+out any deadline set by a response to the same host with the same key (and
+[`ratebucket`](@ref)): one its
 headers give (a `Retry-After`, or an `X-RateLimit-Reset` with
 `X-RateLimit-Remaining: 0`), or [`nextallowed`](@ref) does. Responses served
 from the cache are not held back.
@@ -292,7 +293,7 @@ response has been received: for a stream, until its transfer ends.
 """
 function throttled(exchange::F, req::Request) where {F <: Function}
     (; ratelimit, timeout) = req.config
-    throttle = throttler(req.config)
+    throttle = throttler(req.config, ratebucket(req.endpoint))
     claimslot!(req, throttle)
     release() = @lock throttle.slots (throttle.inflight -= 1; notify(throttle.slots))
     incoming = try
@@ -345,7 +346,7 @@ end
 function hold!(req::Request, deadline::Float64)
     isfinite(deadline) || return
     (; ratelimit, baseurl) = req.config
-    throttle = throttler(req.config)
+    throttle = throttler(req.config, ratebucket(req.endpoint))
     allowance = (ratelimit.burst - 1) / ratelimit.rate
     before, after = @atomic throttle.arrival max deadline + allowance
     after - before >= 1 &&
@@ -390,10 +391,11 @@ function quotaof(headers::Headers)
 end
 
 """
-    quota(config::RequestConfig) -> Union{Quota, Nothing}
+    quota(config::RequestConfig, bucket = nothing) -> Union{Quota, Nothing}
 
 Return the rate limit the server last reported to requests through `config`, or
-any other config for the same host and key, or `nothing` if none has.
+any other config for the same host and key, in `bucket` (see
+[`ratebucket`](@ref)), or `nothing` if none has.
 
 It is read from the response's `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
 `X-RateLimit-Reset` headers, as a [`Quota`](@ref): the requests allowed and
@@ -407,7 +409,7 @@ julia> RestClient.quota(config)
 RestClient.Quota: 4987 of 5000 left, renewing 2026-11-14T13:00:00 UTC
 ```
 """
-quota(config::RequestConfig) = @atomic throttler(config).quota
+quota(config::RequestConfig, bucket = nothing) = @atomic throttler(config, bucket).quota
 
 # `t` seconds from now as a Unix time, or `t` itself if it's over a year's worth
 unixtime(t::Real) = if t < 365 * 24 * 60 * 60 time() + t else Float64(t) end

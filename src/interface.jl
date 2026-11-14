@@ -630,7 +630,7 @@ Return when the API next allows a request after `response` to a request to
 Unix time.
 
 Each response from the network is given to this, and requests to the same host
-with the same key wait until the later of this and the time its rate-limit
+with the same key (and [`ratebucket`](@ref)) wait until the later of this and the time its rate-limit
 headers set (`Retry-After`, or `X-RateLimit-Reset` with `X-RateLimit-Remaining: 0`), so a
 method can only lengthen the wait. An unsuccessful response with a time is
 retried then, and with `Inf` is raised without a retry. By default `nothing`.
@@ -645,3 +645,22 @@ RestClient.nextallowed(::LichessEndpoint, response) = if response.status == 429 
 ```
 """
 nextallowed(@nospecialize(::AbstractEndpoint), _) = nothing
+
+"""
+    ratebucket(endpoint::AbstractEndpoint) -> Any
+
+Return which of the rate limits an API keeps on one host requests to `endpoint`
+count against, or `nothing` (the default) for the host's one limit.
+
+Endpoints in different buckets are paced and held back as if on different hosts:
+each bucket has its own [`RateLimit`](@ref) allowance and `inflight` count, waits
+out only its own pauses, and has its own [`quota`](@ref). Any value names a
+bucket, such as a `Symbol` or the endpoint's type.
+
+# Examples
+
+```julia
+RestClient.ratebucket(::SearchEndpoint) = :search    # GitHub counts searches apart
+```
+"""
+ratebucket(@nospecialize(::AbstractEndpoint)) = nothing
