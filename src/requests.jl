@@ -384,9 +384,9 @@ function quotaof(headers::Headers)
         if !isnothing(n) && 0 <= n < typemax(Int) floor(Int, n) end
     end
     reset = headertime(get(headers, "x-ratelimit-reset", ""))
-    quota = (limit = requests("x-ratelimit-limit"), remaining = requests("x-ratelimit-remaining"),
-             reset = if isfinite(reset) unix2datetime(reset) end)
-    if !all(isnothing, quota) quota end
+    fields = (requests("x-ratelimit-limit"), requests("x-ratelimit-remaining"),
+              if isfinite(reset) unix2datetime(reset) end)
+    if !all(isnothing, fields) Quota(fields...) end
 end
 
 """
@@ -396,16 +396,15 @@ Return the rate limit the server last reported to requests through `config`, or
 any other config for the same host and key, or `nothing` if none has.
 
 It is read from the response's `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
-`X-RateLimit-Reset` headers, as a `(; limit, remaining, reset)` named tuple: the
-requests allowed and those left, and when the count renews (a UTC `DateTime`).
-A field is `nothing` when its header wasn't given. Responses from the cache don't
+`X-RateLimit-Reset` headers, as a [`Quota`](@ref): the requests allowed and
+those left, and when the count renews. Responses from the cache don't
 count, as their headers are as old as the response.
 
 # Examples
 
 ```julia
 julia> RestClient.quota(config)
-(limit = 5000, remaining = 4987, reset = DateTime("2026-11-14T13:00:00"))
+RestClient.Quota: 4987 of 5000 left, renewing 2026-11-14T13:00:00 UTC
 ```
 """
 quota(config::RequestConfig) = @atomic throttler(config).quota

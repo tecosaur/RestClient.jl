@@ -244,7 +244,10 @@ end
         end
         reply(["x-ratelimit-limit" => "60", "x-ratelimit-remaining" => "59.0",
                "x-ratelimit-reset" => "1700000000"])
-        @test RestClient.quota(config) == (limit = 60, remaining = 59, reset = unix2datetime(1700000000))
+        @test RestClient.quota(config) == RestClient.Quota(60, 59, unix2datetime(1700000000))
+        @test repr(MIME"text/plain"(), RestClient.quota(config)) ==
+            "RestClient.Quota: 59 of 60 left, renewing 2023-11-14T22:13:20 UTC"
+        @test repr(MIME"text/plain"(), RestClient.Quota(nothing, 3, nothing)) == "RestClient.Quota: 3 of ? left"
         @test RestClient.quota(RequestConfig("http://quota.example/v2")) == RestClient.quota(config)
         reply(["content-type" => "text/plain"])
         @test RestClient.quota(config).remaining == 59

@@ -220,8 +220,24 @@ function Base.show(io::IO, (; rate, burst, inflight)::RateLimit)
           if isempty(options) "" else "; " * join(options, ", ") end, ')')
 end
 
-const Quota = @NamedTuple{limit::Union{Int, Nothing}, remaining::Union{Int, Nothing},
-                          reset::Union{DateTime, Nothing}}
+"""
+    Quota
+
+The rate limit a server reported (see [`quota`](@ref)): `limit`, the requests
+allowed; `remaining`, those left; and `reset`, when the count renews (a UTC
+`DateTime`). Each is `nothing` when the server didn't say.
+"""
+struct Quota
+    limit::Union{Int, Nothing}
+    remaining::Union{Int, Nothing}
+    reset::Union{DateTime, Nothing}
+end
+
+function Base.show(io::IO, ::MIME"text/plain", (; limit, remaining, reset)::Quota)
+    show(io, Quota)
+    print(io, S": {emphasis:$(something(remaining, '?'))} of {emphasis:$(something(limit, '?'))} left")
+    isnothing(reset) || print(io, ", renewing ", reset, " UTC")
+end
 
 """
     Throttle

@@ -17,7 +17,7 @@ export MalformedRequest, TransportError, ResponseError, MalformedResponse, RateL
 public urlpath, headers, parameters, payload, validate, responsetype, errortype, postprocess,
     dataformat, mimetype, interpretresponse, writepayload, AbstractFormat,
     authscheme, authpolicy, isstreamend, isstreamskip, thispagenumber, remainingpages,
-    nextallowed, quota, Response, Headers, globalconfig
+    nextallowed, quota, Quota, Response, Headers, globalconfig
 public StreamFormat, UnspecifiedFormat, readframe, framestate, elementpayload,
     authheaders, authparams, contents, pagecount, cachelifetime
 
