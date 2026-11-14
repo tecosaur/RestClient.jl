@@ -199,13 +199,15 @@ global variables) by surrounding them with curly braces.
 
 Parameters with a value of `nothing` are omitted from the query string, a
 collection (a `Vector`, `Tuple`, or `Set`) is sent as one parameter per element
-(`?tag=a&tag=b`), and other values are converted with `string`. A component
-without a value (`?verbose`) is sent as written. In the path, `nothing` is an
-error rather than omitted.
+(`?tag=a&tag=b`, or nothing for an empty one), and other values are converted
+with `string`. A component without a value (`?verbose`) is sent as written. In
+the path, `nothing` is an error rather than omitted.
 
 `string` sends a `Bool` as `true` or `false`, which some APIs read as set
 whatever its value; for those, send `{Int(flag)}`. An API that wants a list as
 one comma-joined parameter (`?tags=a,b`) can be given one with `{join(tags, ',')}`.
+An expression is given its fields as they are, so one for an optional field
+handles `nothing` itself, as in `{if !isnothing(tags) join(tags, ',') end}`.
 
 For convenience, a parameter by the same name as the field can be referred to by
 the field name alone (e.g. `?{var}` instead of `?var={var}`).
