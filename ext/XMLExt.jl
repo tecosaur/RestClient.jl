@@ -194,6 +194,22 @@ function parsexml(::Type{Union{T, Nothing}}, nodes::Vector{<:LazyNode}) where {T
 end
 parsexml(::Type{Union{T, Nothing}}, x) where {T} = parsexml(T, x)
 
+function parsexml(::Type{T}, found, tags::NamedTuple) where {T}
+    F = Base.nonnothingtype(T)
+    lifted(::Type{E}, text::String) where {E} = if haskey(tags, :lift)
+        tags.lift(text)
+    elseif haskey(tags, :dateformat)
+        E(text, tags.dateformat)
+    else
+        parsexml(E, text)
+    end
+    if F <: AbstractVector
+        F(map(text -> lifted(eltype(F), text), parsexml(Vector{String}, found)))
+    else
+        lifted(F, parsexml(String, found))
+    end
+end
+
 # Construction
 
 macro xmldef(struc::Expr)
@@ -201,12 +217,16 @@ macro xmldef(struc::Expr)
     body = Expr[esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), __source__, structdef))]
     # Create the parse rule
     fieldparsers = Any[]
-    for (i, (; key, default)) in enumerate(fields)
+    for (i, (; key, default, tags)) in enumerate(fields)
         one, all = (esc(Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@xpath")), __source__,
                              something(key, String(fields[i].name)), many))
                     for many in (false, true))
         node = :(if fieldtype(S, $i) <: AbstractVector; $all(node) else $one(node) end)
-        parsefield(from) = :(parsexml(fieldtype(S, $i), $from))
+        parsefield(from) = if isnothing(tags)
+            :(parsexml(fieldtype(S, $i), $from))
+        else
+            :(parsexml(fieldtype(S, $i), $from, $(esc(tags))))
+        end
         push!(fieldparsers, if isnothing(default) parsefield(node) else
             :(let found = $node
                   if isnothing(found) || found isa Vector && isempty(found)

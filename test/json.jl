@@ -5,6 +5,7 @@
 
 using RestClient
 using JSON
+using Dates
 
 module JSONClient
     using RestClient, JSON, Dates
@@ -60,12 +61,29 @@ module JSONClient
         maybe::Union{Int, Nothing}          # defaults to nothing
         flags::Dict{String, Nothing}        # doesn't: Nothing is only a parameter
     end
+    @jsondef struct Converted
+        count::Int &(lift = s -> parse(Int, s),)
+        created."creation_date"::DateTime &(lift = unix2datetime,)
+        day::Date = Date(2000) &(dateformat = "yyyymmdd",)
+        since::Date &(dateformat = "yyyymmdd",) = Date(1999)
+        stamp::DateTime
+    end
 end
 
 const JC = JSONClient
 jsonparse(::Type{T}, body::AbstractString) where {T} =
     RestClient.interpretresponse(codeunits(body), RestClient.dataformat(T), T)
 jsonwrite(x) = sprint(io -> RestClient.writepayload(io, RestClient.dataformat(typeof(x)), x))
+
+@testset "field tags" begin
+    c = jsonparse(JC.Converted, """{"count": "1053", "creation_date": 86400,
+                                     "day": "20260807", "since": "20250101",
+                                     "stamp": "2026-08-07T15:00:00Z"}""")
+    @test (c.count, c.created, c.day, c.since, c.stamp) ==
+        (1053, DateTime(1970, 1, 2), Date(2026, 8, 7), Date(2025), DateTime(2026, 8, 7, 15))
+    d = jsonparse(JC.Converted, """{"count": "1", "creation_date": 0, "stamp": "2026-08-07T15:00:00"}""")
+    @test (d.day, d.since) == (Date(2000), Date(1999))
+end
 
 @testset "backend" begin
     @test RestClient.dataformat(JC.Item) == RestClient.JSONFormat()

@@ -7,6 +7,7 @@
 
 using RestClient
 using XML
+using Dates
 
 xmlparse(::Type{T}, body::AbstractString) where {T} =
     RestClient.interpretresponse(codeunits(body), RestClient.dataformat(T), T)
@@ -14,7 +15,7 @@ xmlparse(::Type{T}, body::AbstractString) where {T} =
 # Endpoints/types declared as a user would, in their own module so the xpath
 # field syntax and generated `parsexml` methods are realistic.
 module XMLClient
-    using RestClient, XML
+    using RestClient, XML, Dates
     @xmldef struct Book
         title."title/text()"::String
         year."@year"::Int
@@ -71,6 +72,12 @@ module XMLClient
     end
     @xmldef struct Sole
         affiliation."info/aff/text()"::Union{String, Nothing} = nothing
+    end
+    @xmldef struct Stamped
+        published::DateTime &(dateformat = "yyyy-mm-ddTHH:MM:SSZ",)
+        count."@count"::Int &(lift = s -> parse(Int, replace(s, ',' => "")),)
+        seen."seen"::Vector{Int} &(lift = s -> length(s),)
+        updated."updated/text()"::Union{Date, Nothing} &(lift = s -> Date(s[1:10]),)
     end
     @xmldef struct Fault
         reason."reason/text()"::String
@@ -245,6 +252,14 @@ end
     @test xmlparse(XC.Nested, "<r><group/></r>").last_item === nothing
     nested = xmlparse(XC.Nested, "<r><group><item>x</item><item>y</item></group></r>")
     @test (nested.first_item, nested.last_item) == ("x", "y")
+end
+
+@testset "field tags" begin
+    s = xmlparse(XC.Stamped, """<e count="1,053"><published>2024-01-02T03:04:05Z</published>
+        <seen>ab</seen><seen>abc</seen><updated>2024-05-06T00:00:00Z</updated></e>""")
+    @test (s.published, s.count, s.seen, s.updated) ==
+        (DateTime(2024, 1, 2, 3, 4, 5), 1053, [2, 3], Date(2024, 5, 6))
+    @test isnothing(xmlparse(XC.Stamped, """<e count="1"><published>2024-01-02T03:04:05Z</published></e>""").updated)
 end
 
 @testset "error type" begin

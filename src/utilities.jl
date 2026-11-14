@@ -121,23 +121,29 @@ const SUPERTYPE_VAR = Symbol("#endpoint_supertype")
 const FORMAT_SHORTHANDS = (json = JSONFormat(), xml = XMLFormat())
 
 """
-    parsefield(line) -> (; name::Symbol, key, type, default)
+    parsefield(line) -> (; name::Symbol, key, type, default, tags)
 
-Parse the struct field declaration `name[."key"][::type][ = default]`, with
-`nothing` for the parts not given.
+Parse the struct field declaration `name[."key"][::type][ &(tags…)][ = default]`,
+with `nothing` for the parts not given. The tags are StructUtils' field tags, in
+its syntax, which may also follow the default.
 
 Throws an `ArgumentError` when `line` is not of that form.
 """
 function parsefield(line)
-    field, key, type, default = line, nothing, nothing, nothing
-    Meta.isexpr(field, :(=), 2) && ((field, default) = field.args)
+    field, key, type, default, tags = line, nothing, nothing, nothing, nothing
+    istagged(ex) = Meta.isexpr(ex, :call, 3) && ex.args[1] === :&
+    if Meta.isexpr(field, :(=), 2)
+        field, default = field.args
+        istagged(default) && ((default, tags) = default.args[2:3])
+    end
+    istagged(field) && ((field, tags) = field.args[2:3])
     Meta.isexpr(field, :(::), 2) && ((field, type) = field.args)
     if Meta.isexpr(field, :., 2) && field.args[2] isa QuoteNode && field.args[2].value isa String
         field, key = field.args[1], field.args[2].value
     end
     field isa Symbol ||
-        throw(ArgumentError("Malformed field $line, expected `name[.\"key\"][::Type][ = default]`"))
-    (; name = field, key, type, default)
+        throw(ArgumentError("Malformed field $line, expected `name[.\"key\"][::Type][ &(tags…)][ = default]`"))
+    (; name = field, key, type, default, tags)
 end
 
 """
@@ -158,11 +164,12 @@ function parsefields(struc, source::LineNumberNode)
     label = if Meta.isexpr(decl, :(<:), 2) first(decl.args) else decl end
     name = if Meta.isexpr(label, :curly) first(label.args) else label end
     name isa Symbol || throw(ArgumentError("Malformed struct name in $decl"))
-    fields = @NamedTuple{name::Symbol, key::Union{String, Nothing}, type::Any, default::Any}[]
+    fields = @NamedTuple{name::Symbol, key::Union{String, Nothing}, type::Any, default::Any, tags::Any}[]
     newbody = map(body.args) do line
         line isa Union{LineNumberNode, String} && return line
         isconstructor = Meta.isexpr(line, :function) ||
-            Meta.isexpr(line, :(=), 2) && Meta.isexpr(line.args[1], (:call, :where))
+            Meta.isexpr(line, :(=), 2) && Meta.isexpr(line.args[1], (:call, :where)) &&
+            first(line.args[1].args) !== :&
         isconstructor && return line
         field = parsefield(line)
         if isnothing(field.default) && allowsnothing(field.type)
@@ -206,6 +213,19 @@ Keys of the JSON object that no field names are ignored. A field typed
 of the JSON written, as most APIs read a missing key as "not given";
 to send an explicit `null`, type the field `Union{Nothing, JSON.Null}` and set it
 to `JSON.Null()`.
+
+A field may take StructUtils' field tags after its type, for a value the JSON
+gives in another form: `lift` makes the field from the JSON value, and
+`dateformat` reads a date or time in that format. A `DateTime` already reads
+ISO 8601, with or without a `Z` or an offset.
+
+```julia
+@jsondef struct Search
+    count::Int &(lift = s -> parse(Int, s),)             # sent as "1053"
+    created."creation_date"::DateTime &(lift = unix2datetime,)
+    day::Date &(dateformat = "yyyymmdd",) = Date(2000)
+end
+```
 
 The optional `kind` argument selects the JSON representation, one of `Struct`
 (the default), `Dict`, `Array`, `Vector`, `Nothing`, and `String`. For `String`,
@@ -298,6 +318,10 @@ match through every step of its path, so `a/@b` gives the `b` of each `a`.
 Other fields need each step before the last to match one element; at the
 last, a `Union{…, Nothing}` field takes the first of several, and any other
 field requires exactly one.
+
+A field may take the same tags as in [`@jsondef`](@ref): `lift` makes the field
+from its text (each match's, for a `Vector`), and `dateformat` reads a date or
+time in that format, as in `published::DateTime &(dateformat = "yyyy-mm-ddTHH:MM:SSZ",)`.
 
 !!! warning "Soft XML dependency"
     This macro is implemented in a package extension, and so

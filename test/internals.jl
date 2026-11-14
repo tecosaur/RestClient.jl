@@ -664,6 +664,13 @@ end
         @test_throws "already defines it" @eval cc @endpoint struct GetItemEndpoint; "y" -> String; end
         @test_throws "`CountriesEndpoint` is already defined" @eval cc @endpoint countries() -> "c" -> String
     end
+    @testset "fields without tags" begin
+        @test_throws "cannot take tags" @macroexpand @endpoint struct TagEndpoint
+            "x" -> String
+            id::Int &(lift = identity,)
+        end
+        @test_throws "cannot take tags" @macroexpand @formdef struct TagForm; id::Int &(lift = identity,); end
+    end
     @testset "error type" begin
         @eval module ErrorTypeClient
             using RestClient

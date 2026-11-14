@@ -640,9 +640,11 @@ function decompose_struct(strux::Expr; allowspecial::Bool = true)
         elseif line isa String # a field docstring, kept in the struct
             continue
         end
-        (; name, key, type, default) = parsefield(line)
+        (; name, key, type, default, tags) = parsefield(line)
         isnothing(key) ||
             throw(ArgumentError("@endpoint struct field $line cannot rename its key, only @jsondef/@xmldef/@formdef fields can"))
+        isnothing(tags) ||
+            throw(ArgumentError("@endpoint struct field $line cannot take tags, only @jsondef/@xmldef fields can"))
         push!(fields, (name, something(type, :Any), default))
     end
     desugar = if isnothing(specialline)

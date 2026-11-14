@@ -172,6 +172,10 @@ end
 # `dataformat` method and (if any keys were remapped) a `form_key` method.
 function formlike_expand(source::LineNumberNode, struc::Expr, fmt::Type)
     (; name, fields, structdef) = parsefields(struc, source)
+    for field in fields
+        isnothing(field.tags) ||
+            throw(ArgumentError("The form field `$(field.name)` cannot take tags, only @jsondef/@xmldef fields can"))
+    end
     form_keys = Tuple{Symbol, String}[(f.name, f.key) for f in fields if !isnothing(f.key)]
     sname = esc(name)
     out = Any[source, esc(Expr(:macrocall, GlobalRef(Base, Symbol("@kwdef")), source, structdef)),

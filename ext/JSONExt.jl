@@ -37,11 +37,18 @@ function RestClient._jsondef_expand(source::LineNumberNode, option::Symbol, kind
         push!(body, fielddefaults_method(name, fields),
               :($(GlobalRef(JSON, :omit_null))(::Type{<:$T}) = true))
         # Not under `json`, so the names also hold in the default style container `lift`s read in
-        renamed = [Expr(:kw, f.name, :((name = $(f.key),))) for f in fields
-                   if !isnothing(f.key) && String(f.name) != f.key]
-        isempty(renamed) ||
+        isrenamed(f) = !isnothing(f.key) && String(f.name) != f.key
+        fieldtags(f) = if !isrenamed(f)
+            esc(f.tags)
+        elseif isnothing(f.tags)
+            :((name = $(f.key),))
+        else
+            :(merge((name = $(f.key),), $(esc(f.tags))))
+        end
+        tagged = [Expr(:kw, f.name, fieldtags(f)) for f in fields if isrenamed(f) || !isnothing(f.tags)]
+        isempty(tagged) ||
             push!(body, :($(GlobalRef(StructUtils, :fieldtags))(::$(GlobalRef(StructUtils, :StructStyle)), ::Type{<:$T}) =
-                              $(Expr(:tuple, Expr(:parameters, renamed...)))))
+                              $(Expr(:tuple, Expr(:parameters, tagged...)))))
     end
     option === :noshow || push!(body, kwshow(name, fields))
     push!(body, :(RestClient.dataformat(::Type{<:$T}) = RestClient.JSONFormat()))
