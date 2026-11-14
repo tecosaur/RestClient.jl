@@ -636,6 +636,37 @@ end
             @test_throws ArgumentError @macroexpand @endpoint f(x) -> x -> y -> "url"
         end
     end
+    @testset "error type" begin
+        @eval module ErrorTypeClient
+            using RestClient
+            struct Fault end
+            struct OtherFault end
+            abstract type FaultyAPI <: AbstractEndpoint end
+            RestClient.errortype(::FaultyAPI) = Fault
+            @endpoint struct LookupEndpoint <: FaultyAPI
+                "items/{id}" -> Vector{UInt8} | OtherFault
+                id::Int
+            end
+            @endpoint struct PingEndpoint <: FaultyAPI
+                "ping"
+            end
+            @endpoint announce(msg::String) -> msg -> :post("events") | Fault
+            @endpoint struct StatusEndpoint
+                "status" -> String | Fault
+            end
+        end
+        etc = ErrorTypeClient
+        @test RestClient.errortype(etc.LookupEndpoint(1)) === etc.OtherFault
+        @test RestClient.responsetype(etc.LookupEndpoint(1)) === Vector{UInt8}
+        @test RestClient.errortype(etc.PingEndpoint()) === etc.Fault
+        @test RestClient.errortype(etc.AnnounceEndpoint("hi")) === etc.Fault
+        @test RestClient.responsetype(etc.AnnounceEndpoint("hi")) === Nothing
+        @test RestClient.urlpath(RequestConfig("http://x"), etc.AnnounceEndpoint("hi")) == "events"
+        @test RestClient.errortype(etc.StatusEndpoint()) === etc.Fault
+        @test RestClient.responsetype(etc.StatusEndpoint()) === String
+        @test_throws "one error type" @macroexpand @endpoint f() -> "u" -> String | A | B
+        @test_throws "not a type" @macroexpand @endpoint f(x) -> "u" -> String | x
+    end
     @testset "generated functions" begin
         # A module that only imports RestClient, whose requests stop at validation.
         @eval module SigClient

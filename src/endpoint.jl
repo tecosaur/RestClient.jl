@@ -267,6 +267,14 @@ cached, and the endpoint returns `nothing`.
 When the URL is an expression rather than a string (or `:method(url)` form), the
 result type cannot be told apart from it, so must be given explicitly.
 
+An error type may follow the result type (or the URL, when there is none) after
+a `|`. It is the [`errortype`](@ref) this endpoint's error responses are read
+as, overriding any its API's supertype declares.
+
+```julia
+@endpoint lookup(id::String) -> "lookup/id/{id}" -> Gene | EnsemblError
+```
+
 The parsed result can be reinterpreted into another form with
 [`postprocess`](@ref). By default, [`ListResponse`](@ref)-type responses are
 restructured into a [`List`](@ref) to facilitate paging.
@@ -340,6 +348,8 @@ macro endpoint(args...)
     isnothing(params) ||
         push!(body, methoddef(:parameters, :($querypairs($(Expr(:tuple, params...))))))
     push!(body, methoddef(:responsetype, einfo.out; withconfig = false))
+    isnothing(einfo.error) ||
+        push!(body, methoddef(:errortype, einfo.error; withconfig = false))
     # Authentication: only a marker's policy; defaults are looked up at runtime
     isnothing(einfo.authpolicy) ||
         push!(body, methoddef(:authpolicy, QuoteNode(einfo.authpolicy); withconfig = false))
@@ -510,6 +520,15 @@ function extract_forms(args::Tuple; mod::Module)
     elseif length(components) > 3
         throw(ArgumentError("Too many components in @endpoint, at most could contain `func -> struct -> in -> url -> out`"))
     end
+    iserrorclause(form) = Meta.isexpr(form, :call, 3) && form.args[1] === :|
+    eerror = if iserrorclause(last(components))
+        rest, errtype = last(components).args[2:3]
+        iserrorclause(rest) &&
+            throw(ArgumentError("@endpoint takes one error type, not `$(last(components))`; \
+                                 to read several kinds, give an abstract type for them"))
+        components[end] = rest
+        errtype
+    end
     urlshaped(form) = form isa String || (Meta.isexpr(form, :call, 2) && form.args[1] isa QuoteNode)
     has_out = !urlshaped(last(components))
     has_out && length(components) == 1 &&
@@ -540,6 +559,8 @@ function extract_forms(args::Tuple; mod::Module)
         throw(ArgumentError("@endpoint result type `$eout` is not a type. If it is instead an \
                              expression URL (after a payload), give the result type explicitly, \
                              e.g. `-> Nothing` to discard the response body."))
+    isnothing(eerror) || istypelike(eerror) ||
+        throw(ArgumentError("@endpoint error type `$eerror` (after `|`) is not a type"))
     # Chosen as the struct is defined, so a `@globalconfig` in the same block applies
     esuper = something(esuper, :(if isdefined($mod, $(QuoteNode(SUPERTYPE_VAR))); $(GlobalRef(mod, SUPERTYPE_VAR))
                                  else $(GlobalRef(@__MODULE__, :AbstractEndpoint)) end))
@@ -551,7 +572,8 @@ function extract_forms(args::Tuple; mod::Module)
         estruct.args[2] = Expr(:<:, estruct.args[2], esuper)
     end
     (; func=efunc, structdef=estruct, structname=estructname, structparams=estructparams,
-     fields=efields, in=ein, method=emethod, url=eurl, out=eout, authpolicy=if isnothing(marker) nothing else AUTH_MARKERS[marker] end)
+     fields=efields, in=ein, method=emethod, url=eurl, out=eout, error=eerror,
+     authpolicy=if isnothing(marker) nothing else AUTH_MARKERS[marker] end)
 end
 
 function decompose_struct(strux::Expr; allowspecial::Bool = true)

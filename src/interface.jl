@@ -238,11 +238,12 @@ inside a `200` raises them as a `ResponseError` (as does a [`Stream`](@ref)
 element, partway through the stream). For that, the error type needs
 a required field that a successful body lacks, or it would read from any body.
 
-Define this for an API's endpoint supertype to read its errors from every endpoint.
-An abstract error type (with a subtype chosen per body, such as by JSON.jl's
-`@choosetype`) is matched as declared: `ResponseError{APIError}` for any subtype.
-Make the type an `Exception` with a `showerror` method to give the
-`ResponseError` the API's own explanation, rather than the type's `show`.
+Define this for an API's endpoint supertype to read its errors from every
+endpoint, or give one endpoint its own with [`@endpoint`](@ref)'s
+`-> Result | Error`. An abstract error type, with a subtype chosen per body (as
+by JSON.jl's `@choosetype`), is matched as declared: `ResponseError{APIError}`.
+Make it an `Exception` with a `showerror` method for the error to show the API's
+own explanation.
 
 !!! note
     Part of the `AbstractEndpoint` interface.
