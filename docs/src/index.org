@@ -5,10 +5,8 @@ involved in making well-formed requests, handling serialisation and
 deserialisation, request limiting, and result pagination.
 
 =RestClient= aims to take care of as much of this boilerplate as possible without
-compromising on flexibility. [[file:tutorial.md][The tutorial]] builds a client step by step, the
-[[file:howto.org][how-to guides]] answer particular tasks (errors, paging, rate limits and so on),
-[[file:behaviour.org][What RestClient does for you]] explains what happens by default, and the [[file:api.org][API]]
-pages are the reference.
+compromising on flexibility. See [[file:tutorial.org][the tutorial]] for a sense of what this looks
+like in practice.
 
 * Getting started
 ** Set the API configuration
@@ -74,7 +72,7 @@ name a [[@ref][~Stream~]] output type and iterate the elements as they arrive:
 @endpoint chat(; messages) -> "messages" -> Stream{Delta}
 #+end_src
 
-See [[file:streaming.md][the streaming manual]] for more information.
+See [[file:streaming.org][the streaming manual]] for more information.
 
 ** Extra functionality
 
@@ -84,7 +82,7 @@ See [[file:streaming.md][the streaming manual]] for more information.
 + [[@ref Caching-interface][Caching]]
 + [[@ref RestClient.AbstractFormat][Custom data formats]]
 + Form and multipart payloads (via [[@ref][~@formdef~]] and [[@ref][~@multipartdef~]])
-+ [[file:streaming.md][Streaming responses]] (via SSE and NDJSON)
++ [[file:streaming.org][Streaming responses]] (via SSE and NDJSON)
 + [[@ref Authentication][Authentication]] (Bearer, Basic, header, and query schemes)
 + Pacing to an API's [[@ref][~RateLimit~]], and retries of rate-limited requests (waiting
   as the response, or [[@ref][~nextallowed~]], asks) and gateway failures
@@ -94,9 +92,6 @@ See [[file:streaming.md][the streaming manual]] for more information.
   and key ([[@ref][~RequestConfig~]])
 + Headers and query parameters for a whole API, declared once on its endpoint
   supertype ([[@ref][~headers~]], [[@ref][~parameters~]])
-
-[[file:behaviour.md][What RestClient does for you]] sets out how these behave by default,
-and how to change them.
 
 * Request data flow
 

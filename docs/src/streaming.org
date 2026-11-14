@@ -14,16 +14,17 @@ exactly as ~List~ is.
 
 * How streaming fits together
 
-A streamed body has two layers, and =RestClient= keeps them separate:
+A streamed body has two layers, and =RestClient= keeps them separate.
 
-+ Framing :: how the byte stream is divided into messages. /Server-Sent Events/
-  (=text/event-stream=) separate events with a blank line; /NDJSON/ (newline-delimited
-  JSON) puts one record per line. =RestClient= supports both.
-+ Interpretation :: how each message's payload becomes a typed value. This is the
-  same machinery that parses a buffered response. A [[@ref][~@jsondef~]] type is decoded
-  identically whether it arrives whole, in an SSE event, or as an NDJSON line, and a
-  message that can't be decoded ends the stream with a [[@ref][~MalformedResponse~]]
-  holding its payload.
+/Framing/ is how the byte stream is divided into messages. /Server-Sent Events/
+(=text/event-stream=) separate events with a blank line; /NDJSON/ (newline-delimited
+JSON) puts one record per line. =RestClient= supports both.
+
+/Interpretation/ is how each message's payload becomes a typed value. This is the
+same machinery that parses a buffered response. A [[@ref][~@jsondef~]] type is decoded
+identically whether it arrives whole, in an SSE event, or as an NDJSON line, and a
+message that can't be decoded ends the stream with a [[@ref][~MalformedResponse~]]
+holding its payload.
 
 The framing is a property of the /stream/; the element type is a property of the
 /payload/. They are independent, so the same element type can appear in a
@@ -55,8 +56,8 @@ For a newline-delimited endpoint, name the framing as the second type parameter:
 @endpoint generate(; prompt) -> "api/generate" -> Stream{Token, :NDJSON}
 #+end_src
 
-A ~Stream~ result type is all it takes: whatever the endpoint's supertype, its
-requests are read incrementally, just as a [[@ref][~ListResponse~]] result is wrapped
+With a ~Stream~ result type, whatever the endpoint's supertype, its requests are
+read incrementally, just as a [[@ref][~ListResponse~]] result is wrapped
 in a [[@ref][~List~]]. The =Accept= header is set from the framing automatically
 (=text/event-stream= for SSE, =application/x-ndjson= for NDJSON), so you need not
 set it yourself.
@@ -77,7 +78,7 @@ end
     type::String
 end
 
-JSON.@choosetype Event event -> event.type[] == "message" ? Message : Ping
+JSON.@choosetype Event event -> if event.type[] == "message" Message else Ping end
 RestClient.dataformat(::Type{Event}) = RestClient.JSONFormat()
 
 @endpoint events() -> "events" -> Stream{Event}
@@ -221,3 +222,11 @@ apply, but only to the response status: a 429 is retried before the first
 element reaches you, as for a buffered request, and once elements flow there is
 nothing to retry.
 #+end_info
+
+* Beyond SSE and NDJSON
+
+A framing of your own, such as a length-prefixed binary protocol, is added from
+outside the package by defining [[@ref][~RestClient.readframe~]] and its companions
+for a new framing symbol, with no change to ~Stream~, the transport, or
+cancellation. Few clients will need one; it's there for libraries built on
+=RestClient=.

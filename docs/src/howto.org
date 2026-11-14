@@ -1,22 +1,14 @@
 #+title: How-to guides
 
-Each section here answers one question that comes up when wrapping a real API,
-such as "how do I send this header on every request?" or "how do I page through
-results by offset?". They assume you've met ~@endpoint~ and ~@jsondef~, in [[file:tutorial.org][the
-tutorial]] or [[file:index.org][the introduction]], and link to the reference for the details.
+* Configure the whole API at once
 
-The examples share an API supertype, set up as in the first section.
-
-* Set things once for the whole API
-
-Most APIs want the same headers, parameters or key on every request. Give the
-API's endpoints a supertype, and define these for that type:
+Give the API's endpoints a supertype, and declare what every request needs on
+it:
 
 #+begin_src julia
 abstract type ExampleEndpoint <: AbstractEndpoint end
 
-const CONFIG = RequestConfig("https://api.example.com/v1")
-@globalconfig CONFIG auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
+@globalconfig RequestConfig("https://api.example.com/v1") auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
 
 RestClient.headers(::RequestConfig, ::Type{ExampleEndpoint}) =
     ["Accept" => "application/vnd.example+json",
@@ -28,13 +20,12 @@ RestClient.parameters(::RequestConfig, ::Type{ExampleEndpoint}) = ("format" => "
   are sent once for every type below it too.
 + An endpoint that gives a header or parameter of the same name replaces the
   API-wide one, and a given =Accept= or =User-Agent= replaces RestClient's own.
-+ With an ~:optional~ auth policy the key is sent only when a config has one, so a
-  caller with a key passes ~RequestConfig(Example.CONFIG; key = "…")~ as the first
-  argument of any endpoint function.
++ With an ~:optional~ auth policy the key is sent only when a config has one, so
+  callers without a key need nothing more.
 
 See [[@ref][~headers~]], [[@ref][~parameters~]], [[@ref][~@globalconfig~]] and [[@ref][~AuthScheme~]].
 
-* Turn the API's errors into its own exception
+* Raise the API's own errors
 
 Declare the type the API's error bodies read as, and every failure raises a
 [[@ref][~ResponseError~]] carrying it as its ~detail~:
@@ -51,7 +42,7 @@ Base.showerror(io::IO, err::ExampleError) =
 RestClient.errortype(::ExampleEndpoint) = ExampleError
 #+end_src
 
-A caller then matches the API's errors without touching anything else:
+A caller then catches them by type:
 
 #+begin_src julia
 try
@@ -62,12 +53,11 @@ catch err
 end
 #+end_src
 
-An API that reports errors inside a =200= needs nothing more, as long as the
-error type has a required field that a successful body lacks: a body that
-doesn't read as the result is tried as the error type. When an error body also
-reads as a valid result (an empty list with an ~error~ key beside it, say), check
-for it in [[@ref][~postprocess~]], and throw the error type there. It's raised as a
-~ResponseError~ like any other:
+Errors reported inside a =200= are caught too: a body that doesn't read as the
+result is tried as the error type, so give that type a required field successful
+bodies lack. An error body that also reads as a valid result (an empty list with
+an ~error~ key beside it, say) needs a check in [[@ref][~postprocess~]], which
+throws the error type to raise it as a ~ResponseError~:
 
 #+begin_src julia
 RestClient.postprocess(::Request{<:Any, SummaryEndpoint}, summary::Summary) =
@@ -93,7 +83,7 @@ for page in Iterators.take(eachpage(search("julia")), 3)
 end
 #+end_src
 
-An API that pages by =Link: <…>; rel="next"= headers needs no more. For any other
+An API that pages by =Link: <…>; rel="next"= headers needs no ~nextpage~ method. For any other
 scheme, say where the next page is with a ~nextpage(endpoint, data)~ method. By
 page number, until the response says there are no more:
 
@@ -102,8 +92,8 @@ RestClient.nextpage(search::SearchEndpoint, results::SearchResults) =
     if results.has_more SearchEndpoint(search; page = search.page + 1) end
 #+end_src
 
-By offset, until it passes the total reported, stepping by the page size you
-asked for, as a page may come back short:
+By offset, stepping by the page size requested (a page can come back short)
+until the total is reached:
 
 #+begin_src julia
 RestClient.nextpage(listing::ListingEndpoint, page::ListingPage) =
@@ -112,9 +102,9 @@ RestClient.nextpage(listing::ListingEndpoint, page::ListingPage) =
     end
 #+end_src
 
-A cursor the response gives works the same way, with
-~ListingEndpoint(listing; cursor = page.next_cursor)~, and for a URL the response
-gives, return the URL.
+A cursor works the same way, with
+~ListingEndpoint(listing; cursor = page.next_cursor)~, and for a next-page URL in
+the response, return the URL itself.
 
 Each ~@endpoint~ struct has a copy constructor, ~Endpoint(old; field = new)~,
 which these use. To show "page 2 of 7", give [[@ref][~thispagenumber~]] for an
@@ -133,7 +123,7 @@ RequestConfig("https://api.example.com"; ratelimit = RateLimit(inflight = 1))  #
 #+end_src
 
 + A pause the server asks for, with =Retry-After= or an exhausted
-  =X-RateLimit-Remaining=, is waited out without any code from you.
+  =X-RateLimit-Remaining=, is waited out.
 + For a rule the headers don't carry, such as "wait a full minute after any
   429", return the wait from [[@ref][~nextallowed~]], as in
   ~RestClient.nextallowed(::ExampleEndpoint, r) = if r.status == 429 60 end~.
@@ -144,17 +134,21 @@ RequestConfig("https://api.example.com"; ratelimit = RateLimit(inflight = 1))  #
 + To be told rather than kept waiting, give the config a ~timeout~: a request
   that would wait longer raises a [[@ref][~RateLimitError~]] instead.
 
-* Reach a second host, or use several keys
+* Use a second host or key
 
 A config holds one base URL and one key. For another host, or another key,
-derive a config from the first, which keeps its other settings:
+derive a config from the API's, which keeps its other settings. To refer to the
+API's config, name it, and give the name to ~@globalconfig~:
 
 #+begin_src julia
+const CONFIG = RequestConfig("https://api.example.com/v1")
+@globalconfig CONFIG auth=(QueryAuth("api_key"), :optional) supertype=ExampleEndpoint
+
 const GEOCODING = RequestConfig(CONFIG; baseurl = "https://geocoding.example.com/v1")
 #+end_src
 
-Pass it as the first argument of an endpoint function, as in
-~search(RequestConfig(CONFIG; key = "…"), "julia")~. For an endpoint that always
+Pass a derived config as the first argument of an endpoint function, as in
+~search(RequestConfig(Example.CONFIG; key = "…"), "julia")~. For an endpoint that always
 lives on the second host, leave out the function form and write the function
 yourself:
 
@@ -172,10 +166,10 @@ geocode(name::String; count::Int = 10) =
 Requests through configs with the same host and key are paced together, as the
 server counts them; a different key is paced apart.
 
-* Read a format RestClient doesn't know
+* Add a data format
 
-Define a format type, the media type it's labelled with, and how to read it,
-then say which types come in it:
+Define a format type, its media type, and how to read it, then assign it to the
+types that come in it:
 
 #+begin_src julia
 struct FASTAFormat <: RestClient.AbstractFormat end
@@ -203,7 +197,7 @@ reply with this method, unless an =Accept= header is given: an API-wide one, as 
 the first section, would need replacing on that endpoint. Read from a copy of ~data~, as ~String(data)~ empties it.
 To send the format too, define [[@ref][~writepayload~]] for it.
 
-* Test a client without the network
+* Test offline
 
 You can check your types against a saved response with
 [[@ref][~interpretresponse~]], which is how RestClient reads every body:
@@ -219,7 +213,7 @@ RestClient.Response("https://api.example.com/search", 429, "HTTP/1.1 429",
                     RestClient.Headers(["Retry-After" => "30"]))
 #+end_src
 
-* See what's sent
+* Inspect requests and responses
 
 Set =JULIA_DEBUG=RestClient= to log every request and response, with their
 headers. A request or response with a body has it saved to a file in a
