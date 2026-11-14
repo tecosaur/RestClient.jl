@@ -211,7 +211,19 @@ An expression is given its fields as they are, so one for an optional field
 handles `nothing` itself, as in `{if !isnothing(tags) join(tags, ',') end}`.
 
 For convenience, a parameter by the same name as the field can be referred to by
-the field name alone (e.g. `?{var}` instead of `?var={var}`).
+the field name alone (e.g. `?{var}` instead of `?var={var}`), and `{pairs...}`
+splices in a collection of `name => value` pairs, such as a `Dict`, for a set of
+parameters only known when sent (`?action=query&{continuation...}`), or none for
+`nothing`. Their values are sent as other parameters' are.
+
+A template too long for one line can be split into string literals joined by
+`*`, in parentheses as `->` binds more tightly, and is read as one template:
+
+```julia
+@endpoint issues(owner, repo; state, labels, page) ->
+    ("repos/{owner}/{repo}/issues" *
+     "?{state}&{labels}&{page}") -> Vector{Issue}
+```
 
 In more complex cases, arbitrary Julia code can be included in the curly braces.
 This code will be evaluated with the endpoint value bound to the anaphoric
@@ -560,6 +572,16 @@ function extract_forms(args::Tuple; mod::Module)
         components[end] = rest
         errtype
     end
+    function joined(form)
+        if Meta.isexpr(form, :call) && form.args[1] === :* && all(a -> a isa String, form.args[2:end])
+            join(form.args[2:end])
+        elseif Meta.isexpr(form, :call, 2) && form.args[1] isa QuoteNode
+            Expr(:call, form.args[1], joined(form.args[2]))
+        else
+            form
+        end
+    end
+    map!(joined, components, components)
     urlshaped(form) = form isa String || (Meta.isexpr(form, :call, 2) && form.args[1] isa QuoteNode)
     has_out = !urlshaped(last(components))
     has_out && length(components) == 1 &&
@@ -698,11 +720,16 @@ function parse_endpoint_url(url::String; kwargs...)
             keyex, valex = interp_curlies(first(keyvalue); kwargs...), interp_curlies(last(keyvalue); kwargs...)
             push!(parameters, :($keyex => $valex))
         elseif startswith(comp, '{') && endswith(comp, '}')
-            # `{name}` is short for `name={name}`
-            name = Meta.parse(comp)
-            Meta.isexpr(name, :braces, 1) && only(name.args) isa Symbol ||
-                throw(ArgumentError("Invalid query component $comp"))
-            push!(parameters, :($(String(only(name.args))) => $(interp_curlies(comp; kwargs...))))
+            form = Meta.parse(comp)
+            inner = if Meta.isexpr(form, :braces, 1) only(form.args) end
+            if Meta.isexpr(inner, :..., 1)
+                splice = interp_curlies(comp; kwargs...)
+                push!(parameters, Expr(:..., :($querysplice($(only(splice.args))))))
+            else
+                # `{name}` is short for `name={name}`
+                inner isa Symbol || throw(ArgumentError("Invalid query component $comp"))
+                push!(parameters, :($(String(inner)) => $(interp_curlies(comp; kwargs...))))
+            end
         elseif !isempty(comp) && (flag = interp_curlies(comp; kwargs...)) isa String
             push!(flags, encode_uri_component(flag))
         else

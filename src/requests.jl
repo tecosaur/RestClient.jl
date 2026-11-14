@@ -220,6 +220,16 @@ url_parameters(params) =
 
 const MultiValue = Union{AbstractVector, Tuple, AbstractSet}
 
+# The pairs a `{pairs...}` query component splices in: none for `nothing`
+function querysplice(pairs)
+    isnothing(pairs) && return ()
+    for pair in pairs
+        pair isa Pair || throw(ArgumentError("A `{…...}` query component splices in `name => value` pairs, \
+                                              not $(repr(pair)); for a NamedTuple, splice `pairs(nt)`"))
+    end
+    pairs
+end
+
 function querypairs(fields)
     pairs = Pair{String, String}[]
     for (key, val) in fields

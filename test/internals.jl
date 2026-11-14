@@ -1050,6 +1050,8 @@ end
             @endpoint scoped(site::String, extra::Vector{Pair{String, String}}) -> "s?{site}" -> String
             RestClient.parameters(s::ScopedEndpoint) = s.extra
             RestClient.headers(::ScopedEndpoint) = ["accept" => "text/plain"]
+            @endpoint spliced(extra) -> "s?a=1&{extra...}&b=2" -> String
+            @endpoint joined(q::String) -> ("j/{q}" * "?{q}") -> String
         end
         get(endpoint; key = nothing) = Request{:get}(RequestConfig("http://x"; key), endpoint)
         ping, find = TieredClient.PingEndpoint(), TieredClient.FindEndpoint("a b")
@@ -1063,6 +1065,11 @@ end
         scoped = TieredClient.ScopedEndpoint("own", ["b" => "2", "b" => "3"])
         @test RestClient.url(get(scoped)) == "http://x/s?site=own&b=2&b=3"
         @test RestClient.headers(get(scoped)) == ["accept" => "text/plain"]
+        spliced(extra) = RestClient.url(get(TieredClient.SplicedEndpoint(extra)))
+        @test spliced(["x" => "1", "y" => nothing, "z" => ["2", "3"]]) == "http://x/s?a=1&x=1&z=2&z=3&b=2&site=main"
+        @test spliced(nothing) == "http://x/s?a=1&b=2&site=main"
+        @test_throws "splices in `name => value` pairs" spliced(["x=1"])
+        @test RestClient.url(get(TieredClient.JoinedEndpoint("a"))) == "http://x/j/a?q=a&site=main"
         @test RestClient.parameters(RequestConfig("http://x"), Int) === ()
         @test RestClient.headers(Request{:get}(RequestConfig("http://x"), SharedHeadersEP())) ===
             SHARED_HEADERS                                       # nothing to add, so not copied
