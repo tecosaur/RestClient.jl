@@ -427,14 +427,14 @@ end
 redactsecrets(res::Response, secrets::NamedTuple) =
     Response(redactsecrets(res.url, secrets), res.status, res.message, res.headers)
 
-# The curl error codes of each `TransportError` reason
 const CURL_REASONS = let C = Downloads.Curl
-    (resolve = (C.CURLE_COULDNT_RESOLVE_HOST, C.CURLE_COULDNT_RESOLVE_PROXY),
-     connect = (C.CURLE_COULDNT_CONNECT,),
-     tls = (C.CURLE_SSL_CONNECT_ERROR, C.CURLE_SSL_CERTPROBLEM, C.CURLE_PEER_FAILED_VERIFICATION),
-     timeout = (C.CURLE_OPERATION_TIMEDOUT,),
-     dropped = (C.CURLE_PARTIAL_FILE, C.CURLE_GOT_NOTHING, C.CURLE_SEND_ERROR, C.CURLE_RECV_ERROR),
-     redirects = (C.CURLE_TOO_MANY_REDIRECTS,))
+    reasons = (resolve = (C.CURLE_COULDNT_RESOLVE_HOST, C.CURLE_COULDNT_RESOLVE_PROXY),
+               connect = (C.CURLE_COULDNT_CONNECT,),
+               tls = (C.CURLE_SSL_CONNECT_ERROR, C.CURLE_SSL_CERTPROBLEM, C.CURLE_PEER_FAILED_VERIFICATION),
+               timeout = (C.CURLE_OPERATION_TIMEDOUT,),
+               dropped = (C.CURLE_PARTIAL_FILE, C.CURLE_GOT_NOTHING, C.CURLE_SEND_ERROR, C.CURLE_RECV_ERROR),
+               redirects = (C.CURLE_TOO_MANY_REDIRECTS,))
+    Dict{Int, Symbol}(code => reason for (reason, codes) in pairs(reasons) for code in codes)
 end
 
 # A transport failure as a `TransportError`, with `req`'s secrets removed from its URL
@@ -444,7 +444,7 @@ function transporterror(req::Request, err::Downloads.RequestError, watchdog::Wat
         :silence, if watchdog.responding "No data received for $waited seconds"
                   else "No response for $waited seconds" end
     else
-        something(findfirst(codes -> err.code ∈ codes, CURL_REASONS), :other), err.message
+        get(CURL_REASONS, err.code, :other), err.message
     end
     TransportError(req, redactsecrets(err.url, authsecrets(req)), reason, message)
 end
