@@ -5,6 +5,7 @@ disk rather than the server. Call it while the server is asking clients to slow
 down, and it waits before sending. Most of what happens between calling an
 endpoint and getting its result needs no code from you. This page sets out what
 RestClient does by default, so none of it catches you out, and how to change it.
+For testing a client offline or seeing what it sends, see the [[file:howto.org][how-to guides]].
 
 * Caching
 
@@ -103,25 +104,3 @@ Keys are hidden as =*****= in errors, debug output, and the cache.
 
 A =HEAD= request's result is whether the resource exists: ~true~, or ~false~ for
 a 404 or 410.
-
-* Testing without the network
-
-You can check your types against a saved response with
-[[@ref][~interpretresponse~]], which is how RestClient reads every body:
-
-#+begin_src julia
-RestClient.interpretresponse(read("sample.json"), JSONFormat(), SearchResults)
-#+end_src
-
-To test a ~postprocess~ or ~nextallowed~ method, build the response it would see:
-
-#+begin_src julia
-RestClient.Response("https://api.example.com/search", 429, "HTTP/1.1 429",
-                    RestClient.Headers(["Retry-After" => "30"]))
-#+end_src
-
-* Seeing what's sent
-
-Set =JULIA_DEBUG=RestClient= to log every request and response, with their
-headers. A request or response with a body has it saved to a file in a
-temporary folder, named in the log, which is deleted when Julia exits.

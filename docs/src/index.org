@@ -5,8 +5,10 @@ involved in making well-formed requests, handling serialisation and
 deserialisation, request limiting, and result pagination.
 
 =RestClient= aims to take care of as much of this boilerplate as possible without
-compromising on flexibility. See [[file:tutorial.md][the tutorial]] for a sense of what this looks
-like in practice.
+compromising on flexibility. [[file:tutorial.md][The tutorial]] builds a client step by step, the
+[[file:howto.org][how-to guides]] answer particular tasks (errors, paging, rate limits and so on),
+[[file:behaviour.org][What RestClient does for you]] explains what happens by default, and the [[file:api.org][API]]
+pages are the reference.
 
 * Getting started
 ** Set the API configuration

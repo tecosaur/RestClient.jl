@@ -19,6 +19,7 @@ makedocs(;
     pages=[
         "Introduction" => "index.md",
         "Tutorial" => "tutorial.md",
+        "How-to guides" => "howto.md",
         "Streaming" => "streaming.md",
         "What RestClient does for you" => "behaviour.md",
         "API" => "api.md",
