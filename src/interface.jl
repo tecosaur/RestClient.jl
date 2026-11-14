@@ -305,6 +305,8 @@ dataformat(::Type{<:AbstractVector{UInt8}}) = RawFormat()
 dataformat(::Type{<:IO}) = RawFormat()
 dataformat(::Type{<:AbstractVector{T}}) where T = dataformat(T)
 dataformat(::Type{<:Dict{<:Any, T}}) where T = dataformat(T)
+dataformat(::Type{Union{T, Nothing}}) where T = dataformat(T)
+dataformat(::Type{Nothing}) = UnspecifiedFormat()  # else it matches the method above, with `T` unbound
 
 """
     mimetype(fmt::AbstractFormat, ::Type{T}) -> Union{String, MIME, Nothing}
@@ -397,7 +399,8 @@ also reads as a result can be thrown here as that type, and is raised as a
 `ResponseError` like any other.
 
 The result is then restructured: a [`ListResponse`](@ref) is wrapped in a
-[`List`](@ref), and a [`SingleResponse`](@ref) gives its [`contents`](@ref). So
+[`List`](@ref), and a [`SingleResponse`](@ref) gives its [`contents`](@ref),
+restructured in turn (so a `ListResponse` inside one is still paged). So
 a method may check or unwrap the data, and a `ListResponse` it returns is still
 paged.
 
@@ -414,7 +417,8 @@ end
 postprocess(_, req::Request, data) = postprocess(req, data)
 
 restructure(::Response, ::Request, data) = data
-restructure(::Response, ::Request, single::SingleResponse) = contents(single)
+restructure(response::Response, req::Request, single::SingleResponse) =
+    restructure(response, req, contents(single))
 
 restructure(response::Response, req::Request, list::ListResponse{T}) where {T} =
     List{T}(req, contents(list), list, response)

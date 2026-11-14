@@ -154,6 +154,9 @@ struct BrokenBody <: IO end
 Base.mark(::BrokenBody) = 0
 Base.eof(::BrokenBody) = false
 Base.readavailable(::BrokenBody) = throw(ArgumentError("unreadable"))
+struct PagedContent <: SingleResponse{ListContent}
+    inner::ListContent
+end
 struct OptionalListContent <: ListResponse{String}
     total::Int
     items::Union{Vector{String}, Nothing}
@@ -537,6 +540,7 @@ end
         @test isconcretetype(fieldtype(typeof(listed), :request))   # so a next page dispatches statically
         @test RestClient.restructure(sample_response(), Request{:get}(RequestConfig("http://x"), PlainEP()),
                                      OneContent("n", 3)) === 3       # a single response gives its contents
+        @test RestClient.restructure(sample_response(), req, PagedContent(ListContent(1, ["x"]))) isa RestClient.List{String}
     end
     @testset "result type named like a field" begin
         @eval module FieldNamedResult
@@ -1161,6 +1165,9 @@ end
         @test RestClient.dataformat(FC.WordsEndpoint(), Stream{String}) == RestClient.StreamFormat{:SSE}(RawFormat())
         @test RestClient.dataformat(PlainEP(), Vector{String}) === RawFormat()   # no API format
         @test RestClient.dataformat(FC.CsvEndpoint(), FC.CsvText) === RawFormat()  # declared raw stays raw
+        @test RestClient.dataformat(Dict{String, Union{FC.Login, Nothing}}) === RestClient.FormFormat()
+        @test RestClient.dataformat(Vector{Union{FC.Login, Nothing}}) === RestClient.FormFormat()
+        @test RestClient.dataformat(Nothing) === RestClient.UnspecifiedFormat()
         @test RestClient.dataformat(Vector{String}) === RestClient.UnspecifiedFormat()
         # Resolved when compiled: the call is just its result
         ci = only(code_typed(RestClient.dataformat, Tuple{FC.NamesEndpoint, Type{Vector{String}}}))[1]
