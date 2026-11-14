@@ -93,6 +93,9 @@ See [[file:streaming.md][the streaming manual]] for more information.
 + Headers and query parameters for a whole API, declared once on its endpoint
   supertype ([[@ref][~headers~]], [[@ref][~parameters~]])
 
+[[file:behaviour.md][What RestClient does for you]] sets out how these behave by default,
+and how to change them.
+
 * Request data flow
 
 As detailed in the [[@ref][~Request~]] docstring, this is the flow of calls when making a

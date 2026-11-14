@@ -1,0 +1,117 @@
+#+title: What RestClient does for you
+
+Call an endpoint twice in a minute, and the second answer may come from your own
+disk rather than the server. Call it while the server is asking clients to slow
+down, and it waits before sending. Most of what happens between calling an
+endpoint and getting its result needs no code from you. This page sets out what
+RestClient does by default, so none of it catches you out, and how to change it.
+
+* Caching
+
+Responses to =GET=, =HEAD= and =QUERY= requests are kept on disk for as long as
+the server says they stay current, through its =Cache-Control= or =Expires=
+headers. A response the server marks with an =ETag= or =Last-Modified= is kept
+for two weeks past that, and when it's next wanted RestClient asks the server
+whether it has changed. An unchanged response costs the server a short reply,
+and is good for another stretch.
+
++ A response is stored under its URL, method, headers and payload, so requests
+  with different keys or =Accept= headers never share one.
++ It is dropped once it's out of date with nothing to check it against, when a
+  =POST=, =PUT=, =PATCH= or =DELETE= succeeds at the same URL, or when it can't be
+  read as the endpoint's result type.
++ ~postprocess~ sees a stored response with its original headers, and an =Age=
+  header saying how many seconds old it is. Its rate-limit headers are as old as
+  it is, which is why [[@ref][~quota~]] ignores stored responses.
++ Give a config ~cache = false~ to turn caching off, or define
+  [[@ref][~cachelifetime~]] for an endpoint to choose how long its responses stay
+  current. The cache lives in your user cache folder (on Linux,
+  =~/.cache/julia/restclient/=), and deleting that folder clears it.
+
+* Waiting and retrying
+
+Requests through configs with the same host and key are paced together, since
+that's how the server counts them. They are sent no faster than the config's
+[[@ref][~RateLimit~]] allows, and they all wait when a response asks for a pause:
+with a =Retry-After= header, or with =X-RateLimit-Remaining: 0= and an
+=X-RateLimit-Reset= time (in seconds from now, as a Unix time, or as a date).
+[[@ref][~nextallowed~]] can ask for longer pauses than the headers do.
+
+An unsuccessful response is retried, up to five attempts in all, when:
++ it's a 429 (Too Many Requests);
++ it's a 403 or 503 whose headers say when to try again;
++ ~nextallowed~ gives a time for it, whatever the method;
++ it's a 502, 503 or 504 from a gateway, and the method is safe to repeat (not
+  =POST= or =PATCH=).
+
+A retry waits until the time it was given, or failing that for about 0.5, 1, 2
+and then 4 seconds. No wait is ever longer than the config's ~timeout~: a retry
+that would need longer gives you the response as a [[@ref][~ResponseError~]], and a
+request that would be held back for longer raises a [[@ref][~RateLimitError~]]
+rather than being sent. With the default ~timeout = Inf~, a wait can last until
+an hourly quota renews, so give a timeout if you'd rather be told.
+
+[[@ref][~quota~]] gives the rate limit the server last reported, for showing a
+user how many requests they have left.
+
+* Time limits
+
+A config's ~timeout~ bounds how long a request may take as a whole, and for a
+[[@ref][~Stream~]], how long it may go without new data. Without one, two limits
+still stop a request (other than a stream) that will never finish:
++ the response must begin within two minutes, since a server may think for a
+  while before answering;
++ once it has begun, it must not stall for more than 20 seconds.
+
+A longer ~timeout~ raises both. A request that hits either raises a
+[[@ref][~TransportError~]] saying which.
+
+* What each request sends
+
+Every request says =User-Agent: RestClient.jl/<version>=, with an =Accept= header
+for the result's format and a =Content-Type= for the payload's. Headers you give,
+through the endpoint's or its API's [[@ref][~headers~]], are added to these, and
+replace them when they share a name. RestClient also asks for compressed
+responses and decompresses them, and follows redirects, turning a request into a
+=GET= after a 303 (See Other).
+
+Keys are hidden as =*****= in errors, debug output, and the cache.
+
+* The order things happen in
+
+1. [[@ref][~validate~]] checks the endpoint, before anything is sent.
+2. The request waits its turn, then is sent, or served from the cache.
+3. [[@ref][~nextallowed~]] sees each response from the server, and retries
+   happen.
+4. A successful response is read as the endpoint's [[@ref][~responsetype~]]; one
+   that can't be is tried as its [[@ref][~errortype~]], so an error inside a 200
+   is raised as one. An unsuccessful response is read as the ~errortype~ and
+   raised as a [[@ref][~ResponseError~]].
+5. [[@ref][~postprocess~]] sees what was read, even when there is no result
+   type (as ~nothing~), and its result is unwrapped by [[@ref][~contents~]] or
+   wrapped in a [[@ref][~List~]].
+
+A =HEAD= request's result is whether the resource exists: ~true~, or ~false~ for
+a 404 or 410.
+
+* Testing without the network
+
+You can check your types against a saved response with
+[[@ref][~interpretresponse~]], which is how RestClient reads every body:
+
+#+begin_src julia
+RestClient.interpretresponse(read("sample.json"), JSONFormat(), SearchResults)
+#+end_src
+
+To test a ~postprocess~ or ~nextallowed~ method, build the response it would see:
+
+#+begin_src julia
+RestClient.Response("https://api.example.com/search", 429, "HTTP/1.1 429",
+                    RestClient.Headers(["Retry-After" => "30"]))
+#+end_src
+
+* Seeing what's sent
+
+Set =JULIA_DEBUG=RestClient= to log every request and response, with their
+headers. A request or response with a body has it saved to a file in a
+temporary folder, named in the log, which is deleted when Julia exits.

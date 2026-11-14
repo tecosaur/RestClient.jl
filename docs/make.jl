@@ -20,6 +20,7 @@ makedocs(;
         "Introduction" => "index.md",
         "Tutorial" => "tutorial.md",
         "Streaming" => "streaming.md",
+        "What RestClient does for you" => "behaviour.md",
         "API" => "api.md",
     ],
     format=Documenter.HTML(assets=["assets/favicon.ico"]),

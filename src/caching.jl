@@ -106,7 +106,9 @@ end
 
 Determine how long a response may be served from the cache: until a (UTC)
 `DateTime`, for a number of seconds, or `nothing` to follow the response's
-HTTP caching headers.
+HTTP caching headers. With `0`, a response is out of date at once: checked with
+the server each time it's wanted if it has an `ETag` or `Last-Modified`, and
+otherwise not kept.
 
 # Specialisation
 
