@@ -265,15 +265,15 @@ end
 # Performing a cached request
 
 """
-    http_cached(cfile::String, req::Request, out::Outgoing) -> Tuple{Incoming, Bool}
+    http_cached(cfile::String, req::Request, out::Outgoing) -> Incoming
 
 Perform the request `out` through the cache entry `cfile`: serve it if fresh,
 revalidate it if stale (RFC 9111 §4.3), or else make the request afresh. The
-`Bool` is true when the response is the stored entry unchanged.
+response's `source` says which.
 """
 function http_cached(cfile::String, req::Request, out::Outgoing)
     entry = opencacheentry(cfile, redactsecrets(out.url, authsecrets(req)))
-    isnothing(entry) && return http_request(req, out), false
+    isnothing(entry) && return http_request(req, out)
     expiry, retain, res, io = entry
     now = time()
     if expiry >= now
@@ -282,10 +282,10 @@ function http_cached(cfile::String, req::Request, out::Outgoing)
         stored = something(tryparse(Int, get(res.headers, "age", "")), 0)
         age = "age" => string(stored + max(0, round(Int, now - mtime(cfile))))
         headers = Headers(push!([h for h in res.headers if first(h) != "age"], age))
-        return Incoming(Response(res.url, res.status, res.message, headers), io), true
+        return Incoming(Response(res.url, res.status, res.message, headers, :stored), io)
     elseif retain < now
         close(io)
-        return http_request(req, out), false
+        return http_request(req, out)
     end
     @debug S"{inverse,magenta,bold: CACHE } revalidating stale entry" _file=nothing
     etag, lastmod = get(res.headers, "etag", ""), get(res.headers, "last-modified", "")
@@ -295,7 +295,7 @@ function http_cached(cfile::String, req::Request, out::Outgoing)
     revalidation = http_request(req, out, [out.headers; conditions])
     if revalidation.response.status != 304
         close(io)
-        return revalidation, false
+        return revalidation
     end
     # Not Modified: refresh the stored headers (§4.3.4)
     @debug S"{inverse,magenta,bold: CACHE } stale entry is still valid" _file=nothing
@@ -303,7 +303,7 @@ function http_cached(cfile::String, req::Request, out::Outgoing)
     kept = [h for h in res.headers if !any(u -> first(u) == first(h), updates)]
     body = IOBuffer(read(io))
     close(io)
-    Incoming(Response(res.url, res.status, res.message, Headers(vcat(kept, updates))), body), false
+    Incoming(Response(res.url, res.status, res.message, Headers(vcat(kept, updates)), :revalidated), body)
 end
 
 

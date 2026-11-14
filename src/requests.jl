@@ -434,7 +434,7 @@ function redactsecrets(url::AbstractString, secrets::NamedTuple)
 end
 
 redactsecrets(res::Response, secrets::NamedTuple) =
-    Response(redactsecrets(res.url, secrets), res.status, res.message, res.headers)
+    Response(redactsecrets(res.url, secrets), res.status, res.message, res.headers, res.source)
 
 const CURL_REASONS = let C = Downloads.Curl
     reasons = (resolve = (C.CURLE_COULDNT_RESOLVE_HOST, C.CURLE_COULDNT_RESOLVE_PROXY),
@@ -594,10 +594,10 @@ function transmit(req::Request{kind}, out::Outgoing) where {kind}
             rm(cachefolder(out.url); recursive = true, force = true)
         return incoming
     end
-    incoming, isstored = http_cached(cfile, req, out)
+    incoming = http_cached(cfile, req, out)
     # A partial response (206) must not stand in for the full one (RFC 9111 §3.3)
-    (; status) = incoming.response
-    isstored || status ∉ 200:299 || status == 206 ||
+    (; status, source) = incoming.response
+    source === :stored || status ∉ 200:299 || status == 206 ||
         cachesave(req, cfile, out.url, incoming.response, incoming.body)
     incoming
 end

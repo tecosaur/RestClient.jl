@@ -481,13 +481,19 @@ A response from an API: as given to hooks such as [`postprocess`](@ref) and
 - `status::Int`: its status code.
 - `message::String`: its status line, such as `"HTTP/1.1 200 OK"`.
 - `headers::Headers`: its [`Headers`](@ref).
+- `source::Symbol`: where it was read from: `:network`; `:stored`, the cache,
+  without asking the server; or `:revalidated`, the cache, once the server said
+  it hadn't changed (a 304). It is `:network` unless given.
 """
 struct Response
     url::String
     status::Int
     message::String
     headers::Headers
+    source::Symbol
 end
+
+Response(url, status, message, headers) = Response(url, status, message, headers, :network)
 
 Response(res::Downloads.Response) = Response(res.url, res.status, res.message, Headers(res.headers))
 

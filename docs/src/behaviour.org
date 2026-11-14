@@ -21,7 +21,9 @@ and is good for another stretch.
   =POST=, =PUT=, =PATCH= or =DELETE= succeeds at the same URL, or when it can't be
   read as the endpoint's result type.
 + ~postprocess~ sees a stored response with its original headers, and an =Age=
-  header saying how many seconds old it is. Its rate-limit headers are as old as
+  header saying how many seconds old it is. Its [[@ref][~Response~]]'s ~source~
+  says whether it came from the network, from the cache, or from the cache once
+  the server said it hadn't changed. Its rate-limit headers are as old as
   it is, which is why [[@ref][~quota~]] ignores stored responses.
 + Give a config ~cache = false~ to turn caching off, or define
   [[@ref][~cachelifetime~]] for an endpoint to choose how long its responses stay

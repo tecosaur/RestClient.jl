@@ -129,6 +129,8 @@ module IntegrationClient
     @endpoint text() -> "text" -> String
     @endpoint number() -> "number" -> Int
     @endpoint revalidate() -> "revalidate" -> Item
+    @endpoint sourced() -> "revalidate" -> Item
+    RestClient.postprocess(res::RestClient.Response, ::RestClient.Request{<:Any, SourcedEndpoint}, ::Item) = res.source
     @endpoint rotating() -> "rotating" -> Item
     @endpoint struct AuthEndpoint
         showheaders() -> "headers" -> Headers
@@ -834,6 +836,17 @@ end
                 @test IC.revalidate(config).name == "revalidated"   # 304 ⇒ now fresh for 60s
                 @test IC.revalidate(config).name == "revalidated"   # served from disk
                 @test state.revalidations == 1
+                @test state.requests == 2
+            finally
+                clean_cache("$baseurl/revalidate")
+            end
+        end
+    end
+    @testset "response source" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test [IC.sourced(config) for _ in 1:3] == [:network, :revalidated, :stored]
                 @test state.requests == 2
             finally
                 clean_cache("$baseurl/revalidate")
