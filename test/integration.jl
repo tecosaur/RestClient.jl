@@ -69,6 +69,7 @@ module IntegrationClient
     @endpoint limited() -> "ratelimited" -> Item
     @endpoint throttled() -> "throttled" -> Item
     @endpoint cached() -> "cacheable" -> Item
+    @endpoint misread() -> "cacheable" -> Echoed
     @endpoint replace_cached(; item::Item) -> item -> :put("cacheable")
     @endpoint nostore() -> "nostore" -> Item
     @endpoint partial() -> "partial" -> Item
@@ -791,6 +792,20 @@ end
                 @test state.requests == 2
             finally
                 clean_cache("$baseurl/partial")
+            end
+        end
+    end
+    @testset "unreadable success" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test_throws MalformedResponse IC.misread(config)
+                @test_throws MalformedResponse IC.misread(config)
+                @test state.requests == 2
+                @test IC.cached(config).id == 1
+                @test state.requests == 3
+            finally
+                clean_cache("$baseurl/cacheable")
             end
         end
     end

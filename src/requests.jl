@@ -57,15 +57,21 @@ perform(req::Request) = send(req, outgoing(req))
 function send(req::Request{kind}, out::Outgoing) where {kind}
     # A caller's IO payload can only be resent if it can be rewound
     isretryable = !(out.payload isa IO) || !isnothing(out.payloadstart)
-    attempt = 1
+    attempt, incoming = 1, transmit(req, out)
     while true
-        incoming = transmit(req, out)
         retry = retrydeadline(req, incoming.response, kind ∉ (:post, :patch), attempt)
-        isretryable && attempt < MAX_ATTEMPTS && !isnothing(retry) && retry - time() <= req.config.timeout ||
-            return deliver(req, incoming)
+        isretryable && attempt < MAX_ATTEMPTS && !isnothing(retry) && retry - time() <= req.config.timeout || break
         close(incoming)
         hold!(req, retry)
-        attempt += 1
+        attempt, incoming = attempt + 1, transmit(req, out)
+    end
+    try
+        deliver(req, incoming)
+    catch err
+        # A successful response that can't be read mustn't be replayed from the cache
+        cfile = cachefile(req, out)
+        err isa MalformedResponse && !isnothing(cfile) && rm(cfile; force = true)
+        rethrow()
     end
 end
 
@@ -495,17 +501,14 @@ end
 # whole response is read, through the HTTP cache when it may be stored.
 function transmit(req::Request{kind}, out::Outgoing) where {kind}
     kind !== :head && responsetype(req.endpoint) <: Stream && return throttled(() -> open_stream(req, out), req)
-    # RFC 9111 §3, RFC 10008 §2.7: GET, HEAD, and QUERY (keyed on its content) are cacheable
-    iscacheable = req.config.cache && responsetype(req.endpoint) !== Nothing &&
-        kind ∈ (:get, :head, :query) && !(out.payload isa IO)
-    if !iscacheable
+    cfile = cachefile(req, out)
+    if isnothing(cfile)
         incoming = http_request(req, out)
         # RFC 9111 §4.4: a successful unsafe request invalidates what is cached for its target
         kind ∈ (:get, :head, :query, :options) || incoming.response.status >= 400 ||
             rm(cachefolder(out.url); recursive = true, force = true)
         return incoming
     end
-    cfile = joinpath(cachefolder(out.url), cachekey(out.url, out.method, out.headers, out.payload) * ".http")
     incoming, isstored = http_cached(cfile, req, out)
     # A partial response (206) must not stand in for the full one (RFC 9111 §3.3)
     (; status) = incoming.response

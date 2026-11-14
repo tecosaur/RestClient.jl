@@ -95,6 +95,13 @@ function cachekey(url::String, method::String, headers::Vector{Pair{String, Stri
     string(h, base = 36)
 end
 
+function cachefile(req::Request{kind}, out::Outgoing) where {kind}
+    # RFC 9111 §3, RFC 10008 §2.7: GET, HEAD, and QUERY (keyed on its content) are cacheable
+    req.config.cache && responsetype(req.endpoint) !== Nothing &&
+        kind ∈ (:get, :head, :query) && !(out.payload isa IO) || return nothing
+    joinpath(cachefolder(out.url), cachekey(out.url, out.method, out.headers, out.payload) * ".http")
+end
+
 """
     cachelifetime(req::Request, res::Response) -> Union{DateTime, Integer, Nothing}
 
