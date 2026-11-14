@@ -277,7 +277,11 @@ function http_cached(cfile::String, req::Request, out::Outgoing)
     now = time()
     if expiry >= now
         @debug debug_request("CACHE", out.url, out.headers; secrets = authsecrets(req)) _file=nothing
-        return Incoming(res, io), true
+        # Served with its `Age`, the time since it was stored added to any it had (RFC 9111 §5.1)
+        stored = something(tryparse(Int, get(res.headers, "age", "")), 0)
+        age = "age" => string(stored + max(0, round(Int, now - mtime(cfile))))
+        headers = Headers(push!([h for h in res.headers if first(h) != "age"], age))
+        return Incoming(Response(res.url, res.status, res.message, headers), io), true
     elseif retain < now
         close(io)
         return http_request(req, out), false

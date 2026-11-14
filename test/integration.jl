@@ -79,6 +79,9 @@ module IntegrationClient
     @endpoint throttled() -> "throttled" -> Item
     @endpoint cached() -> "cacheable" -> Item
     @endpoint misread() -> "cacheable" -> Echoed
+    @endpoint cachedage() -> "cacheable" -> Item
+    RestClient.postprocess(res::RestClient.Response, ::RestClient.Request{<:Any, CachedageEndpoint}, ::Item) =
+        get(res.headers, "age", nothing)
     @endpoint replace_cached(; item::Item) -> item -> :put("cacheable")
     @endpoint nostore() -> "nostore" -> Item
     @endpoint partial() -> "partial" -> Item
@@ -834,6 +837,18 @@ end
                 @test state.requests == 2
             finally
                 clean_cache("$baseurl/partial")
+            end
+        end
+    end
+    @testset "age of a stored response" begin
+        with_server() do baseurl, state
+            config = cfg(baseurl)
+            try
+                @test isnothing(IC.cachedage(config))
+                @test parse(Int, IC.cachedage(config)) >= 0
+                @test state.requests == 1
+            finally
+                clean_cache("$baseurl/cacheable")
             end
         end
     end
