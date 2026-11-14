@@ -411,11 +411,18 @@ restructure(response::Response, req::Request, list::ListResponse{T}) where {T} =
 function contents end
 
 """
-    contents(response::SingleResponse{T}) -> T
+    contents(response::SingleResponse{T}) -> Union{T, Nothing}
 
-Return the content of the response.
+Return the content of the response: its `T` field, or failing that its
+`Union{T, Nothing}` field, which may be `nothing`.
 """
-contents(r::R) where {T, R <: SingleResponse{T}} = typedfield(r, T)
+function contents(r::R) where {T, R <: SingleResponse{T}}
+    if isempty(fieldslots(R, T)) && !isempty(fieldslots(R, Union{T, Nothing}))
+        typedfield(r, Union{T, Nothing})
+    else
+        typedfield(r, T)
+    end
+end
 
 """
     contents(response::ListResponse{T}) -> Vector{T}

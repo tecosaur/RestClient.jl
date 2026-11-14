@@ -135,6 +135,10 @@ struct OneContent <: SingleResponse{Int}
     note::String
     value::Int
 end
+struct OptionalContent <: SingleResponse{Int}
+    note::String
+    value::Union{Int, Nothing}
+end
 struct TwoContents <: SingleResponse{Int}
     a::Int
     b::Int
@@ -1250,6 +1254,8 @@ end
         @test @inferred(RestClient.contents(OneContent("n", 3))) === 3
         @test @inferred(RestClient.contents(ListContent(1, ["x"]))) == ["x"]
         @test_throws ArgumentError RestClient.contents(TwoContents(1, 2))
+        @test RestClient.contents(OptionalContent("n", 3)) === 3
+        @test isnothing(RestClient.contents(OptionalContent("n", nothing)))
         # An optional list counts when there's no plain one, absent as empty
         @test @inferred(RestClient.contents(OptionalListContent(1, ["x"]))) == ["x"]
         @test @inferred(RestClient.contents(OptionalListContent(0, nothing))) == String[]
