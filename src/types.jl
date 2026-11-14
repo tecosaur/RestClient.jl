@@ -732,7 +732,8 @@ end
 A page of `T` items, from an `R` request to an `E` endpoint whose response was
 read as a `D` (a [`ListResponse`](@ref)).
 
-A `List` iterates and indexes as its items. Its fields are `request`, `items`,
+A `List` is a read-only `AbstractVector` of its items, so it indexes, slices and
+compares as they do. Its fields are `request`, `items`,
 `data` (the response's body as read, such as for a total count), `response`
 (its status and headers), and `page`, its number among the pages
 [`nextpage`](@ref) has fetched. With Tables.jl loaded, a `List` of structs is a
@@ -740,7 +741,7 @@ table, one row per item.
 
 See also: [`ListResponse`](@ref), [`eachpage`](@ref).
 """
-struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}, D}
+struct List{T, E<:AbstractEndpoint, R<:Request{<:Any, E}, D} <: AbstractVector{T}
     request::R
     items::Vector{T}
     data::D
@@ -799,15 +800,8 @@ end
 """
 abstract type ListResponse{T} end
 
+Base.size(list::List) = size(list.items)
 Base.getindex(list::List, idx::Int) = list.items[idx]
-Base.firstindex(list::List) = firstindex(list.items)
-Base.lastindex(list::List) = lastindex(list.items)
-Base.length(list::List) = length(list.items)
-Base.eltype(::List{T}) where {T} = T
-function Base.iterate(list::List, i::Int = firstindex(list))
-    firstindex(list) <= i <= lastindex(list) || return nothing
-    list.items[i], i + 1
-end
 
 function Base.show(io::IO, m::MIME"text/plain", list::List{I, E}) where {I, E}
     show(io, List)

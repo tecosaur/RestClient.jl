@@ -1359,6 +1359,14 @@ end
         @test !Tables.istable(strings)                           # String has no columns
         @test isnothing(Tables.schema(strings))                  # unknown, not empty
     end
+    @testset "List as a vector" begin
+        list = RestClient.List{String}(
+            Request{:get}(RequestConfig("http://x"), PagedListEP()), ["a", "b", "c"], nothing, sample_response())
+        @test list isa AbstractVector{String}
+        @test (list[2], list[end], list[2:3], collect(list)) == ("b", "c", ["b", "c"], ["a", "b", "c"])
+        @test list == ["a", "b", "c"] && hash(list) == hash(["a", "b", "c"])
+        @test_throws "setindex! not defined" list[1] = "z"
+    end
     @testset "List display" begin
         list = RestClient.List{String}(
             Request{:get}(RequestConfig("http://x"), PagedListEP()), string.(1:100), nothing, sample_response())
